@@ -1,0 +1,138 @@
+use crate::common::ast::{BinOp, Expr, Literal, Program, Stmt, Type, UnaryOp};
+
+/// Display the program structure in a human-readable format
+pub fn display_program(program: &Program) {
+    println!("\nProgram with {} function(s):", program.functions.len());
+
+    for (func, _span) in &program.functions {
+        println!("\n  Function: '{}'", func.name);
+
+        // Format parameters
+        if func.parameters.is_empty() {
+            println!("    Parameters: ()");
+        } else {
+            let params: Vec<String> = func
+                .parameters
+                .iter()
+                .map(|(param, _)| format!("{}: {}", param.name, format_type(&param.ty.0)))
+                .collect();
+            println!("    Parameters: ({})", params.join(", "));
+        }
+
+        println!("    Body: {} statement(s)\n", func.statements.len());
+
+        for (i, (stmt, _)) in func.statements.iter().enumerate() {
+            match stmt {
+                Stmt::Let {
+                    is_mut,
+                    name,
+                    ty,
+                    value,
+                } => {
+                    let mutability = if *is_mut { "mut " } else { "" };
+                    println!(
+                        "    [{}] let {}{}: {} = {};",
+                        i + 1,
+                        mutability,
+                        name,
+                        format_type(&ty.0),
+                        format_expr(&value.0)
+                    );
+                }
+                Stmt::Assignment { lhs, rhs } => {
+                    println!(
+                        "    [{}] {} = {};",
+                        i + 1,
+                        format_expr(&lhs.0),
+                        format_expr(&rhs.0)
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Format a type as a string
+pub fn format_type(ty: &Type) -> String {
+    match ty {
+        Type::Int => "int".to_string(),
+        Type::Bool => "bool".to_string(),
+        Type::Array {
+            element_type,
+            size,
+        } => {
+            format!(
+                "[{}; {}]",
+                format_type(&element_type.0),
+                format_expr(&size.0)
+            )
+        }
+        Type::Ref(inner) => format!("&{}", format_type(&inner.0)),
+        Type::RefMut(inner) => format!("&mut {}", format_type(&inner.0)),
+        Type::SingletonInt(expr) => format!("int({})", format_expr(&expr.0)),
+        Type::RefinedInt { var, predicate } => {
+            format!("{{{}: int | {}}}", var, format_expr(&predicate.0))
+        }
+    }
+}
+
+/// Format an expression as a string
+pub fn format_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Error => "<error>".to_string(),
+        Expr::Literal(Literal::Int(n)) => n.to_string(),
+        Expr::Literal(Literal::Bool(b)) => b.to_string(),
+        Expr::Variable(name) => name.to_string(),
+        Expr::BinOp { op, lhs, rhs } => {
+            let op_str = match op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Eq => "==",
+                BinOp::NotEq => "!=",
+                BinOp::Lt => "<",
+                BinOp::Lte => "<=",
+                BinOp::Gt => ">",
+                BinOp::Gte => ">=",
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+            };
+            format!(
+                "({} {} {})",
+                format_expr(&lhs.0),
+                op_str,
+                format_expr(&rhs.0)
+            )
+        }
+        Expr::UnaryOp { op, cond } => {
+            let u_op_str = match op {
+                UnaryOp::Not => "!",
+            };
+            format!("({} {})", u_op_str, format_expr(&cond.0))
+        }
+        Expr::Call { func_name, args } => {
+            let arg_strs: Vec<String> = args.0.iter().map(|(e, _)| format_expr(e)).collect();
+            format!("{}({})", func_name, arg_strs.join(", "))
+        }
+        Expr::Index { base, index } => {
+            format!("{}[{}]", format_expr(&base.0), format_expr(&index.0))
+        }
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            let else_str = if else_block.is_some() {
+                " else { ... }"
+            } else {
+                ""
+            };
+            format!(
+                "if {} {{ {} stmt(s) }}{}",
+                format_expr(&cond.0),
+                then_block.len(),
+                else_str
+            )
+        }
+    }
+}
