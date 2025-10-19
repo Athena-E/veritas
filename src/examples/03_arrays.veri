@@ -1,0 +1,7 @@
+// Function with array types
+fn array_example() {
+    let size: int = 10;
+    let arr: [int; 10] = init_array();
+    let first: int = arr[0];
+    let last: int = arr[9];
+}

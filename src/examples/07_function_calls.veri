@@ -1,0 +1,10 @@
+// Function with function calls
+fn compute() {
+    let x: int = add(5, 10);
+    let y: int = multiply(x, 2);
+    let z: int = complex_calc(x, y, 100);
+}
+
+fn helper() {
+    let result: int = compute();
+}

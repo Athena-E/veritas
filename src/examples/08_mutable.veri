@@ -1,0 +1,8 @@
+// Function with mutable variables
+fn mutable_example() {
+    let mut counter: int = 0;
+    counter = counter + 1;
+    counter = counter + 1;
+    let mut flag: bool = false;
+    flag = true;
+}

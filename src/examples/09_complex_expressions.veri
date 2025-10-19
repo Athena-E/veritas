@@ -1,0 +1,10 @@
+// Function with complex nested expressions
+fn complex_math() {
+    let a: int = 5;
+    let b: int = 10;
+    let c: int = 3;
+    let result: int = a * b + c;
+    let nested: int = a + b * c;
+    let parens: int = (a + b) * c;
+    let chain: int = a + b + c;
+}

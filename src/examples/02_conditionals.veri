@@ -1,0 +1,9 @@
+// Function with if expressions
+fn check_value() {
+    let x: int = 42;
+    let result: int = if x > 40 {
+        let temp: int = x + 10;
+    } else {
+        let temp: int = x - 10;
+    };
+}
