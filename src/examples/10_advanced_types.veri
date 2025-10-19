@@ -1,0 +1,6 @@
+// Function with advanced type features (will parse but type checking not implemented)
+fn advanced_types() {
+    let x: int(42) = get_fortytwo();
+    let positive: {n: int | n > 0} = get_positive();
+    let arr: [int; 10 + 5] = make_array();
+}

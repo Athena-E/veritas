@@ -1,0 +1,6 @@
+// Function with reference types
+fn reference_example() {
+    let x: int = 100;
+    let r: &int = get_ref();
+    let mr: &mut int = get_mut_ref();
+}

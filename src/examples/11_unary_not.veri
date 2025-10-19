@@ -1,0 +1,9 @@
+// Function with unary NOT operator
+fn test_not() {
+    let x: bool = true;
+    let y: bool = false;
+    let not_x: bool = !x;
+    let not_y: bool = !y;
+    let double_not: bool = !!x;
+    let complex: bool = !(x && y);
+}

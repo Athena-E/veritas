@@ -1,0 +1,7 @@
+// Function with logical operators
+fn logical_operations() {
+    let x: bool = true;
+    let y: bool = false;
+    let and_result: bool = x && y;
+    let or_result: bool = x || y;
+}

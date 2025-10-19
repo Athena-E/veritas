@@ -1,0 +1,25 @@
+// Functions with parameters
+fn add(x: int, y: int) {
+    let result: int = x + y;
+}
+
+fn is_positive(n: int) {
+    let check: bool = n > 0;
+}
+
+fn process_array(arr: [int; 10], index: int) {
+    let elem: int = arr[index];
+    let doubled: int = elem * 2;
+}
+
+fn no_params() {
+    let x: int = 42;
+}
+
+fn single_param(value: bool) {
+    let not_value: bool = !value;
+}
+
+fn with_refinement(positive: {x: int | x > 0}) {
+    let safe: int = positive;
+}
