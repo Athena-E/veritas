@@ -15,6 +15,8 @@ pub enum Token<'src> {
     If,
     Else,
     Return,
+    For,
+    In,
     // Type keywords
     Int,
     Bool,
@@ -35,6 +37,8 @@ impl fmt::Display for Token<'_> {
             Token::If => write!(f, "if"),
             Token::Else => write!(f, "else"),
             Token::Return => write!(f, "return"),
+            Token::For => write!(f, "for"),
+            Token::In => write!(f, "in"),
             Token::Int => write!(f, "int"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
@@ -138,6 +142,12 @@ pub enum Stmt<'src> {
         expr: Box<Spanned<Expr<'src>>>,
     },
     Expr(Spanned<Expr<'src>>),
+    For {
+        var: &'src str,
+        start: Box<Spanned<Expr<'src>>>,
+        end: Box<Spanned<Expr<'src>>>,
+        body: Vec<Spanned<Stmt<'src>>>,
+    },
 }
 
 // Function parameter

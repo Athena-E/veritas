@@ -69,6 +69,16 @@ pub fn display_program(program: &Program) {
                         format_expr(&expr.0)
                     );
                 }
+                Stmt::For { var, start, end, body } => {
+                    println!(
+                        "    [{}] for {} in {}..{} {{ {} statement(s) }}",
+                        i + 1,
+                        var,
+                        format_expr(&start.0),
+                        format_expr(&end.0),
+                        body.len()
+                    );
+                }
             }
         }
 
