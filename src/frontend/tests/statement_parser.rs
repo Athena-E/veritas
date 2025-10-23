@@ -162,3 +162,25 @@ fn test_empty_for_loop() {
         .into_result();
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_let_statement_with_array_init() {
+    let src = "fn test() { let arr: [int; 10] = [0; 10]; }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        if let Stmt::Let { name, value, .. } = &func.body.statements[0].0 {
+            assert_eq!(name, &"arr");
+            assert!(matches!(value.0, crate::common::ast::Expr::ArrayInit { .. }));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+}

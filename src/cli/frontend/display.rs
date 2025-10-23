@@ -155,6 +155,9 @@ pub fn format_expr(expr: &Expr) -> String {
         Expr::Index { base, index } => {
             format!("{}[{}]", format_expr(&base.0), format_expr(&index.0))
         }
+        Expr::ArrayInit { value, length } => {
+            format!("[{}; {}]", format_expr(&value.0), format_expr(&length.0))
+        }
         Expr::If {
             cond,
             then_block,

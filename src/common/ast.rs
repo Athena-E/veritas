@@ -118,6 +118,10 @@ pub enum Expr<'src> {
         base: Box<Spanned<Self>>,
         index: Box<Spanned<Self>>,
     },
+    ArrayInit {
+        value: Box<Spanned<Self>>,
+        length: Box<Spanned<Self>>,
+    },
     If {
         cond: Box<Spanned<Self>>,
         then_block: Vec<Spanned<Stmt<'src>>>,

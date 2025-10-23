@@ -31,6 +31,17 @@ where
             .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
             .map(|(e, _)| e);
 
+        // Array initialization: [value; length]
+        let array_init = expr
+            .clone()
+            .then_ignore(just(Token::Ctrl(';')))
+            .then(expr.clone())
+            .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
+            .map(|(value, length)| Expr::ArrayInit {
+                value: Box::new(value),
+                length: Box::new(length),
+            });
+
         // Function call
         let call = select! { Token::Ident(name) => name }
             .then(
@@ -44,6 +55,7 @@ where
             .map(|(func_name, args)| Expr::Call { func_name, args });
 
         let atom = call
+            .or(array_init)
             .or(paren)
             .or(lit)
             .or(var)
@@ -197,6 +209,17 @@ where
                 .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
                 .map(|(e, _)| e);
 
+            // Array initialization: [value; length]
+            let array_init = inline_expr
+                .clone()
+                .then_ignore(just(Token::Ctrl(';')))
+                .then(inline_expr.clone())
+                .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
+                .map(|(value, length)| Expr::ArrayInit {
+                    value: Box::new(value),
+                    length: Box::new(length),
+                });
+
             // Function call
             let call = select! { Token::Ident(name) => name }
                 .then(
@@ -211,6 +234,7 @@ where
                 .map(|(func_name, args)| Expr::Call { func_name, args });
 
             let atom = call
+                .or(array_init)
                 .or(paren)
                 .or(lit)
                 .or(var)
