@@ -72,7 +72,8 @@ pub fn format_type(ty: &Type) -> String {
         Type::SingletonInt(expr) => format!("int({})", format_expr(&expr.0)),
         Type::RefinedInt { var, predicate } => {
             format!("{{{}: int | {}}}", var, format_expr(&predicate.0))
-        }
+        },
+        Type::Unit => "()".to_string(),
     }
 }
 

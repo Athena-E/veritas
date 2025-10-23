@@ -1,6 +1,6 @@
 use chumsky::{input::ValueInput, prelude::*};
 use crate::common::types::{Span, Spanned};
-use crate::common::ast::{Token, Function, Program, Parameter};
+use crate::common::ast::{Token, Function, Program, Parameter, Type};
 use super::expr::expr_parser;
 use super::stmt::stmt_parser;
 use super::types::type_parser;
@@ -18,7 +18,7 @@ where
     // Parse a single parameter: name: type
     let parameter = select! { Token::Ident(name) => name }
         .then_ignore(just(Token::Ctrl(':')))
-        .then(ty)
+        .then(ty.clone())
         .map_with(|(name, ty), e| {
             (
                 Parameter { name, ty },
@@ -33,19 +33,31 @@ where
         .collect::<Vec<_>>()
         .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')));
 
+    // Parse optional return type: -> Type
+    let return_type = just(Token::Op("->"))
+        .ignore_then(ty.clone())
+        .or_not();
+
     just(Token::Fn)
         .ignore_then(select! { Token::Ident(name) => name })
         .then(parameters)
+        .then(return_type)
         .then(
             stmt.repeated()
                 .collect::<Vec<_>>()
                 .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
         )
-        .map_with(|((name, parameters), statements), e| {
+        .map_with(|(((name, parameters), return_type), statements), e| {
+            // Default to Unit type if no return type is specified
+            let return_type = return_type.unwrap_or_else(|| {
+                let span = e.span();
+                (Type::Unit, span)
+            });
             (
                 Function {
                     name,
                     parameters,
+                    return_type,
                     statements,
                 },
                 e.span(),

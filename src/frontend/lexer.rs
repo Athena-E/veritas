@@ -20,6 +20,7 @@ pub fn lexer<'src>(
         just(">="),
         just("&&"),
         just("||"),
+        just("->"),
         just("<"),
         just(">"),
         just("+"),

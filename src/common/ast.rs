@@ -75,6 +75,7 @@ pub enum Literal {
 // Type expressions
 #[derive(Clone, Debug)]
 pub enum Type<'src> {
+    Unit,
     Int,
     Bool,
     Array {
@@ -147,6 +148,7 @@ pub struct Parameter<'src> {
 pub struct Function<'src> {
     pub name: &'src str,
     pub parameters: Vec<Spanned<Parameter<'src>>>,
+    pub return_type: Spanned<Type<'src>>,
     pub statements: Vec<Spanned<Stmt<'src>>>,
 }
 
