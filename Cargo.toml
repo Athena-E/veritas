@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 ariadne = "0.5.1"
 chumsky = "1.0.0-alpha.8"
+im = "15.1.0"
+z3 = "0.19.2"
