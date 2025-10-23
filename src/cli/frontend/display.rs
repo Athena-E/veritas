@@ -19,9 +19,17 @@ pub fn display_program(program: &Program) {
             println!("    Parameters: ({})", params.join(", "));
         }
 
-        println!("    Body: {} statement(s)\n", func.statements.len());
+        // Display return type
+        println!("    Return type: {}", format_type(&func.return_type.0));
 
-        for (i, (stmt, _)) in func.statements.iter().enumerate() {
+        let stmt_count = func.body.statements.len();
+        let has_return_expr = func.body.return_expr.is_some();
+        println!("    Body: {} statement(s){}\n",
+            stmt_count,
+            if has_return_expr { " + implicit return" } else { "" }
+        );
+
+        for (i, (stmt, _)) in func.body.statements.iter().enumerate() {
             match stmt {
                 Stmt::Let {
                     is_mut,
@@ -47,7 +55,26 @@ pub fn display_program(program: &Program) {
                         format_expr(&rhs.0)
                     );
                 }
+                Stmt::Return { expr } => {
+                    println!(
+                        "    [{}] return {};",
+                        i + 1,
+                        format_expr(&expr.0)
+                    );
+                }
+                Stmt::Expr(expr) => {
+                    println!(
+                        "    [{}] {};",
+                        i + 1,
+                        format_expr(&expr.0)
+                    );
+                }
             }
+        }
+
+        // Display implicit return if present
+        if let Some(return_expr) = &func.body.return_expr {
+            println!("    [return] {}", format_expr(&return_expr.0));
         }
     }
 }

@@ -35,6 +35,19 @@ where
             )
         });
 
+    // Return statement
+    let return_stmt = just(Token::Return)
+        .ignore_then(expr.clone())
+        .then_ignore(just(Token::Ctrl(';')))
+        .map_with(|expr, e| {
+            (
+                Stmt::Return {
+                    expr: Box::new(expr),
+                },
+                e.span(),
+            )
+        });
+
     // Assignment statement
     let assign_stmt = expr
         .clone()
@@ -43,7 +56,13 @@ where
         .then_ignore(just(Token::Ctrl(';')))
         .map_with(|(lhs, rhs), e| (Stmt::Assignment { lhs, rhs }, e.span()));
 
-    choice((let_stmt, assign_stmt))
+    // Expression statement
+    let expr_stmt = expr
+        .clone()
+        .then_ignore(just(Token::Ctrl(';')))
+        .map_with(|expr, e| (Stmt::Expr(expr), e.span()));
+
+    choice((let_stmt, return_stmt, assign_stmt, expr_stmt))
         .labelled("statement")
         .boxed()
 }

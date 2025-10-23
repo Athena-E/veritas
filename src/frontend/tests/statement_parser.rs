@@ -16,9 +16,9 @@ fn test_let_statement_immutable() {
         .into_result();
     assert!(result.is_ok());
     if let Ok((func, _)) = result {
-        if let Stmt::Let { is_mut, name, .. } = &func.statements[0].0 {
-            assert_eq!(*is_mut, false);
-            assert_eq!(*name, "x");
+        if let Stmt::Let { is_mut, name, .. } = &func.body.statements[0].0 {
+            assert_eq!(is_mut, &false);
+            assert_eq!(name, &"x");
         } else {
             panic!("Expected Let statement");
         }
@@ -38,9 +38,9 @@ fn test_let_statement_mutable() {
         .into_result();
     assert!(result.is_ok());
     if let Ok((func, _)) = result {
-        if let Stmt::Let { is_mut, name, .. } = &func.statements[0].0 {
-            assert_eq!(*is_mut, true);
-            assert_eq!(*name, "y");
+        if let Stmt::Let { is_mut, name, .. } = &func.body.statements[0].0 {
+            assert_eq!(is_mut, &true);
+            assert_eq!(name, &"y");
         } else {
             panic!("Expected Let statement");
         }
@@ -60,8 +60,8 @@ fn test_assignment_statement() {
         .into_result();
     assert!(result.is_ok());
     if let Ok((func, _)) = result {
-        assert_eq!(func.statements.len(), 2);
-        assert!(matches!(func.statements[1].0, Stmt::Assignment { .. }));
+        assert_eq!(func.body.statements.len(), 2);
+        assert!(matches!(func.body.statements[1].0, Stmt::Assignment { .. }));
     }
 }
 

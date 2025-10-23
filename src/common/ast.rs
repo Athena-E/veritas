@@ -134,6 +134,10 @@ pub enum Stmt<'src> {
         lhs: Spanned<Expr<'src>>,
         rhs: Spanned<Expr<'src>>,
     },
+    Return {
+        expr: Box<Spanned<Expr<'src>>>,
+    },
+    Expr(Spanned<Expr<'src>>),
 }
 
 // Function parameter
@@ -143,13 +147,20 @@ pub struct Parameter<'src> {
     pub ty: Spanned<Type<'src>>,
 }
 
+// Function body
+#[derive(Debug)]
+pub struct FunctionBody<'src> {
+    pub statements: Vec<Spanned<Stmt<'src>>>,
+    pub return_expr: Option<Box<Spanned<Expr<'src>>>>,
+}
+
 // Function definition
 #[derive(Debug)]
 pub struct Function<'src> {
     pub name: &'src str,
     pub parameters: Vec<Spanned<Parameter<'src>>>,
     pub return_type: Spanned<Type<'src>>,
-    pub statements: Vec<Spanned<Stmt<'src>>>,
+    pub body: FunctionBody<'src>,
 }
 
 // Program
