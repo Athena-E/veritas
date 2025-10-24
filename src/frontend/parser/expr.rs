@@ -187,7 +187,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens, I>(
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
-    recursive(|expr| {
+    recursive(|_expr| {
         let inline_expr = recursive(|inline_expr| {
             // Literals
             let lit = select! {
