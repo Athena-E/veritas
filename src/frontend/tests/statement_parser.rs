@@ -184,3 +184,124 @@ fn test_let_statement_with_array_init() {
         }
     }
 }
+
+#[test]
+fn test_array_indexing_assignment_with_literal_index() {
+    let src = "fn test() { let mut arr: [int; 5] = [0; 5]; arr[2] = 100; }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        assert_eq!(func.body.statements.len(), 2);
+        if let Stmt::Assignment { lhs, .. } = &func.body.statements[1].0 {
+            assert!(matches!(lhs.0, crate::common::ast::Expr::Index { .. }));
+        } else {
+            panic!("Expected Assignment statement");
+        }
+    }
+}
+
+#[test]
+fn test_array_indexing_assignment_with_variable_index() {
+    let src = "fn test() { let mut arr: [int; 10] = [0; 10]; arr[i] = value; }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        if let Stmt::Assignment { lhs, rhs } = &func.body.statements[1].0 {
+            if let crate::common::ast::Expr::Index { base, index } = &lhs.0 {
+                assert!(matches!(base.0, crate::common::ast::Expr::Variable("arr")));
+                assert!(matches!(index.0, crate::common::ast::Expr::Variable("i")));
+            } else {
+                panic!("Expected Index expression");
+            }
+            assert!(matches!(rhs.0, crate::common::ast::Expr::Variable("value")));
+        } else {
+            panic!("Expected Assignment statement");
+        }
+    }
+}
+
+#[test]
+fn test_array_indexing_assignment_with_expression_value() {
+    let src = "fn test() { let mut arr: [int; 5] = [0; 5]; arr[0] = x + y * 2; }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        if let Stmt::Assignment { rhs, .. } = &func.body.statements[1].0 {
+            assert!(matches!(rhs.0, crate::common::ast::Expr::BinOp { .. }));
+        } else {
+            panic!("Expected Assignment statement");
+        }
+    }
+}
+
+#[test]
+fn test_array_indexing_assignment_with_expression_index() {
+    let src = "fn test() { let mut arr: [int; 10] = [0; 10]; arr[i + 1] = 42; }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        if let Stmt::Assignment { lhs, .. } = &func.body.statements[1].0 {
+            if let crate::common::ast::Expr::Index { index, .. } = &lhs.0 {
+                assert!(matches!(index.0, crate::common::ast::Expr::BinOp { .. }));
+            } else {
+                panic!("Expected Index expression");
+            }
+        } else {
+            panic!("Expected Assignment statement");
+        }
+    }
+}
+
+#[test]
+fn test_nested_array_indexing_assignment() {
+    let src = "fn test() { let mut matrix: [[int; 3]; 3] = init(); matrix[i][j] = 99; }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        if let Stmt::Assignment { lhs, .. } = &func.body.statements[1].0 {
+            // Should be Index { base: Index { ... }, index: ... }
+            if let crate::common::ast::Expr::Index { base, .. } = &lhs.0 {
+                assert!(matches!(base.0, crate::common::ast::Expr::Index { .. }));
+            } else {
+                panic!("Expected nested Index expression");
+            }
+        } else {
+            panic!("Expected Assignment statement");
+        }
+    }
+}
