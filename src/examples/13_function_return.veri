@@ -1,0 +1,21 @@
+// Function with explicit return
+fn return_add(x: int, y: int) -> int {
+    let res: int = x + y;
+    return res;
+}
+
+// Function with implicit return
+fn implicit_add(x: int, y: int) -> int {
+    x + y
+}
+
+// Function with statements and implicit return
+fn compute(x: int) -> int {
+    let y: int = x * 2;
+    y + 10
+}
+
+// Function with no return (Unit type)
+fn print_value(x: int) {
+    let temp: int = x;
+}
