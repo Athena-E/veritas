@@ -1,5 +1,5 @@
 use chumsky::prelude::*;
-use crate::common::types::{Span, Spanned};
+use crate::common::span::{Span, Spanned};
 use crate::common::ast::Token;
 
 // Lexer

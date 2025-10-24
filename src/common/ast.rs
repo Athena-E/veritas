@@ -1,5 +1,5 @@
 use std::fmt;
-use super::types::Spanned;
+use super::span::Spanned;
 
 // Token definition
 #[derive(Clone, Debug, PartialEq)]
