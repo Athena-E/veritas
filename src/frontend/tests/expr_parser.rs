@@ -353,3 +353,111 @@ fn test_expr_parser_complex_expression() {
         .into_result();
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_expr_parser_array_init_simple() {
+    let src = "[0; 10]";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        if let Expr::ArrayInit { value, length } = expr {
+            assert!(matches!(value.0, Expr::Literal(Literal::Int(0))));
+            assert!(matches!(length.0, Expr::Literal(Literal::Int(10))));
+        } else {
+            panic!("Expected ArrayInit expression");
+        }
+    }
+}
+
+#[test]
+fn test_expr_parser_array_init_variable_value() {
+    let src = "[x; 10]";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        if let Expr::ArrayInit { value, length } = expr {
+            assert!(matches!(value.0, Expr::Variable("x")));
+            assert!(matches!(length.0, Expr::Literal(Literal::Int(10))));
+        } else {
+            panic!("Expected ArrayInit expression");
+        }
+    }
+}
+
+#[test]
+fn test_expr_parser_array_init_variable_length() {
+    let src = "[0; n]";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        if let Expr::ArrayInit { value, length } = expr {
+            assert!(matches!(value.0, Expr::Literal(Literal::Int(0))));
+            assert!(matches!(length.0, Expr::Variable("n")));
+        } else {
+            panic!("Expected ArrayInit expression");
+        }
+    }
+}
+
+#[test]
+fn test_expr_parser_array_init_expression_value() {
+    let src = "[x + 1; 10]";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        if let Expr::ArrayInit { value, .. } = expr {
+            assert!(matches!(value.0, Expr::BinOp { .. }));
+        } else {
+            panic!("Expected ArrayInit expression");
+        }
+    }
+}
+
+#[test]
+fn test_expr_parser_array_init_expression_length() {
+    let src = "[0; n * 2]";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        if let Expr::ArrayInit { length, .. } = expr {
+            assert!(matches!(length.0, Expr::BinOp { .. }));
+        } else {
+            panic!("Expected ArrayInit expression");
+        }
+    }
+}

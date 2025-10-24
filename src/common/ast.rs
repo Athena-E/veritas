@@ -1,5 +1,5 @@
 use std::fmt;
-use super::types::{Span, Spanned};
+use super::types::Spanned;
 
 // Token definition
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +15,8 @@ pub enum Token<'src> {
     If,
     Else,
     Return,
+    For,
+    In,
     // Type keywords
     Int,
     Bool,
@@ -35,6 +37,8 @@ impl fmt::Display for Token<'_> {
             Token::If => write!(f, "if"),
             Token::Else => write!(f, "else"),
             Token::Return => write!(f, "return"),
+            Token::For => write!(f, "for"),
+            Token::In => write!(f, "in"),
             Token::Int => write!(f, "int"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
@@ -75,6 +79,7 @@ pub enum Literal {
 // Type expressions
 #[derive(Clone, Debug)]
 pub enum Type<'src> {
+    Unit,
     Int,
     Bool,
     Array {
@@ -113,6 +118,10 @@ pub enum Expr<'src> {
         base: Box<Spanned<Self>>,
         index: Box<Spanned<Self>>,
     },
+    ArrayInit {
+        value: Box<Spanned<Self>>,
+        length: Box<Spanned<Self>>,
+    },
     If {
         cond: Box<Spanned<Self>>,
         then_block: Vec<Spanned<Stmt<'src>>>,
@@ -133,6 +142,16 @@ pub enum Stmt<'src> {
         lhs: Spanned<Expr<'src>>,
         rhs: Spanned<Expr<'src>>,
     },
+    Return {
+        expr: Box<Spanned<Expr<'src>>>,
+    },
+    Expr(Spanned<Expr<'src>>),
+    For {
+        var: &'src str,
+        start: Box<Spanned<Expr<'src>>>,
+        end: Box<Spanned<Expr<'src>>>,
+        body: Vec<Spanned<Stmt<'src>>>,
+    },
 }
 
 // Function parameter
@@ -142,12 +161,20 @@ pub struct Parameter<'src> {
     pub ty: Spanned<Type<'src>>,
 }
 
+// Function body
+#[derive(Debug)]
+pub struct FunctionBody<'src> {
+    pub statements: Vec<Spanned<Stmt<'src>>>,
+    pub return_expr: Option<Box<Spanned<Expr<'src>>>>,
+}
+
 // Function definition
 #[derive(Debug)]
 pub struct Function<'src> {
     pub name: &'src str,
     pub parameters: Vec<Spanned<Parameter<'src>>>,
-    pub statements: Vec<Spanned<Stmt<'src>>>,
+    pub return_type: Spanned<Type<'src>>,
+    pub body: FunctionBody<'src>,
 }
 
 // Program

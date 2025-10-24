@@ -1,0 +1,40 @@
+// Simple for loop
+fn simple_loop() {
+    for i in 0..10 {
+        let x: int = i * 2;
+    }
+}
+
+// For loop with variable range
+fn variable_range(start: int, end: int) {
+    let sum: int = 0;
+    for i in start..end {
+        sum = sum + i;
+    }
+}
+
+// Nested for loops
+fn nested_loops() {
+    for i in 0..3 {
+        for j in 0..3 {
+            let product: int = i * j;
+        }
+    }
+}
+
+// For loop with multiple statements
+fn complex_loop() {
+    for i in 1..100 {
+        let x: int = i * 2;
+        let y: int = x + 5;
+        let z: int = y * y;
+    }
+}
+
+// For loop with array operations
+fn array_loop() {
+    let mut arr: [int; 10] = init_array();
+    for i in 0..10 {
+        arr[i] = i * i;
+    }
+}

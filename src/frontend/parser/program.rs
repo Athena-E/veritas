@@ -1,6 +1,6 @@
 use chumsky::{input::ValueInput, prelude::*};
 use crate::common::types::{Span, Spanned};
-use crate::common::ast::{Token, Function, Program, Parameter};
+use crate::common::ast::{Token, Function, Program, Parameter, Type, FunctionBody};
 use super::expr::expr_parser;
 use super::stmt::stmt_parser;
 use super::types::type_parser;
@@ -12,13 +12,13 @@ where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
     let expr = expr_parser();
-    let stmt = stmt_parser(expr);
+    let stmt = stmt_parser(expr.clone());
     let ty = type_parser();
 
     // Parse a single parameter: name: type
     let parameter = select! { Token::Ident(name) => name }
         .then_ignore(just(Token::Ctrl(':')))
-        .then(ty)
+        .then(ty.clone())
         .map_with(|(name, ty), e| {
             (
                 Parameter { name, ty },
@@ -33,20 +33,42 @@ where
         .collect::<Vec<_>>()
         .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')));
 
+    // Parse optional return type: -> Type
+    let return_type = just(Token::Op("->"))
+        .ignore_then(ty.clone())
+        .or_not();
+
+    // Parse function body: { stmts* expr? }
+    // We need to parse statements, then check if there's a final expression without semicolon
+    let body = just(Token::Ctrl('{'))
+        .ignore_then(
+            stmt.repeated()
+                .collect::<Vec<_>>()
+                .then(expr.or_not())
+        )
+        .then_ignore(just(Token::Ctrl('}')))
+        .map(|(statements, return_expr)| FunctionBody {
+            statements,
+            return_expr: return_expr.map(Box::new),
+        });
+
     just(Token::Fn)
         .ignore_then(select! { Token::Ident(name) => name })
         .then(parameters)
-        .then(
-            stmt.repeated()
-                .collect::<Vec<_>>()
-                .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
-        )
-        .map_with(|((name, parameters), statements), e| {
+        .then(return_type)
+        .then(body)
+        .map_with(|(((name, parameters), return_type), body), e| {
+            // Default to Unit type if no return type is specified
+            let return_type = return_type.unwrap_or_else(|| {
+                let span = e.span();
+                (Type::Unit, span)
+            });
             (
                 Function {
                     name,
                     parameters,
-                    statements,
+                    return_type,
+                    body,
                 },
                 e.span(),
             )
