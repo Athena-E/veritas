@@ -1,5 +1,5 @@
 use chumsky::{input::ValueInput, prelude::*};
-use crate::common::types::{Span, Spanned};
+use crate::common::span::{Span, Spanned};
 use crate::common::ast::{Token, Stmt, Expr};
 use super::types::type_parser;
 

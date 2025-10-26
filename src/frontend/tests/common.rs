@@ -1,4 +1,4 @@
-use crate::common::types::Spanned;
+use crate::common::span::Spanned;
 use crate::common::ast::Token;
 use crate::frontend::lexer::lexer;
 use chumsky::prelude::*;
