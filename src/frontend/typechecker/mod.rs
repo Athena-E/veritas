@@ -4,6 +4,9 @@ pub mod context;
 pub mod error;
 pub mod smt;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export commonly used types
 pub use context::{MutableBinding, TypingContext, VarBinding};
 pub use error::TypeError;
