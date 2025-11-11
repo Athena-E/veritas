@@ -1,7 +1,3 @@
-// Expression type synthesis
-//
-// Implements the judgment: ¦; “; ” ¢ e Ò T, e'
-//
 // Given an expression e, synthesize its type T and produce a typed expression e'
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
@@ -22,7 +18,7 @@ pub fn synth_expr<'src>(
 
     match &expr.0 {
         // INT-LIT: Integer literals have singleton types
-        // ¢ n Ò int(n)
+        // ï¿½ n ï¿½ int(n)
         Expr::Literal(Literal::Int(n)) => {
             let ty = IType::SingletonInt(IValue::Int(*n));
             let texpr = TExpr::Literal {
@@ -33,7 +29,7 @@ pub fn synth_expr<'src>(
         }
 
         // BOOL-LIT: Boolean literals have singleton types
-        // ¢ true Ò bool  (we use base bool, not singleton for simplicity)
+        // ï¿½ true ï¿½ bool  (we use base bool, not singleton for simplicity)
         Expr::Literal(Literal::Bool(b)) => {
             let ty = IType::Bool;
             let texpr = TExpr::Literal {
@@ -44,8 +40,8 @@ pub fn synth_expr<'src>(
         }
 
         // VAR: Look up variable in context
-        // x: T  “ * ”
-        // ¢ x Ò T
+        // x: T  ï¿½ * ï¿½
+        // ï¿½ x ï¿½ T
         Expr::Variable(name) => {
             match ctx.lookup_variable(name) {
                 Some(VarBinding::Immutable(ty)) => {
@@ -72,8 +68,8 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-ARITH: Arithmetic operations
-        // e1 Ò T1,  e2 Ò T2,  T1 <: int,  T2 <: int
-        // ¢ e1 op e2 Ò int   where op  {+, -, *}
+        // e1 ï¿½ T1,  e2 ï¿½ T2,  T1 <: int,  T2 <: int
+        // ï¿½ e1 op e2 ï¿½ int   where op  {+, -, *}
         Expr::BinOp { op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -105,8 +101,8 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-CMP: Comparison operations
-        // e1 Ò T1,  e2 Ò T2,  T1 <: int,  T2 <: int
-        // ¢ e1 op e2 Ò bool   where op  {<, <=, >, >=, ==, !=}
+        // e1 ï¿½ T1,  e2 ï¿½ T2,  T1 <: int,  T2 <: int
+        // ï¿½ e1 op e2 ï¿½ bool   where op  {<, <=, >, >=, ==, !=}
         Expr::BinOp { op: op @ (BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -138,8 +134,8 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-BOOL: Boolean operations
-        // e1 Ò T1,  e2 Ò T2,  T1 <: bool,  T2 <: bool
-        // ¢ e1 op e2 Ò bool   where op  {&&, ||}
+        // e1 ï¿½ T1,  e2 ï¿½ T2,  T1 <: bool,  T2 <: bool
+        // ï¿½ e1 op e2 ï¿½ bool   where op  {&&, ||}
         Expr::BinOp { op: op @ (BinOp::And | BinOp::Or), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -171,8 +167,8 @@ pub fn synth_expr<'src>(
         }
 
         // UNARY-NOT: Logical negation
-        // e Ò T,  T <: bool
-        // ¢ !e Ò bool
+        // e ï¿½ T,  T <: bool
+        // ï¿½ !e ï¿½ bool
         Expr::UnaryOp { op: UnaryOp::Not, cond } => {
             let (tcond, ty) = synth_expr(ctx, cond)?;
 
@@ -194,8 +190,8 @@ pub fn synth_expr<'src>(
         }
 
         // UNARY-NEG: Arithmetic negation
-        // e Ò T,  T <: int
-        // ¢ -e Ò int
+        // e ï¿½ T,  T <: int
+        // ï¿½ -e ï¿½ int
         Expr::UnaryOp { op: UnaryOp::Neg, cond } => {
             let (tcond, ty) = synth_expr(ctx, cond)?;
 
@@ -217,8 +213,8 @@ pub fn synth_expr<'src>(
         }
 
         // ARRAY-INDEX: Array indexing
-        // e1 Ò [T; n],  e2 Ò T_idx,  T_idx <: int
-        // ¢ e1[e2] Ò T
+        // e1 ï¿½ [T; n],  e2 ï¿½ T_idx,  T_idx <: int
+        // ï¿½ e1[e2] ï¿½ T
         Expr::ArrayIndex { array, index } => {
             let (tarray, array_ty) = synth_expr(ctx, array)?;
             let (tindex, index_ty) = synth_expr(ctx, index)?;
@@ -251,10 +247,10 @@ pub fn synth_expr<'src>(
         }
 
         // FUNC-CALL: Function call
-        // f: (T1, ..., Tn) -> T_ret  £_F
-        // e1 Ò S1, ..., en Ò Sn
+        // f: (T1, ..., Tn) -> T_ret  ï¿½_F
+        // e1 ï¿½ S1, ..., en ï¿½ Sn
         // S1 <: T1, ..., Sn <: Tn
-        // ¢ f(e1, ..., en) Ò T_ret
+        // ï¿½ f(e1, ..., en) ï¿½ T_ret
         Expr::FunctionCall { name, args } => {
             // Look up function signature
             let sig = ctx.lookup_function(name)
@@ -298,8 +294,8 @@ pub fn synth_expr<'src>(
         }
 
         // ARRAY-INIT: Array initialization [e; n]
-        // e Ò T,  n is a compile-time constant
-        // ¢ [e; n] Ò [T; n]
+        // e ï¿½ T,  n is a compile-time constant
+        // ï¿½ [e; n] ï¿½ [T; n]
         Expr::ArrayInit { value, length } => {
             let (tvalue, elem_ty) = synth_expr(ctx, value)?;
 

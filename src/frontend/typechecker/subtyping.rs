@@ -1,10 +1,8 @@
 // Subtyping relation for refinement types
 //
-// Implements the judgment: ¶; ì; î ¢ TÅ <: TÇ
-//
 // Key rules:
 // - Reflexivity: T <: T
-// - Refinement weakening: {x: int | P} <: {x: int | Q} if ¶ ' P ¢ Q
+// - Refinement weakening
 // - Singleton to base: int(n) <: int
 // - Structural: &T <: &T, [T; n] <: [T; n] (invariant)
 
@@ -40,7 +38,7 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
         // Refined to base: {x: int | P} <: int (always true)
         (IType::RefinedInt { .. }, IType::Int) => true,
 
-        // Refined to refined: {x: int | P} <: {x: int | Q} if ¶ ' P ¢ Q
+        // Refined to refined: {x: int | P} <: {x: int | Q} if ÔøΩ ' P ÔøΩ Q
         (
             IType::RefinedInt { base: base1, prop: prop1 },
             IType::RefinedInt { base: base2, prop: prop2 },
@@ -63,7 +61,7 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
             check_provable(&ctx_with_p, &renamed_q)
         }
 
-        // Array subtyping: [TÅ; n] <: [TÇ; m] if TÅ = TÇ and n = m (invariant)
+        // Array subtyping: [TÔøΩ; n] <: [TÔøΩ; m] if TÔøΩ = TÔøΩ and n = m (invariant)
         (
             IType::Array { element_type: elem1, size: size1 },
             IType::Array { element_type: elem2, size: size2 },
@@ -72,10 +70,10 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
             size1 == size2 && types_equal(elem1, elem2)
         }
 
-        // Reference subtyping: &TÅ <: &TÇ if TÅ = TÇ (invariant for shared refs)
+        // Reference subtyping: &TÔøΩ <: &TÔøΩ if TÔøΩ = TÔøΩ (invariant for shared refs)
         (IType::Ref(t1), IType::Ref(t2)) => types_equal(t1, t2),
 
-        // Mutable reference subtyping: &mut TÅ <: &mut TÇ if TÅ = TÇ (invariant)
+        // Mutable reference subtyping: &mut TÔøΩ <: &mut TÔøΩ if TÔøΩ = TÔøΩ (invariant)
         (IType::RefMut(t1), IType::RefMut(t2)) => types_equal(t1, t2),
 
         // Master type unwrapping: M(T) <: T (can use master type as its base)
