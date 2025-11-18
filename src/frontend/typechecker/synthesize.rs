@@ -4,7 +4,7 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::TExpr;
 use crate::common::types::{IType, IValue};
-use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds};
+use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds, extract_proposition, negate_proposition, check_stmts};
 use std::sync::Arc;
 
 /// Synthesize the type of an expression
@@ -316,6 +316,63 @@ pub fn synth_expr<'src>(
                 ty: array_ty.clone(),
             };
             Ok((Spanned(texpr, span), array_ty))
+        }
+
+        // IF-EXPR: If expression with flow-sensitive typing
+        // ; ;   cond  T_cond,  T_cond <: bool
+        // ; + extract(cond);   then_block  (then_block', T_then, _)
+        // ; + negate(extract(cond));   else_block  (else_block', T_else, _)
+        // T_then <: T,  T_else <: T
+        // ; ;   if cond { then_block } else { else_block }  T
+        Expr::If { cond, then_block, else_block } => {
+            // Synthesize condition
+            let (tcond, cond_ty) = synth_expr(ctx, cond)?;
+
+            // Check condition is bool
+            if !is_subtype(ctx, &cond_ty, &IType::Bool) {
+                return Err(TypeError::TypeMismatch {
+                    expected: IType::Bool,
+                    found: cond_ty,
+                    span: cond.1,
+                });
+            }
+
+            // Extract proposition from condition for flow-sensitive typing
+            let mut then_ctx = ctx.clone();
+            if let Some(prop) = extract_proposition(&cond.0) {
+                then_ctx = then_ctx.with_proposition(prop);
+            }
+
+            // Check then block
+            let (tthen_block, _) = check_stmts(&then_ctx, then_block)?;
+
+            // Type the else block (if present)
+            let (telse_block, result_ty) = if let Some(else_stmts) = else_block {
+                // Extract negated proposition for else branch
+                let mut else_ctx = ctx.clone();
+                if let Some(prop) = extract_proposition(&cond.0) {
+                    let neg_prop = negate_proposition(&prop);
+                    else_ctx = else_ctx.with_proposition(neg_prop);
+                }
+
+                let (telse_stmts, _) = check_stmts(&else_ctx, else_stmts)?;
+
+                // For now, if-expressions with both branches produce unit type
+                // In a full implementation, we'd need to handle return expressions
+                (Some(telse_stmts), IType::Unit)
+            } else {
+                // If without else produces unit
+                (None, IType::Unit)
+            };
+
+            let texpr = TExpr::If {
+                cond: Box::new(tcond),
+                then_block: tthen_block,
+                else_block: telse_block,
+                ty: result_ty.clone(),
+            };
+
+            Ok((Spanned(texpr, span), result_ty))
         }
 
         _ => Err(TypeError::UnsupportedFeature {
