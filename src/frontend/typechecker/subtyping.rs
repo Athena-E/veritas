@@ -38,7 +38,7 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
         // Refined to base: {x: int | P} <: int (always true)
         (IType::RefinedInt { .. }, IType::Int) => true,
 
-        // Refined to refined: {x: int | P} <: {x: int | Q} if � ' P � Q
+        // Refined to refined: {x: int | P} <: {x: int | Q} if Phi /\ P |- Q
         (
             IType::RefinedInt { base: base1, prop: prop1 },
             IType::RefinedInt { base: base2, prop: prop2 },
@@ -61,7 +61,7 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
             check_provable(&ctx_with_p, &renamed_q)
         }
 
-        // Array subtyping: [T�; n] <: [T�; m] if T� = T� and n = m (invariant)
+        // Array subtyping: [T1; n] <: [T2; m] if T1 = T2 and n = m (invariant)
         (
             IType::Array { element_type: elem1, size: size1 },
             IType::Array { element_type: elem2, size: size2 },
@@ -70,10 +70,10 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
             size1 == size2 && types_equal(elem1, elem2)
         }
 
-        // Reference subtyping: &T� <: &T� if T� = T� (invariant for shared refs)
+        // Reference subtyping: &T1 <: &T2 if T1 = T2 (invariant for shared refs)
         (IType::Ref(t1), IType::Ref(t2)) => types_equal(t1, t2),
 
-        // Mutable reference subtyping: &mut T� <: &mut T� if T� = T� (invariant)
+        // Mutable reference subtyping: &mut T1 <: &mut T2 if T1 = T2 (invariant)
         (IType::RefMut(t1), IType::RefMut(t2)) => types_equal(t1, t2),
 
         // Master type unwrapping: M(T) <: T (can use master type as its base)

@@ -1,5 +1,4 @@
 // Helper functions for type checking
-//
 // Includes: constant folding, proposition extraction, context joining
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
@@ -8,9 +7,7 @@ use crate::common::types::{IProposition, IType, IValue};
 use std::sync::Arc;
 
 /// Constant folding (join-op from formal semantics)
-///
 /// Attempts to compute the result type of binary operations on singleton types
-/// Example: join_op(Add, int(5), int(3)) = int(8)
 pub fn join_op(op: BinOp, ty1: &IType, ty2: &IType) -> IType {
     match (op, ty1, ty2) {
         // Arithmetic on singleton ints
@@ -33,9 +30,7 @@ pub fn join_op(op: BinOp, ty1: &IType, ty2: &IType) -> IType {
 }
 
 /// Extract a proposition from an expression
-///
 /// Converts comparison expressions into propositions for flow-sensitive typing
-/// Example: x > 5 becomes IProposition { var: "x", predicate: x > 5 }
 pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>> {
     match expr {
         // Simple comparisons: x op n
@@ -55,9 +50,7 @@ pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>
 }
 
 /// Negate a proposition
-///
 /// Creates the negation of a proposition for else-branches
-/// Example: x > 5 becomes x <= 5
 pub fn negate_proposition<'src>(prop: &IProposition<'src>) -> IProposition<'src> {
     let negated_expr = negate_expr(&prop.predicate.0);
 
@@ -102,7 +95,6 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
             rhs: rhs.clone(),
         },
 
-        // Wrap in NOT for other expressions
         _ => Expr::UnaryOp {
             op: UnaryOp::Not,
             cond: Box::new(Spanned(expr.clone(), Span::default())),
@@ -111,7 +103,6 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
 }
 
 /// Check array bounds (proof obligation)
-///
 /// Verifies that 0 <= index < array_size
 pub fn check_array_bounds<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,

@@ -18,7 +18,7 @@ pub fn synth_expr<'src>(
 
     match &expr.0 {
         // INT-LIT: Integer literals have singleton types
-        // � n � int(n)
+        //  n  int(n)
         Expr::Literal(Literal::Int(n)) => {
             let ty = IType::SingletonInt(IValue::Int(*n));
             let texpr = TExpr::Literal {
@@ -29,7 +29,7 @@ pub fn synth_expr<'src>(
         }
 
         // BOOL-LIT: Boolean literals have singleton types
-        // � true � bool  (we use base bool, not singleton for simplicity)
+        //  true  bool  (we use base bool, not singleton for simplicity)
         Expr::Literal(Literal::Bool(b)) => {
             let ty = IType::Bool;
             let texpr = TExpr::Literal {
@@ -40,8 +40,7 @@ pub fn synth_expr<'src>(
         }
 
         // VAR: Look up variable in context
-        // x: T  � * �
-        // � x � T
+        //  x  T
         Expr::Variable(name) => {
             match ctx.lookup_variable(name) {
                 Some(VarBinding::Immutable(ty)) => {
@@ -68,8 +67,8 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-ARITH: Arithmetic operations
-        // e1 � T1,  e2 � T2,  T1 <: int,  T2 <: int
-        // � e1 op e2 � int   where op  {+, -, *}
+        // e1  T1,  e2  T2,  T1 <: int,  T2 <: int
+        //  e1 op e2  int   
         Expr::BinOp { op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -101,8 +100,8 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-CMP: Comparison operations
-        // e1 � T1,  e2 � T2,  T1 <: int,  T2 <: int
-        // � e1 op e2 � bool   where op  {<, <=, >, >=, ==, !=}
+        // e1  T1,  e2  T2,  T1 <: int,  T2 <: int
+        //  e1 op e2  bool   
         Expr::BinOp { op: op @ (BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -134,8 +133,8 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-BOOL: Boolean operations
-        // e1 � T1,  e2 � T2,  T1 <: bool,  T2 <: bool
-        // � e1 op e2 � bool   where op  {&&, ||}
+        // e1  T1,  e2  T2,  T1 <: bool,  T2 <: bool
+        //  e1 op e2  bool   
         Expr::BinOp { op: op @ (BinOp::And | BinOp::Or), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -167,8 +166,8 @@ pub fn synth_expr<'src>(
         }
 
         // UNARY-NOT: Logical negation
-        // e � T,  T <: bool
-        // � !e � bool
+        // e  T,  T <: bool
+        //  !e  bool
         Expr::UnaryOp { op: UnaryOp::Not, cond } => {
             let (tcond, ty) = synth_expr(ctx, cond)?;
 
@@ -190,8 +189,8 @@ pub fn synth_expr<'src>(
         }
 
         // UNARY-NEG: Arithmetic negation
-        // e � T,  T <: int
-        // � -e � int
+        // e  T,  T <: int
+        //  -e  int
         Expr::UnaryOp { op: UnaryOp::Neg, cond } => {
             let (tcond, ty) = synth_expr(ctx, cond)?;
 
@@ -213,8 +212,8 @@ pub fn synth_expr<'src>(
         }
 
         // ARRAY-INDEX: Array indexing
-        // e1 � [T; n],  e2 � T_idx,  T_idx <: int
-        // � e1[e2] � T
+        // e1  [T; n],  e2  T_idx,  T_idx <: int
+        //  e1[e2]  T
         Expr::ArrayIndex { array, index } => {
             let (tarray, array_ty) = synth_expr(ctx, array)?;
             let (tindex, index_ty) = synth_expr(ctx, index)?;
@@ -247,10 +246,10 @@ pub fn synth_expr<'src>(
         }
 
         // FUNC-CALL: Function call
-        // f: (T1, ..., Tn) -> T_ret  �_F
-        // e1 � S1, ..., en � Sn
+        // f: (T1, ..., Tn) -> T_ret 
+        // e1  S1, ..., en  Sn
         // S1 <: T1, ..., Sn <: Tn
-        // � f(e1, ..., en) � T_ret
+        //  f(e1, ..., en)  T_ret
         Expr::FunctionCall { name, args } => {
             // Look up function signature
             let sig = ctx.lookup_function(name)
@@ -294,8 +293,8 @@ pub fn synth_expr<'src>(
         }
 
         // ARRAY-INIT: Array initialization [e; n]
-        // e � T,  n is a compile-time constant
-        // � [e; n] � [T; n]
+        // e  T,  n is a compile-time constant
+        //  [e; n]  [T; n]
         Expr::ArrayInit { value, length } => {
             let (tvalue, elem_ty) = synth_expr(ctx, value)?;
 
@@ -323,8 +322,6 @@ pub fn synth_expr<'src>(
 }
 
 /// Evaluate an expression to a compile-time value
-///
-/// This is a simple evaluator for constant expressions (used for array sizes)
 fn eval_to_ivalue(expr: &Spanned<Expr>) -> Result<IValue, TypeError> {
     match &expr.0 {
         Expr::Literal(Literal::Int(n)) => Ok(IValue::Int(*n)),

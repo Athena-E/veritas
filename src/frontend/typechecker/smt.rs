@@ -172,6 +172,8 @@ impl<'ctx> SmtOracle<'ctx> {
 }
 
 pub fn check_provable(typing_ctx: &TypingContext, goal: &IProposition) -> bool {
-    let mut oracle = SmtOracle::new(&z3_ctx);
+    let cfg = Config::new();
+    let ctx = Context::new(&cfg);
+    let mut oracle = SmtOracle::new(&ctx);
     oracle.is_provable(typing_ctx, goal)
 }
