@@ -49,10 +49,11 @@ pub fn check_stmt<'src>(
             let new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
 
             let tstmt = TStmt::Let {
+                is_mut: false,
                 name: name.to_string(),
-                ty: value_ty,
-                value: Box::new(tvalue),
-                mutable: false,
+                declared_ty: ann_ty,
+                value: tvalue,
+                checked_ty: value_ty,
             };
 
             Ok((Spanned(tstmt, span), new_ctx))
@@ -79,14 +80,15 @@ pub fn check_stmt<'src>(
             }
 
             // Add to mutable context with current type and master type
-            let master_ty = IType::Master(Arc::new(ann_ty));
+            let master_ty = IType::Master(Arc::new(ann_ty.clone()));
             let new_ctx = ctx.with_mutable(name.to_string(), value_ty.clone(), master_ty);
 
             let tstmt = TStmt::Let {
+                is_mut: true,
                 name: name.to_string(),
-                ty: value_ty,
-                value: Box::new(tvalue),
-                mutable: true,
+                declared_ty: ann_ty,
+                value: tvalue,
+                checked_ty: value_ty,
             };
 
             Ok((Spanned(tstmt, span), new_ctx))
@@ -125,9 +127,15 @@ pub fn check_stmt<'src>(
             // Update mutable variable's current type
             let new_ctx = ctx.update_mutable(target.to_string(), value_ty.clone());
 
+            // Create TExpr for the left-hand side (the variable)
+            let lhs_expr = TExpr::Variable {
+                name: target.to_string(),
+                ty: binding.current_type.clone(),
+            };
+
             let tstmt = TStmt::Assignment {
-                target: target.to_string(),
-                value: Box::new(tvalue),
+                lhs: Spanned(lhs_expr, span),
+                rhs: tvalue,
             };
 
             Ok((Spanned(tstmt, span), new_ctx))

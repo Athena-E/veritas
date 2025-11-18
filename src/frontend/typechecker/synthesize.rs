@@ -182,7 +182,7 @@ pub fn synth_expr<'src>(
             let result_ty = IType::Bool;
             let texpr = TExpr::UnaryOp {
                 op: UnaryOp::Not,
-                cond: Box::new(tcond),
+                operand: Box::new(tcond),
                 ty: result_ty.clone(),
             };
             Ok((Spanned(texpr, span), result_ty))
@@ -205,7 +205,7 @@ pub fn synth_expr<'src>(
             let result_ty = IType::Int;
             let texpr = TExpr::UnaryOp {
                 op: UnaryOp::Neg,
-                cond: Box::new(tcond),
+                operand: Box::new(tcond),
                 ty: result_ty.clone(),
             };
             Ok((Spanned(texpr, span), result_ty))
@@ -214,8 +214,8 @@ pub fn synth_expr<'src>(
         // ARRAY-INDEX: Array indexing
         // e1  [T; n],  e2  T_idx,  T_idx <: int
         //  e1[e2]  T
-        Expr::ArrayIndex { array, index } => {
-            let (tarray, array_ty) = synth_expr(ctx, array)?;
+        Expr::Index { base, index } => {
+            let (tbase, base_ty) = synth_expr(ctx, base)?;
             let (tindex, index_ty) = synth_expr(ctx, index)?;
 
             // Check index is an integer
@@ -228,19 +228,19 @@ pub fn synth_expr<'src>(
             }
 
             // Extract element type from array
-            match &array_ty {
+            match &base_ty {
                 IType::Array { element_type, .. } => {
                     let elem_ty = (**element_type).clone();
-                    let texpr = TExpr::ArrayIndex {
-                        array: Box::new(tarray),
+                    let texpr = TExpr::Index {
+                        base: Box::new(tbase),
                         index: Box::new(tindex),
                         ty: elem_ty.clone(),
                     };
                     Ok((Spanned(texpr, span), elem_ty))
                 }
                 _ => Err(TypeError::NotAnArray {
-                    found: array_ty,
-                    span: array.1,
+                    found: base_ty,
+                    span: base.1,
                 }),
             }
         }
@@ -250,26 +250,26 @@ pub fn synth_expr<'src>(
         // e1  S1, ..., en  Sn
         // S1 <: T1, ..., Sn <: Tn
         //  f(e1, ..., en)  T_ret
-        Expr::FunctionCall { name, args } => {
+        Expr::Call { func_name, args } => {
             // Look up function signature
-            let sig = ctx.lookup_function(name)
+            let sig = ctx.lookup_function(func_name)
                 .ok_or_else(|| TypeError::UndefinedFunction {
-                    name: name.to_string(),
+                    name: func_name.to_string(),
                     span,
                 })?;
 
             // Check argument count
-            if args.len() != sig.params.len() {
+            if args.0.len() != sig.params.len() {
                 return Err(TypeError::WrongNumberOfArguments {
                     expected: sig.params.len(),
-                    found: args.len(),
-                    span,
+                    found: args.0.len(),
+                    span: args.1,
                 });
             }
 
             // Synth and check each argument
             let mut typed_args = Vec::new();
-            for (arg, param_ty) in args.iter().zip(sig.params.iter()) {
+            for (arg, param_ty) in args.0.iter().zip(sig.params.iter()) {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
                 if !is_subtype(ctx, &arg_ty, param_ty) {
@@ -284,8 +284,8 @@ pub fn synth_expr<'src>(
             }
 
             let ret_ty = sig.return_type.clone();
-            let texpr = TExpr::FunctionCall {
-                name: name.to_string(),
+            let texpr = TExpr::Call {
+                func_name: func_name.to_string(),
                 args: typed_args,
                 ty: ret_ty.clone(),
             };
