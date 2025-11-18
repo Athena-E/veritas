@@ -4,7 +4,7 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::TExpr;
 use crate::common::types::{IType, IValue};
-use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype};
+use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds};
 use std::sync::Arc;
 
 /// Synthesize the type of an expression
@@ -89,7 +89,8 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            let ty = IType::Int;
+            // Use constant folding to produce precise singleton types when possible
+            let ty = join_op(*op, &ty1, &ty2);
             let texpr = TExpr::BinOp {
                 op: *op,
                 lhs: Box::new(tlhs),
@@ -229,7 +230,10 @@ pub fn synth_expr<'src>(
 
             // Extract element type from array
             match &base_ty {
-                IType::Array { element_type, .. } => {
+                IType::Array { element_type, size } => {
+                    // Optionally check array bounds if index is statically known
+                    check_array_bounds(ctx, &index_ty, size, index.1)?;
+
                     let elem_ty = (**element_type).clone();
                     let texpr = TExpr::Index {
                         base: Box::new(tbase),
