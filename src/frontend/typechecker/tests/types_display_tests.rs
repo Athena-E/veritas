@@ -3,13 +3,14 @@
 use crate::common::types::{FunctionSignature, IType, IValue};
 use super::common::*;
 use crate::common::ast::BinOp;
+use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
 
 #[test]
 fn test_display_basic_types() {
     assert_eq!(format!("{}", IType::Int), "int");
     assert_eq!(format!("{}", IType::Bool), "bool");
-    assert_eq!(format!("{}", IType::Unit), "unit");
+    assert_eq!(format!("{}", IType::Unit), "()");
 }
 
 #[test]
@@ -18,13 +19,13 @@ fn test_display_array() {
         element_type: Arc::new(IType::Int),
         size: IValue::Int(10),
     };
-    assert_eq!(format!("{}", ty), "int[10]");
+    assert_eq!(format!("{}", ty), "[int; 10]");
 
     let ty_symbolic = IType::Array {
         element_type: Arc::new(IType::Bool),
         size: IValue::Symbolic("n".to_string()),
     };
-    assert_eq!(format!("{}", ty_symbolic), "bool[n]");
+    assert_eq!(format!("{}", ty_symbolic), "[bool; n]");
 }
 
 #[test]
@@ -48,32 +49,45 @@ fn test_display_refined_int() {
 #[test]
 fn test_display_master_type() {
     let ty = IType::Master(Arc::new(IType::Int));
-    assert_eq!(format!("{}", ty), "M(int)");
+    assert_eq!(format!("{}", ty), "master(int)");
 
     let refined = make_refined_int("x", make_comparison("x", BinOp::Gte, 0));
     let master_refined = IType::Master(Arc::new(refined));
-    assert_eq!(format!("{}", master_refined), "M({x: int | x >= 0})");
+    assert_eq!(format!("{}", master_refined), "master({x: int | x >= 0})");
 }
 
 #[test]
 fn test_display_function_signature() {
     let sig = FunctionSignature {
-        params: vec![IType::Int],
+        name: "foo".to_string(),
+        parameters: vec![("x".to_string(), IType::Int)],
         return_type: IType::Bool,
+        precondition: None,
+        span: SimpleSpan::new(0, 0),
     };
-    assert_eq!(format!("{}", sig), "(int) -> bool");
+    assert_eq!(format!("{}", sig), "fn foo(x: int) -> bool");
 
     let sig_multiple = FunctionSignature {
-        params: vec![IType::Int, IType::Bool, IType::Unit],
+        name: "bar".to_string(),
+        parameters: vec![
+            ("a".to_string(), IType::Int),
+            ("b".to_string(), IType::Bool),
+            ("c".to_string(), IType::Unit),
+        ],
         return_type: IType::Int,
+        precondition: None,
+        span: SimpleSpan::new(0, 0),
     };
-    assert_eq!(format!("{}", sig_multiple), "(int, bool, unit) -> int");
+    assert_eq!(format!("{}", sig_multiple), "fn bar(a: int, b: bool, c: ()) -> int");
 
     let sig_no_params = FunctionSignature {
-        params: vec![],
+        name: "empty".to_string(),
+        parameters: vec![],
         return_type: IType::Bool,
+        precondition: None,
+        span: SimpleSpan::new(0, 0),
     };
-    assert_eq!(format!("{}", sig_no_params), "() -> bool");
+    assert_eq!(format!("{}", sig_no_params), "fn empty() -> bool");
 }
 
 #[test]
@@ -92,7 +106,7 @@ fn test_display_nested_types() {
     let refmut = IType::RefMut(Arc::new(refined));
     assert_eq!(format!("{}", refmut), "&mut {x: int | x > 0}");
 
-    // int[n][] - nested array
+    // nested array
     let inner = IType::Array {
         element_type: Arc::new(IType::Int),
         size: IValue::Symbolic("n".to_string()),
@@ -101,5 +115,5 @@ fn test_display_nested_types() {
         element_type: Arc::new(inner),
         size: IValue::Int(5),
     };
-    assert_eq!(format!("{}", outer), "int[n][5]");
+    assert_eq!(format!("{}", outer), "[[int; n]; 5]");
 }

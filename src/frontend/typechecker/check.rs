@@ -7,7 +7,7 @@
 
 use crate::common::ast::{Function, Program, Stmt, Type as AstType};
 use crate::common::span::{Span, Spanned};
-use crate::common::tast::{TFunction, TFunctionBody, TParameter, TProgram, TStmt};
+use crate::common::tast::{TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IType, IValue};
 use crate::frontend::typechecker::{
     TypeError, TypingContext, is_subtype, synth_expr,
@@ -29,7 +29,7 @@ pub fn check_stmt<'src>(
         // ; ;   e  T_e
         // T_e <: T_ann
         // ; ;   let x: T_ann = e  (let x: T_e = e', [x: T_e], )
-        Stmt::Let { name, ty, value, mutable: false } => {
+        Stmt::Let { name, ty, value, is_mut: false } => {
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
@@ -56,14 +56,14 @@ pub fn check_stmt<'src>(
                 checked_ty: value_ty,
             };
 
-            Ok((Spanned(tstmt, span), new_ctx))
+            Ok(((tstmt, span), new_ctx))
         }
 
         // LET-MUT: Mutable variable binding
         // ; ;   e  T_e
         // T_e <: T_ann
         // ; ;   let mut x: T_ann = e  (let mut x: T_e = e', , [x: (T_e, M(T_ann))])
-        Stmt::Let { name, ty, value, mutable: true } => {
+        Stmt::Let { name, ty, value, is_mut: true } => {
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
@@ -91,101 +91,127 @@ pub fn check_stmt<'src>(
                 checked_ty: value_ty,
             };
 
-            Ok((Spanned(tstmt, span), new_ctx))
+            Ok(((tstmt, span), new_ctx))
         }
 
-        // ASSIGN: Assignment to mutable variable
-        // x: (T_curr, M(T_master)) 
-        // ; ;   e  T_e
-        // T_e <: T_master
-        // ; ;   x = e  (x = e', , [x: (T_e, M(T_master))])
-        Stmt::Assignment { target, value } => {
-            // Synthesize type of value
-            let (tvalue, value_ty) = synth_expr(ctx, value)?;
+        // ASSIGN: Assignment
+        // Handles both variable assignment and array indexing assignment
+        Stmt::Assignment { lhs, rhs } => {
+            // Synthesize type of RHS value
+            let (trhs, rhs_ty) = synth_expr(ctx, rhs)?;
 
-            // Look up mutable variable
-            let binding = ctx.lookup_mutable(target)
-                .ok_or_else(|| TypeError::NotMutable {
-                    name: target.to_string(),
-                    span,
-                })?;
+            // Check what kind of LHS we have
+            match &lhs.0 {
+                // Variable assignment
+                crate::common::ast::Expr::Variable(var_name) => {
+                    // Look up mutable variable
+                    let binding = ctx.lookup_mutable(var_name)
+                        .ok_or_else(|| TypeError::NotMutable {
+                            name: var_name.to_string(),
+                            span,
+                        })?;
 
-            // Extract master type and check subtyping
-            let master_base = match &binding.master_type {
-                IType::Master(base) => base.as_ref(),
-                _ => &binding.master_type, // Shouldn't happen, but be defensive
-            };
+                    // Extract master type and check subtyping
+                    let master_base = match &binding.master_type {
+                        IType::Master(base) => base.as_ref(),
+                        _ => &binding.master_type,
+                    };
 
-            if !is_subtype(ctx, &value_ty, master_base) {
-                return Err(TypeError::TypeMismatch {
-                    expected: master_base.clone(),
-                    found: value_ty,
-                    span: value.1,
-                });
-            }
+                    if !is_subtype(ctx, &rhs_ty, master_base) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: master_base.clone(),
+                            found: rhs_ty,
+                            span: rhs.1,
+                        });
+                    }
 
-            // Update mutable variable's current type
-            let new_ctx = ctx.update_mutable(target.to_string(), value_ty.clone());
+                    // Update mutable variable's current type
+                    let new_ctx = ctx.with_mutable_update(var_name, rhs_ty.clone())
+                        .map_err(|e| TypeError::InvalidAssignment {
+                            variable: var_name.to_string(),
+                            reason: e,
+                            span,
+                        })?;
 
-            // Create TExpr for the left-hand side (the variable)
-            let lhs_expr = TExpr::Variable {
-                name: target.to_string(),
-                ty: binding.current_type.clone(),
-            };
+                    // Create TExpr for the left-hand side
+                    let tlhs_expr = TExpr::Variable {
+                        name: var_name.to_string(),
+                        ty: binding.current_type.clone(),
+                    };
 
-            let tstmt = TStmt::Assignment {
-                lhs: Spanned(lhs_expr, span),
-                rhs: tvalue,
-            };
+                    let tstmt = TStmt::Assignment {
+                        lhs: (tlhs_expr, lhs.1),
+                        rhs: trhs,
+                    };
 
-            Ok((Spanned(tstmt, span), new_ctx))
-        }
+                    Ok(((tstmt, span), new_ctx))
+                }
 
-        // ARRAY-ASSIGN: Assignment to array element
-        // ; ;   arr  [T_elem; n]
-        // ; ;   idx  T_idx,  T_idx <: int
-        // ; ;   val  T_val,  T_val <: T_elem
-        // ; ;   arr[idx] = val  (arr[idx] = val', , )
-        Stmt::ArrayAssignment { array, index, value } => {
-            let (tarray, array_ty) = synth_expr(ctx, array)?;
-            let (tindex, index_ty) = synth_expr(ctx, index)?;
-            let (tvalue, value_ty) = synth_expr(ctx, value)?;
+                // Array indexing assignment
+                crate::common::ast::Expr::Index { base, index } => {
+                    let (tbase, base_ty) = synth_expr(ctx, base)?;
+                    let (tindex, index_ty) = synth_expr(ctx, index)?;
 
-            // Check index is int
-            if !is_subtype(ctx, &index_ty, &IType::Int) {
-                return Err(TypeError::TypeMismatch {
-                    expected: IType::Int,
-                    found: index_ty,
-                    span: index.1,
-                });
-            }
+                    // Check index is int
+                    if !is_subtype(ctx, &index_ty, &IType::Int) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: IType::Int,
+                            found: index_ty,
+                            span: index.1,
+                        });
+                    }
 
-            // Check array type and extract element type
-            let elem_ty = match &array_ty {
-                IType::Array { element_type, .. } => element_type.as_ref(),
-                _ => return Err(TypeError::NotAnArray {
-                    found: array_ty,
-                    span: array.1,
+                    // Check array type and extract element type
+                    let elem_ty = match &base_ty {
+                        IType::Array { element_type, .. } => element_type.as_ref(),
+                        _ => return Err(TypeError::NotAnArray {
+                            found: base_ty,
+                            span: base.1,
+                        }),
+                    };
+
+                    // Check value type matches element type
+                    if !is_subtype(ctx, &rhs_ty, elem_ty) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: elem_ty.clone(),
+                            found: rhs_ty,
+                            span: rhs.1,
+                        });
+                    }
+
+                    // Create typed LHS (the index expression)
+                    let tlhs_expr = TExpr::Index {
+                        base: Box::new(tbase),
+                        index: Box::new(tindex),
+                        ty: elem_ty.clone(),
+                    };
+
+                    let tstmt = TStmt::Assignment {
+                        lhs: (tlhs_expr, lhs.1),
+                        rhs: trhs,
+                    };
+
+                    // Context unchanged for array assignment
+                    Ok(((tstmt, span), ctx.clone()))
+                }
+
+                _ => Err(TypeError::InvalidAssignment {
+                    variable: format!("{:?}", lhs.0),
+                    reason: "Invalid assignment target".to_string(),
+                    span: lhs.1,
                 }),
-            };
-
-            // Check value type matches element type
-            if !is_subtype(ctx, &value_ty, elem_ty) {
-                return Err(TypeError::TypeMismatch {
-                    expected: elem_ty.clone(),
-                    found: value_ty,
-                    span: value.1,
-                });
             }
+        }
 
-            let tstmt = TStmt::ArrayAssignment {
-                array: Box::new(tarray),
-                index: Box::new(tindex),
-                value: Box::new(tvalue),
+        // RETURN: Return statement
+        Stmt::Return { expr } => {
+            let (texpr, _) = synth_expr(ctx, expr)?;
+
+            let tstmt = TStmt::Return {
+                expr: Box::new(texpr),
             };
 
-            // Context unchanged for array assignment
-            Ok((Spanned(tstmt, span), ctx.clone()))
+            Ok(((tstmt, span), ctx.clone()))
         }
 
         // FOR-LOOP: For loop with range
@@ -221,24 +247,25 @@ pub fn check_stmt<'src>(
 
             let tstmt = TStmt::For {
                 var: var.to_string(),
+                var_ty: IType::Int,
                 start: Box::new(tstart),
                 end: Box::new(tend),
                 body: tbody,
             };
 
             // Context unchanged after loop (loop variable goes out of scope)
-            Ok((Spanned(tstmt, span), ctx.clone()))
+            Ok(((tstmt, span), ctx.clone()))
         }
 
         // EXPR-STMT: Expression statement
         // ; ;   e  T
         // ; ;   e;  (e', , )
-        Stmt::Expression(expr) => {
-            let (texpr, _) = synth_expr(ctx, expr)?;
+        Stmt::Expr(expr) => {
+            let (texpr, _) = synth_expr(ctx, &expr)?;
 
-            let tstmt = TStmt::Expression(Box::new(texpr));
+            let tstmt = TStmt::Expr(texpr);
 
-            Ok((Spanned(tstmt, span), ctx.clone()))
+            Ok(((tstmt, span), ctx.clone()))
         }
     }
 }
@@ -267,28 +294,32 @@ pub fn check_stmts<'src>(
 /// Returns typed function
 pub fn check_function<'src>(
     global_ctx: &TypingContext<'src>,
-    func: &Function<'src>,
+    func: &Spanned<Function<'src>>,
 ) -> Result<TFunction<'src>, TypeError<'src>> {
+    let (func_inner, func_span) = func;
+
     // Convert parameter types to semantic types
     let mut param_types = Vec::new();
-    for param in &func.params {
+    for spanned_param in &func_inner.parameters {
+        let param = &spanned_param.0;
         param_types.push(ast_type_to_itype(&param.ty)?);
     }
 
     // Convert return type
-    let return_type = ast_type_to_itype(&func.return_type)?;
+    let return_type = ast_type_to_itype(&func_inner.return_type)?;
 
     // Create context with parameters
     let mut func_ctx = global_ctx.clone();
-    for (param, ty) in func.params.iter().zip(param_types.iter()) {
+    for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
+        let param = &spanned_param.0;
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
     }
 
     // Check body statements
-    let (tbody, final_ctx) = check_stmts(&func_ctx, &func.body.stmts)?;
+    let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
 
     // Check return expression (if present)
-    let treturn = if let Some(ret_expr) = &func.body.return_expr {
+    let treturn = if let Some(ret_expr) = &func_inner.body.return_expr {
         let (texpr, ret_ty) = synth_expr(&final_ctx, ret_expr)?;
 
         // Check return type matches signature
@@ -306,29 +337,29 @@ pub fn check_function<'src>(
         if !matches!(return_type, IType::Unit) {
             return Err(TypeError::MissingReturn {
                 expected: return_type,
-                span: func.body.span,
+                span: *func_span,
             });
         }
         None
     };
 
     // Build typed function
-    let tparams: Vec<TParameter> = func.params.iter().zip(param_types.iter())
-        .map(|(param, ty)| TParameter {
-            name: param.name.to_string(),
+    let tparams: Vec<TParameter> = func_inner.parameters.iter().zip(param_types.iter())
+        .map(|(spanned_param, ty)| TParameter {
+            name: spanned_param.0.name.to_string(),
             ty: ty.clone(),
         })
         .collect();
 
     let tfunc = TFunction {
-        name: func.name.to_string(),
-        params: tparams,
+        name: func_inner.name.to_string(),
+        parameters: tparams,
         return_type,
         body: TFunctionBody {
-            stmts: tbody,
+            statements: tbody,
             return_expr: treturn.map(Box::new),
-            span: func.body.span,
         },
+        span: *func_span,
     };
 
     Ok(tfunc)
@@ -341,19 +372,26 @@ pub fn check_program<'src>(
     // Collect function signatures
     let mut signatures = HashMap::new();
 
-    for func in &program.functions {
-        // Convert parameter types
-        let mut param_types = Vec::new();
-        for param in &func.params {
-            param_types.push(ast_type_to_itype(&param.ty)?);
+    for spanned_func in &program.functions {
+        let (func, func_span) = spanned_func;
+
+        // Convert parameter types (with names)
+        let mut parameters = Vec::new();
+        for spanned_param in &func.parameters {
+            let param = &spanned_param.0;
+            let ty = ast_type_to_itype(&param.ty)?;
+            parameters.push((param.name.to_string(), ty));
         }
 
         // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
 
         let sig = FunctionSignature {
-            params: param_types,
+            name: func.name.to_string(),
+            parameters,
             return_type,
+            precondition: None,  // TODO: Parse preconditions from AST
+            span: *func_span,
         };
 
         signatures.insert(func.name.to_string(), sig);
@@ -365,8 +403,8 @@ pub fn check_program<'src>(
     // Check each function
     let mut tfunctions = Vec::new();
 
-    for func in &program.functions {
-        let tfunc = check_function(&global_ctx, func)?;
+    for spanned_func in &program.functions {
+        let tfunc = check_function(&global_ctx, spanned_func)?;
         tfunctions.push(tfunc);
     }
 
@@ -404,28 +442,29 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
             Ok(IType::RefMut(Arc::new(inner_ty)))
         }
 
-        AstType::RefinedInt { var, base, predicate } => {
-            let base_ty = ast_type_to_itype(base)?;
-
+        AstType::RefinedInt { var, predicate } => {
+            // RefinedInt has base type of Int implicitly
             let prop = crate::common::types::IProposition {
                 var: var.to_string(),
-                predicate: Arc::new(predicate.clone()),
+                predicate: Arc::new(*predicate.clone()),
             };
 
             Ok(IType::RefinedInt {
-                base: Arc::new(base_ty),
+                base: Arc::new(IType::Int),
                 prop,
             })
         }
 
-        AstType::SingletonInt(n) => {
-            Ok(IType::SingletonInt(IValue::Int(*n)))
+        AstType::SingletonInt(expr) => {
+            // Evaluate the expression to get the singleton value
+            let value = eval_array_size(expr)?;
+            Ok(IType::SingletonInt(value))
         }
     }
 }
 
 /// Evaluate array size expression to IValue
-fn eval_array_size(expr: &Spanned<crate::common::ast::Expr>) -> Result<IValue, TypeError> {
+fn eval_array_size<'src>(expr: &Spanned<crate::common::ast::Expr<'src>>) -> Result<IValue, TypeError<'src>> {
     use crate::common::ast::{Expr, Literal};
 
     match &expr.0 {

@@ -25,7 +25,7 @@ pub fn synth_expr<'src>(
                 value: Literal::Int(*n),
                 ty: ty.clone(),
             };
-            Ok((Spanned(texpr, span), ty))
+            Ok(((texpr, span), ty))
         }
 
         // BOOL-LIT: Boolean literals have singleton types
@@ -36,19 +36,19 @@ pub fn synth_expr<'src>(
                 value: Literal::Bool(*b),
                 ty: ty.clone(),
             };
-            Ok((Spanned(texpr, span), ty))
+            Ok(((texpr, span), ty))
         }
 
         // VAR: Look up variable in context
         //  x  T
         Expr::Variable(name) => {
-            match ctx.lookup_variable(name) {
+            match ctx.lookup_var(name) {
                 Some(VarBinding::Immutable(ty)) => {
                     let texpr = TExpr::Variable {
                         name: name.to_string(),
                         ty: ty.clone(),
                     };
-                    Ok((Spanned(texpr, span), ty.clone()))
+                    Ok(((texpr, span), ty.clone()))
                 }
                 Some(VarBinding::Mutable(binding)) => {
                     // For mutable variables, use the current type
@@ -57,7 +57,7 @@ pub fn synth_expr<'src>(
                         name: name.to_string(),
                         ty: ty.clone(),
                     };
-                    Ok((Spanned(texpr, span), ty))
+                    Ok(((texpr, span), ty))
                 }
                 None => Err(TypeError::UndefinedVariable {
                     name: name.to_string(),
@@ -97,7 +97,7 @@ pub fn synth_expr<'src>(
                 rhs: Box::new(trhs),
                 ty: ty.clone(),
             };
-            Ok((Spanned(texpr, span), ty))
+            Ok(((texpr, span), ty))
         }
 
         // BINOP-CMP: Comparison operations
@@ -130,7 +130,7 @@ pub fn synth_expr<'src>(
                 rhs: Box::new(trhs),
                 ty: ty.clone(),
             };
-            Ok((Spanned(texpr, span), ty))
+            Ok(((texpr, span), ty))
         }
 
         // BINOP-BOOL: Boolean operations
@@ -163,7 +163,7 @@ pub fn synth_expr<'src>(
                 rhs: Box::new(trhs),
                 ty: ty.clone(),
             };
-            Ok((Spanned(texpr, span), ty))
+            Ok(((texpr, span), ty))
         }
 
         // UNARY-NOT: Logical negation
@@ -186,30 +186,7 @@ pub fn synth_expr<'src>(
                 operand: Box::new(tcond),
                 ty: result_ty.clone(),
             };
-            Ok((Spanned(texpr, span), result_ty))
-        }
-
-        // UNARY-NEG: Arithmetic negation
-        // e  T,  T <: int
-        //  -e  int
-        Expr::UnaryOp { op: UnaryOp::Neg, cond } => {
-            let (tcond, ty) = synth_expr(ctx, cond)?;
-
-            if !is_subtype(ctx, &ty, &IType::Int) {
-                return Err(TypeError::TypeMismatch {
-                    expected: IType::Int,
-                    found: ty,
-                    span: cond.1,
-                });
-            }
-
-            let result_ty = IType::Int;
-            let texpr = TExpr::UnaryOp {
-                op: UnaryOp::Neg,
-                operand: Box::new(tcond),
-                ty: result_ty.clone(),
-            };
-            Ok((Spanned(texpr, span), result_ty))
+            Ok(((texpr, span), result_ty))
         }
 
         // ARRAY-INDEX: Array indexing
@@ -240,7 +217,7 @@ pub fn synth_expr<'src>(
                         index: Box::new(tindex),
                         ty: elem_ty.clone(),
                     };
-                    Ok((Spanned(texpr, span), elem_ty))
+                    Ok(((texpr, span), elem_ty))
                 }
                 _ => Err(TypeError::NotAnArray {
                     found: base_ty,
@@ -263,9 +240,9 @@ pub fn synth_expr<'src>(
                 })?;
 
             // Check argument count
-            if args.0.len() != sig.params.len() {
+            if args.0.len() != sig.parameters.len() {
                 return Err(TypeError::WrongNumberOfArguments {
-                    expected: sig.params.len(),
+                    expected: sig.parameters.len(),
                     found: args.0.len(),
                     span: args.1,
                 });
@@ -273,7 +250,7 @@ pub fn synth_expr<'src>(
 
             // Synth and check each argument
             let mut typed_args = Vec::new();
-            for (arg, param_ty) in args.0.iter().zip(sig.params.iter()) {
+            for (arg, (_param_name, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
                 if !is_subtype(ctx, &arg_ty, param_ty) {
@@ -293,7 +270,7 @@ pub fn synth_expr<'src>(
                 args: typed_args,
                 ty: ret_ty.clone(),
             };
-            Ok((Spanned(texpr, span), ret_ty))
+            Ok(((texpr, span), ret_ty))
         }
 
         // ARRAY-INIT: Array initialization [e; n]
@@ -302,8 +279,11 @@ pub fn synth_expr<'src>(
         Expr::ArrayInit { value, length } => {
             let (tvalue, elem_ty) = synth_expr(ctx, value)?;
 
-            // Evaluate length to IValue
+            // Evaluate length to IValue (must be compile-time constant)
             let size = eval_to_ivalue(length)?;
+
+            // Synthesize the length expression for the typed AST
+            let (tlength, _) = synth_expr(ctx, length)?;
 
             let array_ty = IType::Array {
                 element_type: Arc::new(elem_ty),
@@ -312,10 +292,10 @@ pub fn synth_expr<'src>(
 
             let texpr = TExpr::ArrayInit {
                 value: Box::new(tvalue),
-                length: Box::new(*length.clone()),
+                length: Box::new(tlength),
                 ty: array_ty.clone(),
             };
-            Ok((Spanned(texpr, span), array_ty))
+            Ok(((texpr, span), array_ty))
         }
 
         // IF-EXPR: If expression with flow-sensitive typing
@@ -372,7 +352,7 @@ pub fn synth_expr<'src>(
                 ty: result_ty.clone(),
             };
 
-            Ok((Spanned(texpr, span), result_ty))
+            Ok(((texpr, span), result_ty))
         }
 
         _ => Err(TypeError::UnsupportedFeature {
@@ -383,7 +363,7 @@ pub fn synth_expr<'src>(
 }
 
 /// Evaluate an expression to a compile-time value
-fn eval_to_ivalue(expr: &Spanned<Expr>) -> Result<IValue, TypeError> {
+fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<'src>> {
     match &expr.0 {
         Expr::Literal(Literal::Int(n)) => Ok(IValue::Int(*n)),
         Expr::Variable(name) => Ok(IValue::Symbolic(name.to_string())),

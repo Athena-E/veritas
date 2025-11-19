@@ -43,7 +43,7 @@ fn test_context_update_mutable() {
 
     // Update to a refined type
     let refined = make_refined_int("x", make_comparison("x", BinOp::Gt, 0));
-    let ctx = ctx.update_mutable("x".to_string(), refined.clone());
+    let ctx = ctx.with_mutable_update("x", refined.clone()).unwrap();
 
     let binding = ctx.lookup_mutable("x").unwrap();
     assert_eq!(format!("{}", binding.current_type), "{x: int | x > 0}");
@@ -56,14 +56,14 @@ fn test_context_lookup_variable() {
     let ctx = ctx.with_immutable("x".to_string(), IType::Int);
     let ctx = ctx.with_mutable("y".to_string(), IType::Bool, IType::Bool);
 
-    match ctx.lookup_variable("x") {
+    match ctx.lookup_var("x") {
         Some(VarBinding::Immutable(ty)) => {
             assert_eq!(format!("{}", ty), "int");
         }
         _ => panic!("Expected immutable variable binding"),
     }
 
-    match ctx.lookup_variable("y") {
+    match ctx.lookup_var("y") {
         Some(VarBinding::Mutable(binding)) => {
             assert_eq!(format!("{}", binding.current_type), "bool");
         }
@@ -100,17 +100,27 @@ fn test_context_cloning_is_independent() {
 
 #[test]
 fn test_context_with_function() {
-    let ctx = TypingContext::new();
+    use chumsky::prelude::SimpleSpan;
+    use im::HashMap;
+
     let sig = FunctionSignature {
-        params: vec![IType::Int, IType::Bool],
+        name: "foo".to_string(),
+        parameters: vec![
+            ("x".to_string(), IType::Int),
+            ("y".to_string(), IType::Bool),
+        ],
         return_type: IType::Unit,
+        precondition: None,
+        span: SimpleSpan::new(0, 0),
     };
 
-    let ctx = ctx.with_function("foo".to_string(), sig);
+    let mut functions = HashMap::new();
+    functions.insert("foo".to_string(), sig);
+    let ctx = TypingContext::with_functions(functions);
 
     let retrieved = ctx.lookup_function("foo");
     assert!(retrieved.is_some());
     let sig = retrieved.unwrap();
-    assert_eq!(sig.params.len(), 2);
-    assert_eq!(format!("{}", sig.params[0]), "int");
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(format!("{}", sig.parameters[0].1), "int");
 }

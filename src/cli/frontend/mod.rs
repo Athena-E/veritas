@@ -3,5 +3,5 @@ pub mod display;
 pub mod pipeline;
 
 pub use cli::{Config, read_source_file};
-pub use display::display_program;
+pub use display::{display_program, display_typed_program};
 pub use pipeline::run_pipeline;

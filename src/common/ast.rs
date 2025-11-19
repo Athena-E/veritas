@@ -48,7 +48,7 @@ impl fmt::Display for Token<'_> {
 }
 
 // Binary operators
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -64,7 +64,7 @@ pub enum BinOp {
 }
 
 // Unary operators
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UnaryOp {
     Not,
 }

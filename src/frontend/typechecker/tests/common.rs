@@ -1,16 +1,16 @@
 // Common test utilities for type checker tests
 
 use crate::common::ast::{BinOp, Expr, Literal};
-use crate::common::span::{Span, Spanned};
-use crate::common::types::{IProposition, IType, IValue};
+use crate::common::types::{IProposition, IType};
 use crate::frontend::typechecker::{TypingContext, check_provable};
+use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
 
 /// Create a simple integer proposition like {x: int | x > 5}
 pub fn make_int_prop<'src>(var: &str, predicate_expr: Expr<'src>) -> IProposition<'src> {
     IProposition {
         var: var.to_string(),
-        predicate: Arc::new(Spanned(predicate_expr, Span::default())),
+        predicate: Arc::new((predicate_expr, SimpleSpan::new(0, 0))),
     }
 }
 
@@ -27,8 +27,8 @@ pub fn make_refined_int<'src>(var: &str, predicate_expr: Expr<'src>) -> IType<'s
 pub fn make_comparison<'src>(var: &'src str, op: BinOp, value: i64) -> Expr<'src> {
     Expr::BinOp {
         op,
-        lhs: Box::new(Spanned(Expr::Variable(var), Span::default())),
-        rhs: Box::new(Spanned(Expr::Literal(Literal::Int(value)), Span::default())),
+        lhs: Box::new((Expr::Variable(var), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(value)), SimpleSpan::new(0, 0))),
     }
 }
 
@@ -36,8 +36,8 @@ pub fn make_comparison<'src>(var: &'src str, op: BinOp, value: i64) -> Expr<'src
 pub fn make_var_equality<'src>(var1: &'src str, var2: &'src str) -> Expr<'src> {
     Expr::BinOp {
         op: BinOp::Eq,
-        lhs: Box::new(Spanned(Expr::Variable(var1), Span::default())),
-        rhs: Box::new(Spanned(Expr::Variable(var2), Span::default())),
+        lhs: Box::new((Expr::Variable(var1), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Variable(var2), SimpleSpan::new(0, 0))),
     }
 }
 
@@ -45,8 +45,8 @@ pub fn make_var_equality<'src>(var1: &'src str, var2: &'src str) -> Expr<'src> {
 pub fn make_add_expr<'src>(var: &'src str, offset: i64) -> Expr<'src> {
     Expr::BinOp {
         op: BinOp::Add,
-        lhs: Box::new(Spanned(Expr::Variable(var), Span::default())),
-        rhs: Box::new(Spanned(Expr::Literal(Literal::Int(offset)), Span::default())),
+        lhs: Box::new((Expr::Variable(var), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(offset)), SimpleSpan::new(0, 0))),
     }
 }
 

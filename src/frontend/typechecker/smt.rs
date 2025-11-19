@@ -1,52 +1,25 @@
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
-use crate::common::types::{IProposition, IValue};
+use crate::common::types::IProposition;
 use crate::frontend::typechecker::context::TypingContext;
-use std::collections::HashMap;
-use z3::ast::{Ast, Bool, Int};
-use z3::{Config, Context, SatResult, Solver};
+use z3::ast::{Bool, Int};
+use z3::{SatResult, Solver};
 
-pub struct SmtOracle<'ctx> {
-    context: &'ctx Context,
-    solver: Solver<'ctx>,
-    var_cache: HashMap<String, Int<'ctx>>,
-}
+pub struct SmtOracle;
 
-impl<'ctx> SmtOracle<'ctx> {
-    pub fn new(context: &'ctx Context) -> Self {
-        let solver = Solver::new(context);
-        Self {
-            context,
-            solver,
-            var_cache: HashMap::new(),
-        }
+impl SmtOracle {
+    pub fn new() -> Self {
+        Self
     }
 
-    fn translate_ivalue(&mut self, value: &IValue) -> Int<'ctx> {
-        match value {
-            IValue::Int(n) => Int::from_i64(self.context, *n),
-            IValue::Symbolic(name) => {
-                self.var_cache
-                    .entry(name.clone())
-                    .or_insert_with(|| Int::new_const(self.context, name.as_ref()))
-                    .clone()
-            }
-            IValue::Bool(_) => panic!("Boolean IValue in integer context (type error)"),
-        }
-    }
-
-    fn translate_expr(&mut self, expr: &Expr) -> Int<'ctx> {
+    fn translate_expr(expr: &Expr) -> Int {
         match expr {
-            Expr::Literal(Literal::Int(n)) => Int::from_i64(self.context, *n),
+            Expr::Literal(Literal::Int(n)) => Int::from_i64(*n),
 
-            Expr::Variable(name) => self
-                .var_cache
-                .entry(name.to_string())
-                .or_insert_with(|| Int::new_const(self.context, name.as_ref()))
-                .clone(),
+            Expr::Variable(name) => Int::new_const(name.to_string()),
 
             Expr::BinOp { op, lhs, rhs } => {
-                let left = self.translate_expr(&lhs.0);
-                let right = self.translate_expr(&rhs.0);
+                let left = Self::translate_expr(&lhs.0);
+                let right = Self::translate_expr(&rhs.0);
 
                 match op {
                     BinOp::Add => left + right,
@@ -69,51 +42,51 @@ impl<'ctx> SmtOracle<'ctx> {
         }
     }
 
-    fn translate_bool_expr(&mut self, expr: &Expr) -> Bool<'ctx> {
+    fn translate_bool_expr(expr: &Expr) -> Bool {
         match expr {
-            Expr::Literal(Literal::Bool(b)) => Bool::from_bool(self.context, *b),
+            Expr::Literal(Literal::Bool(b)) => Bool::from_bool(*b),
 
             Expr::BinOp { op, lhs, rhs } => match op {
                 BinOp::Eq => {
-                    let left = self.translate_expr(&lhs.0);
-                    let right = self.translate_expr(&rhs.0);
+                    let left = Self::translate_expr(&lhs.0);
+                    let right = Self::translate_expr(&rhs.0);
                     left._eq(&right)
                 }
                 BinOp::NotEq => {
-                    let left = self.translate_expr(&lhs.0);
-                    let right = self.translate_expr(&rhs.0);
-                    !left._eq(&right)
+                    let left = Self::translate_expr(&lhs.0);
+                    let right = Self::translate_expr(&rhs.0);
+                    left._eq(&right).not()
                 }
                 BinOp::Lt => {
-                    let left = self.translate_expr(&lhs.0);
-                    let right = self.translate_expr(&rhs.0);
+                    let left = Self::translate_expr(&lhs.0);
+                    let right = Self::translate_expr(&rhs.0);
                     left.lt(&right)
                 }
                 BinOp::Lte => {
-                    let left = self.translate_expr(&lhs.0);
-                    let right = self.translate_expr(&rhs.0);
+                    let left = Self::translate_expr(&lhs.0);
+                    let right = Self::translate_expr(&rhs.0);
                     left.le(&right)
                 }
                 BinOp::Gt => {
-                    let left = self.translate_expr(&lhs.0);
-                    let right = self.translate_expr(&rhs.0);
+                    let left = Self::translate_expr(&lhs.0);
+                    let right = Self::translate_expr(&rhs.0);
                     left.gt(&right)
                 }
                 BinOp::Gte => {
-                    let left = self.translate_expr(&lhs.0);
-                    let right = self.translate_expr(&rhs.0);
+                    let left = Self::translate_expr(&lhs.0);
+                    let right = Self::translate_expr(&rhs.0);
                     left.ge(&right)
                 }
 
                 BinOp::And => {
-                    let left = self.translate_bool_expr(&lhs.0);
-                    let right = self.translate_bool_expr(&rhs.0);
-                    Bool::and(self.context, &[&left, &right])
+                    let left = Self::translate_bool_expr(&lhs.0);
+                    let right = Self::translate_bool_expr(&rhs.0);
+                    Bool::and(&[&left, &right])
                 }
                 BinOp::Or => {
-                    let left = self.translate_bool_expr(&lhs.0);
-                    let right = self.translate_bool_expr(&rhs.0);
-                    Bool::or(self.context, &[&left, &right])
+                    let left = Self::translate_bool_expr(&lhs.0);
+                    let right = Self::translate_bool_expr(&rhs.0);
+                    Bool::or(&[&left, &right])
                 }
 
                 BinOp::Add | BinOp::Sub | BinOp::Mul => {
@@ -125,7 +98,7 @@ impl<'ctx> SmtOracle<'ctx> {
                 op: UnaryOp::Not,
                 cond,
             } => {
-                let operand = self.translate_bool_expr(&cond.0);
+                let operand = Self::translate_bool_expr(&cond.0);
                 operand.not()
             }
 
@@ -139,41 +112,40 @@ impl<'ctx> SmtOracle<'ctx> {
         }
     }
 
-    fn translate_proposition(&mut self, prop: &IProposition) -> Bool<'ctx> {
+    fn translate_proposition(prop: &IProposition) -> Bool {
         let predicate_expr = &prop.predicate.0;
-        self.translate_bool_expr(predicate_expr)
+        Self::translate_bool_expr(predicate_expr)
     }
 
-    pub fn is_provable(&mut self, typing_ctx: &TypingContext, goal: &IProposition) -> bool {
-        self.solver.reset();
-        self.var_cache.clear();
+    pub fn is_provable(&self, typing_ctx: &TypingContext, goal: &IProposition) -> bool {
+        let solver = Solver::new();
 
+        // Add all context propositions as assumptions
         for prop in typing_ctx.get_propositions() {
-            let constraint = self.translate_proposition(prop);
-            self.solver.assert(&constraint);
+            let constraint = Self::translate_proposition(prop);
+            solver.assert(&constraint);
         }
 
-        let goal_formula = self.translate_proposition(goal);
+        // Negate the goal - if unsatisfiable, the goal is provable
+        let goal_formula = Self::translate_proposition(goal);
         let negated_goal = goal_formula.not();
-        self.solver.assert(&negated_goal);
+        solver.assert(&negated_goal);
 
-        match self.solver.check() {
-            SatResult::Unsat => {
-                true
-            }
-            SatResult::Sat => {
-                false
-            }
-            SatResult::Unknown => {
-                false
-            }
+        match solver.check() {
+            SatResult::Unsat => true,  // Goal is provable
+            SatResult::Sat => false,   // Counterexample exists
+            SatResult::Unknown => false, // Solver couldn't determine
         }
     }
 }
 
+impl Default for SmtOracle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn check_provable(typing_ctx: &TypingContext, goal: &IProposition) -> bool {
-    let cfg = Config::new();
-    let ctx = Context::new(&cfg);
-    let mut oracle = SmtOracle::new(&ctx);
+    let oracle = SmtOracle::new();
     oracle.is_provable(typing_ctx, goal)
 }

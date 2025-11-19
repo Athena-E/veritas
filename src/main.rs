@@ -2,7 +2,7 @@ mod cli;
 mod common;
 mod frontend;
 
-use cli::frontend::{Config, read_source_file, display_program, run_pipeline};
+use cli::frontend::{Config, read_source_file, display_typed_program, run_pipeline};
 
 fn main() {
     // Parse configuration
@@ -36,18 +36,18 @@ fn main() {
     };
 
     // Display results
-    println!("\n[3] Program structure:");
+    println!("\n[4] Program structure:");
     println!("{}", "=".repeat(60));
 
-    display_program(&program);
+    display_typed_program(&program);
 
     // Show detailed AST if requested
     if config.show_ast {
-        println!("\n[4] Detailed AST:");
+        println!("\n[5] Detailed Typed AST:");
         println!("{}", "=".repeat(60));
         println!("{:#?}", program);
     }
 
     println!("\n{}", "=".repeat(60));
-    println!("Successfully parsed {} function(s)", program.functions.len());
+    println!("Successfully type-checked {} function(s)", program.functions.len());
 }

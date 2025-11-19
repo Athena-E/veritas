@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Check if `sub` is a subtype of `sup` in the given typing context
 ///
 /// Returns true if every value of type `sub` is also a valid value of type `sup`
-pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
+pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &IType<'src>) -> bool {
     match (sub, sup) {
         // Reflexivity: T <: T
         (IType::Unit, IType::Unit) => true,
@@ -61,13 +61,14 @@ pub fn is_subtype(ctx: &TypingContext, sub: &IType, sup: &IType) -> bool {
             check_provable(&ctx_with_p, &renamed_q)
         }
 
-        // Array subtyping: [T1; n] <: [T2; m] if T1 = T2 and n = m (invariant)
+        // Array subtyping: [T1; n] <: [T2; m] if T1 <: T2 and n = m
+        // Note: We allow covariance for immutable arrays since elements are read-only
         (
             IType::Array { element_type: elem1, size: size1 },
             IType::Array { element_type: elem2, size: size2 },
         ) => {
-            // Arrays are invariant in element type
-            size1 == size2 && types_equal(elem1, elem2)
+            // Sizes must match, element type is covariant for immutable arrays
+            size1 == size2 && is_subtype(ctx, elem1, elem2)
         }
 
         // Reference subtyping: &T1 <: &T2 if T1 = T2 (invariant for shared refs)
@@ -123,12 +124,12 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
 /// Substitute a value for the bound variable in a proposition
 ///
 /// Example: P = "x > 0", n = 5 => "5 > 0"
-fn substitute_value_in_prop(prop: &IProposition, value: &IValue) -> IProposition {
+fn substitute_value_in_prop<'src>(prop: &IProposition<'src>, value: &'src IValue) -> IProposition<'src> {
     let substituted_expr = substitute_value_in_expr(&prop.predicate.0, &prop.var, value);
 
     IProposition {
         var: "_".to_string(), // Variable is no longer relevant after substitution
-        predicate: Arc::new(Spanned(substituted_expr, prop.predicate.1)),
+        predicate: Arc::new((substituted_expr, prop.predicate.1)),
     }
 }
 
@@ -136,7 +137,7 @@ fn substitute_value_in_prop(prop: &IProposition, value: &IValue) -> IProposition
 fn substitute_value_in_expr<'src>(
     expr: &Expr<'src>,
     var: &str,
-    value: &IValue,
+    value: &'src IValue,
 ) -> Expr<'src> {
     match expr {
         Expr::Variable(name) if *name == var => {
@@ -152,11 +153,11 @@ fn substitute_value_in_expr<'src>(
 
         Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
-            lhs: Box::new(Spanned(
+            lhs: Box::new((
                 substitute_value_in_expr(&lhs.0, var, value),
                 lhs.1,
             )),
-            rhs: Box::new(Spanned(
+            rhs: Box::new((
                 substitute_value_in_expr(&rhs.0, var, value),
                 rhs.1,
             )),
@@ -164,7 +165,7 @@ fn substitute_value_in_expr<'src>(
 
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
-            cond: Box::new(Spanned(
+            cond: Box::new((
                 substitute_value_in_expr(&cond.0, var, value),
                 cond.1,
             )),
@@ -179,12 +180,12 @@ fn substitute_value_in_expr<'src>(
 /// Rename the bound variable in a proposition
 ///
 /// Example: {y: int | y > 0} with new_var = "x" => {x: int | x > 0}
-fn rename_prop_var(prop: &IProposition, new_var: &str) -> IProposition {
+fn rename_prop_var<'src>(prop: &IProposition<'src>, new_var: &'src str) -> IProposition<'src> {
     let renamed_expr = rename_var_in_expr(&prop.predicate.0, &prop.var, new_var);
 
     IProposition {
         var: new_var.to_string(),
-        predicate: Arc::new(Spanned(renamed_expr, prop.predicate.1)),
+        predicate: Arc::new((renamed_expr, prop.predicate.1)),
     }
 }
 
@@ -192,7 +193,7 @@ fn rename_prop_var(prop: &IProposition, new_var: &str) -> IProposition {
 fn rename_var_in_expr<'src>(
     expr: &Expr<'src>,
     old_var: &str,
-    new_var: &str,
+    new_var: &'src str,
 ) -> Expr<'src> {
     match expr {
         Expr::Variable(name) if *name == old_var => Expr::Variable(new_var),
@@ -201,11 +202,11 @@ fn rename_var_in_expr<'src>(
 
         Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
-            lhs: Box::new(Spanned(
+            lhs: Box::new((
                 rename_var_in_expr(&lhs.0, old_var, new_var),
                 lhs.1,
             )),
-            rhs: Box::new(Spanned(
+            rhs: Box::new((
                 rename_var_in_expr(&rhs.0, old_var, new_var),
                 rhs.1,
             )),
@@ -213,7 +214,7 @@ fn rename_var_in_expr<'src>(
 
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
-            cond: Box::new(Spanned(
+            cond: Box::new((
                 rename_var_in_expr(&cond.0, old_var, new_var),
                 cond.1,
             )),

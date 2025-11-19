@@ -1,10 +1,9 @@
 // Tests for SMT Oracle
 
 use crate::common::ast::{BinOp, Expr, Literal};
-use crate::common::span::{Span, Spanned};
 use crate::frontend::typechecker::TypingContext;
+use chumsky::prelude::SimpleSpan;
 use super::common::*;
-use std::sync::Arc;
 
 #[test]
 fn test_smt_simple_implication() {
@@ -35,13 +34,13 @@ fn test_smt_arithmetic_evaluation() {
     // Create goal: x + 5 == 15
     let lhs = Expr::BinOp {
         op: BinOp::Add,
-        lhs: Box::new(Spanned(Expr::Variable("x"), Span::default())),
-        rhs: Box::new(Spanned(Expr::Literal(Literal::Int(5)), Span::default())),
+        lhs: Box::new((Expr::Variable("x"), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(5)), SimpleSpan::new(0, 0))),
     };
     let goal_expr = Expr::BinOp {
         op: BinOp::Eq,
-        lhs: Box::new(Spanned(lhs, Span::default())),
-        rhs: Box::new(Spanned(Expr::Literal(Literal::Int(15)), Span::default())),
+        lhs: Box::new((lhs, SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(15)), SimpleSpan::new(0, 0))),
     };
     let goal = make_int_prop("_", goal_expr);
 
@@ -79,8 +78,8 @@ fn test_smt_boolean_and() {
     let rhs = make_comparison("x", BinOp::Lt, 10);
     let goal_expr = Expr::BinOp {
         op: BinOp::And,
-        lhs: Box::new(Spanned(lhs, Span::default())),
-        rhs: Box::new(Spanned(rhs, Span::default())),
+        lhs: Box::new((lhs, SimpleSpan::new(0, 0))),
+        rhs: Box::new((rhs, SimpleSpan::new(0, 0))),
     };
     let goal = make_int_prop("_", goal_expr);
 
@@ -98,8 +97,8 @@ fn test_smt_boolean_or() {
     let rhs = make_comparison("x", BinOp::Lt, 0);
     let goal_expr = Expr::BinOp {
         op: BinOp::Or,
-        lhs: Box::new(Spanned(lhs, Span::default())),
-        rhs: Box::new(Spanned(rhs, Span::default())),
+        lhs: Box::new((lhs, SimpleSpan::new(0, 0))),
+        rhs: Box::new((rhs, SimpleSpan::new(0, 0))),
     };
     let goal = make_int_prop("_", goal_expr);
 
@@ -113,8 +112,8 @@ fn test_smt_two_variable_inequality() {
 
     let x_gt_y = Expr::BinOp {
         op: BinOp::Gt,
-        lhs: Box::new(Spanned(Expr::Variable("x"), Span::default())),
-        rhs: Box::new(Spanned(Expr::Variable("y"), Span::default())),
+        lhs: Box::new((Expr::Variable("x"), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Variable("y"), SimpleSpan::new(0, 0))),
     };
     let ctx = ctx.with_proposition(make_int_prop("_", x_gt_y));
     let ctx = ctx.with_proposition(make_int_prop("y", make_comparison("y", BinOp::Gt, 5)));
@@ -130,8 +129,8 @@ fn test_smt_tautology() {
 
     let goal_expr = Expr::BinOp {
         op: BinOp::Eq,
-        lhs: Box::new(Spanned(Expr::Literal(Literal::Int(5)), Span::default())),
-        rhs: Box::new(Spanned(Expr::Literal(Literal::Int(5)), Span::default())),
+        lhs: Box::new((Expr::Literal(Literal::Int(5)), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(5)), SimpleSpan::new(0, 0))),
     };
     let goal = make_int_prop("_", goal_expr);
 

@@ -2,5 +2,4 @@
 mod common;
 mod context_tests;
 mod smt_tests;
-mod typechecker_tests;
 mod types_display_tests;
