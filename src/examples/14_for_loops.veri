@@ -7,7 +7,7 @@ fn simple_loop() {
 
 // For loop with variable range
 fn variable_range(start: int, end: int) {
-    let sum: int = 0;
+    let mut sum: int = 0;
     for i in start..end {
         sum = sum + i;
     }
@@ -33,7 +33,7 @@ fn complex_loop() {
 
 // For loop with array operations
 fn array_loop() {
-    let mut arr: [int; 10] = init_array();
+    let mut arr: [int; 10] = [0; 10];
     for i in 0..10 {
         arr[i] = i * i;
     }

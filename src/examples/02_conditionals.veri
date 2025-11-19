@@ -1,9 +1,22 @@
-// Function with if expressions
+// Function with conditional logic using mutable variables
 fn check_value() {
     let x: int = 42;
-    let result: int = if x > 40 {
-        let temp: int = x + 10;
+    let mut result: int = 0;
+    if x > 40 {
+        result = x + 10;
     } else {
-        let temp: int = x - 10;
+        result = x - 10;
+    };
+}
+
+// Function with nested conditionals
+fn nested_conditionals() {
+    let a: int = 10;
+    let b: int = 20;
+    let mut max: int = 0;
+    if a > b {
+        max = a;
+    } else {
+        max = b;
     };
 }

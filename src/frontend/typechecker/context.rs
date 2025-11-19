@@ -25,7 +25,7 @@ pub enum VarBinding<'src> {
 // Typing context
 #[derive(Clone, Debug)]
 pub struct TypingContext<'src> {
-    // Refinement propositions 
+    // Refinement propositions
     phi: Vector<IProposition<'src>>,
 
     // Immutable variable bindings (name -> type)
@@ -39,6 +39,9 @@ pub struct TypingContext<'src> {
     // Global function signatures (name -> signature)
     // Populated in first pass over program, immutable during type checking
     sigma_f: HashMap<String, FunctionSignature<'src>>,
+
+    // Expected return type for current function (for checking return statements)
+    expected_return: Option<IType<'src>>,
 }
 
 impl<'src> TypingContext<'src> {
@@ -49,6 +52,7 @@ impl<'src> TypingContext<'src> {
             gamma: HashMap::new(),
             delta: HashMap::new(),
             sigma_f: HashMap::new(),
+            expected_return: None,
         }
     }
 
@@ -59,7 +63,20 @@ impl<'src> TypingContext<'src> {
             gamma: HashMap::new(),
             delta: HashMap::new(),
             sigma_f: functions,
+            expected_return: None,
         }
+    }
+
+    // Set expected return type for current function
+    pub fn with_expected_return(&self, ty: IType<'src>) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.expected_return = Some(ty);
+        new_ctx
+    }
+
+    // Get expected return type
+    pub fn get_expected_return(&self) -> Option<&IType<'src>> {
+        self.expected_return.as_ref()
     }
 
     // Propositions context

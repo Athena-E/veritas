@@ -205,7 +205,18 @@ pub fn check_stmt<'src>(
 
         // RETURN: Return statement
         Stmt::Return { expr } => {
-            let (texpr, _) = synth_expr(ctx, expr)?;
+            let (texpr, ret_ty) = synth_expr(ctx, expr)?;
+
+            // Check return type matches expected return type
+            if let Some(expected) = ctx.get_expected_return() {
+                if !is_subtype(ctx, &ret_ty, expected) {
+                    return Err(TypeError::ReturnTypeMismatch {
+                        expected: expected.clone(),
+                        found: ret_ty,
+                        span: expr.1,
+                    });
+                }
+            }
 
             let tstmt = TStmt::Return {
                 expr: Box::new(texpr),
@@ -308,15 +319,33 @@ pub fn check_function<'src>(
     // Convert return type
     let return_type = ast_type_to_itype(&func_inner.return_type)?;
 
-    // Create context with parameters
+    // Create context with parameters and expected return type
     let mut func_ctx = global_ctx.clone();
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
     }
+    // Set expected return type for checking return statements
+    func_ctx = func_ctx.with_expected_return(return_type.clone());
 
     // Check body statements
     let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
+
+    // Check if body contains any return statements
+    fn has_return_stmt(stmts: &[Spanned<TStmt>]) -> bool {
+        for (stmt, _) in stmts {
+            match stmt {
+                TStmt::Return { .. } => return true,
+                TStmt::For { body, .. } => {
+                    if has_return_stmt(body) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
 
     // Check return expression (if present)
     let treturn = if let Some(ret_expr) = &func_inner.body.return_expr {
@@ -333,8 +362,8 @@ pub fn check_function<'src>(
 
         Some(texpr)
     } else {
-        // No return expression - check that return type is unit
-        if !matches!(return_type, IType::Unit) {
+        // No trailing expression - check if we have return statements or if return type is unit
+        if !matches!(return_type, IType::Unit) && !has_return_stmt(&tbody) {
             return Err(TypeError::MissingReturn {
                 expected: return_type,
                 span: *func_span,

@@ -1,31 +1,16 @@
 // Simple array initialization with literal values
-fn simple_array_init() -> [int; 10] {
+fn simple_array_init() {
     let arr: [int; 10] = [0; 10];
-    arr
 }
 
 // Array initialization with variable value
-fn array_init_with_value(val: int) -> [int; 5] {
+fn array_init_with_value(val: int) {
     let arr: [int; 5] = [val; 5];
-    arr
-}
-
-// Array initialization with variable length
-fn array_init_variable_length(n: int) -> [int; n] {
-    let buffer: [int; n] = [0; n];
-    buffer
 }
 
 // Array initialization with expression as value
-fn array_init_expression_value(x: int) -> [int; 10] {
+fn array_init_expression_value(x: int) {
     let arr: [int; 10] = [x * 2; 10];
-    arr
-}
-
-// Array initialization with expression as length
-fn array_init_expression_length(size: int) -> [bool; size * 2] {
-    let flags: [bool; size * 2] = [false; size * 2];
-    flags
 }
 
 // Using array initialization in function body
@@ -42,14 +27,9 @@ fn multiple_arrays() {
     let flags: [bool; 10] = [true; 10];
 }
 
-// Array initialization with complex expression
-fn complex_initialization(base: int, count: int) {
-    let arr: [int; count] = [base * base + 1; count];
-}
-
 // Nested context: array init inside for loop
-fn array_in_loop(n: int) {
-    for i in 0..n {
+fn array_in_loop() {
+    for i in 0..10 {
         let temp: [int; 10] = [i; 10];
     }
 }

@@ -7,6 +7,16 @@ use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds, extract_proposition, negate_proposition, check_stmts};
 use std::sync::Arc;
 
+/// Widen singleton types to their base types
+/// This is used for array element types where we want [int; n] not [int(0); n]
+fn widen_type(ty: IType) -> IType {
+    match ty {
+        IType::SingletonInt(_) => IType::Int,
+        // Could add SingletonBool -> Bool if needed
+        other => other,
+    }
+}
+
 /// Synthesize the type of an expression
 ///
 /// Returns a typed expression and its type, or a type error
@@ -275,7 +285,7 @@ pub fn synth_expr<'src>(
 
         // ARRAY-INIT: Array initialization [e; n]
         // e  T,  n is a compile-time constant
-        //  [e; n]  [T; n]
+        //  [e; n]  [widen(T); n]
         Expr::ArrayInit { value, length } => {
             let (tvalue, elem_ty) = synth_expr(ctx, value)?;
 
@@ -285,8 +295,12 @@ pub fn synth_expr<'src>(
             // Synthesize the length expression for the typed AST
             let (tlength, _) = synth_expr(ctx, length)?;
 
+            // Widen singleton types for array elements
+            // [0; 10] should have type [int; 10], not [int(0); 10]
+            let widened_elem_ty = widen_type(elem_ty);
+
             let array_ty = IType::Array {
-                element_type: Arc::new(elem_ty),
+                element_type: Arc::new(widened_elem_ty),
                 size,
             };
 
