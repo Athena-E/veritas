@@ -1,0 +1,8 @@
+// Error: Arithmetic on boolean values
+// Expected error: E001 - Type mismatch
+
+fn main() {
+    let a: bool = true;
+    let b: bool = false;
+    let c: int = a + b;
+}

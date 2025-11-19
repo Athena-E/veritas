@@ -9,7 +9,7 @@ fn main() {
     // Parse configuration
     let config = Config::from_args();
 
-    println!("Parsing: {}", config.file_path);
+    println!("\n{}", config.file_path);
     println!("{}", "=".repeat(60));
 
     // Read the source file

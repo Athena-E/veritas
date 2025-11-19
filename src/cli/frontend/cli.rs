@@ -33,20 +33,7 @@ pub fn read_source_file(file_path: &str) -> Result<String, String> {
     fs::read_to_string(file_path).map_err(|e| {
         format!(
             "Error reading file '{}': {}\n\n\
-            Usage: cargo run [example_file.veri]\n\n\
-            Available examples:\n\
-            \x20 - src/examples/01_simple.veri\n\
-            \x20 - src/examples/02_conditionals.veri\n\
-            \x20 - src/examples/03_arrays.veri\n\
-            \x20 - src/examples/04_references.veri\n\
-            \x20 - src/examples/05_comparisons.veri\n\
-            \x20 - src/examples/06_logical.veri\n\
-            \x20 - src/examples/07_function_calls.veri\n\
-            \x20 - src/examples/08_mutable.veri\n\
-            \x20 - src/examples/09_complex_expressions.veri\n\
-            \x20 - src/examples/10_advanced_types.veri\n\
-            \x20 - src/examples/11_unary_not.veri\n\
-            \x20 - src/examples/12_function_parameters.veri",
+            Usage: cargo run [example_file.veri]",
             file_path, e
         )
     })
