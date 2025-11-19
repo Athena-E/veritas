@@ -2,7 +2,8 @@ mod cli;
 mod common;
 mod frontend;
 
-use cli::frontend::{Config, read_source_file, display_typed_program, run_pipeline};
+use cli::frontend::{Config, read_source_file, display_typed_program, run_pipeline, PipelineError};
+use frontend::typechecker::report_type_error;
 
 fn main() {
     // Parse configuration
@@ -30,7 +31,14 @@ fn main() {
     let program = match run_pipeline(&src, config.verbose) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("\n{}", e);
+            println!();
+            match e {
+                PipelineError::LexError(msg) => eprintln!("Lexer error: {}", msg),
+                PipelineError::ParseError(msg) => eprintln!("Parse error: {}", msg),
+                PipelineError::TypeError(type_error) => {
+                    report_type_error(&config.file_path, &src, &type_error);
+                }
+            }
             return;
         }
     };
