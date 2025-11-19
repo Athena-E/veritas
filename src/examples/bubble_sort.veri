@@ -1,0 +1,23 @@
+fn bubble_sort(arr: [int; 10]) -> [int; 10] {
+    let mut result: [int; 10] = arr;
+    
+    for i in 0..10 {
+        for j in 0..9 {
+            let a: int = result[j];
+            let b: int = result[j + 1];
+            if a > b {
+                result[j] = b;
+                result[j + 1] = a;
+            } else {
+                let dummy: int = 0;
+            }
+        }
+    }
+    
+    result
+}
+
+fn main() {
+    let arr: [int; 10] = [0; 10];
+    let sorted: [int; 10] = bubble_sort(arr);
+}
