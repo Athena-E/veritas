@@ -150,13 +150,22 @@ pub fn check_stmt<'src>(
                     }
 
                     // Check array type and extract element type
-                    let elem_ty = match &base_ty {
-                        IType::Array { element_type, .. } => element_type.as_ref(),
+                    let (elem_ty, array_size) = match &base_ty {
+                        IType::Array { element_type, size } => (element_type.as_ref(), size),
                         _ => return Err(TypeError::NotAnArray {
                             found: base_ty,
                             span: base.1,
                         }),
                     };
+
+                    // Check array bounds
+                    crate::frontend::typechecker::check_array_bounds(
+                        ctx,
+                        &index_ty,
+                        array_size,
+                        &base_ty,
+                        index.1,
+                    )?;
 
                     // Check value type matches element type
                     if !is_subtype(ctx, &rhs_ty, elem_ty) {
@@ -253,14 +262,83 @@ pub fn check_stmt<'src>(
         }
 
         // EXPR-STMT: Expression statement
+        // Special handling for if-expressions to support context joining
         Stmt::Expr(expr) => {
-            let (texpr, _) = synth_expr(ctx, &expr)?;
-
-            let tstmt = TStmt::Expr(texpr);
-
-            Ok(((tstmt, span), ctx.clone()))
+            match &expr.0 {
+                // If-expression as statement: handle context joining
+                crate::common::ast::Expr::If { cond, then_block, else_block } => {
+                    check_if_stmt(ctx, cond, then_block, else_block.as_ref(), span)
+                }
+                // Other expressions: context unchanged
+                _ => {
+                    let (texpr, _) = synth_expr(ctx, &expr)?;
+                    let tstmt = TStmt::Expr(texpr);
+                    Ok(((tstmt, span), ctx.clone()))
+                }
+            }
         }
     }
+}
+
+/// Check an if-statement with context joining
+/// Returns the joined context after both branches merge
+fn check_if_stmt<'src>(
+    ctx: &TypingContext<'src>,
+    cond: &Box<Spanned<crate::common::ast::Expr<'src>>>,
+    then_block: &[Spanned<crate::common::ast::Stmt<'src>>],
+    else_block: Option<&Vec<Spanned<crate::common::ast::Stmt<'src>>>>,
+    span: Span,
+) -> Result<(Spanned<TStmt<'src>>, TypingContext<'src>), TypeError<'src>> {
+    use crate::frontend::typechecker::{extract_proposition, negate_proposition};
+
+    // Synthesize condition
+    let (tcond, cond_ty) = synth_expr(ctx, cond)?;
+
+    if !is_subtype(ctx, &cond_ty, &IType::Bool) {
+        return Err(TypeError::TypeMismatch {
+            expected: IType::Bool,
+            found: cond_ty,
+            span: cond.1,
+        });
+    }
+
+    // Create then-branch context with condition proposition
+    let mut then_ctx = ctx.clone();
+    if let Some(prop) = extract_proposition(&cond.0) {
+        then_ctx = then_ctx.with_proposition(prop);
+    }
+
+    // Check then block and get final context
+    let (tthen_block, then_final_ctx) = check_stmts(&then_ctx, then_block)?;
+
+    // Check else block (if present) and get final context
+    let (telse_block, else_final_ctx) = if let Some(else_stmts) = else_block {
+        let mut else_ctx = ctx.clone();
+        if let Some(prop) = extract_proposition(&cond.0) {
+            let neg_prop = negate_proposition(&prop);
+            else_ctx = else_ctx.with_proposition(neg_prop);
+        }
+
+        let (typed_else, else_ctx_final) = check_stmts(&else_ctx, else_stmts)?;
+        (Some(typed_else), else_ctx_final)
+    } else {
+        // No else branch - context unchanged from original
+        (None, ctx.clone())
+    };
+
+    // Join the contexts from both branches
+    let joined_ctx = TypingContext::join_mutable_contexts(&then_final_ctx, &else_final_ctx);
+
+    let texpr = TExpr::If {
+        cond: Box::new(tcond),
+        then_block: tthen_block,
+        else_block: telse_block,
+        ty: IType::Unit,
+    };
+
+    let tstmt = TStmt::Expr((texpr, span));
+
+    Ok(((tstmt, span), joined_ctx))
 }
 
 /// Check a sequence of statements
