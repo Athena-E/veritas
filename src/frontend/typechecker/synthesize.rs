@@ -8,7 +8,7 @@ use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subt
 use std::sync::Arc;
 
 /// Widen singleton types to their base types
-/// This is used for array element types where we want [int; n] not [int(0); n]
+/// Temp fix: array element types give [int; n] not [int(0); n]
 fn widen_type(ty: IType) -> IType {
     match ty {
         IType::SingletonInt(_) => IType::Int,
@@ -18,7 +18,6 @@ fn widen_type(ty: IType) -> IType {
 }
 
 /// Synthesize the type of an expression
-///
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
     ctx: &TypingContext<'src>,
@@ -28,7 +27,6 @@ pub fn synth_expr<'src>(
 
     match &expr.0 {
         // INT-LIT: Integer literals have singleton types
-        //  n  int(n)
         Expr::Literal(Literal::Int(n)) => {
             let ty = IType::SingletonInt(IValue::Int(*n));
             let texpr = TExpr::Literal {
@@ -39,7 +37,6 @@ pub fn synth_expr<'src>(
         }
 
         // BOOL-LIT: Boolean literals have singleton types
-        //  true  bool  (we use base bool, not singleton for simplicity)
         Expr::Literal(Literal::Bool(b)) => {
             let ty = IType::Bool;
             let texpr = TExpr::Literal {
@@ -50,7 +47,6 @@ pub fn synth_expr<'src>(
         }
 
         // VAR: Look up variable in context
-        //  x  T
         Expr::Variable(name) => {
             match ctx.lookup_var(name) {
                 Some(VarBinding::Immutable(ty)) => {
@@ -77,8 +73,6 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-ARITH: Arithmetic operations
-        // e1  T1,  e2  T2,  T1 <: int,  T2 <: int
-        //  e1 op e2  int   
         Expr::BinOp { op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -111,8 +105,6 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-CMP: Comparison operations
-        // e1  T1,  e2  T2,  T1 <: int,  T2 <: int
-        //  e1 op e2  bool   
         Expr::BinOp { op: op @ (BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -144,8 +136,6 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-BOOL: Boolean operations
-        // e1  T1,  e2  T2,  T1 <: bool,  T2 <: bool
-        //  e1 op e2  bool   
         Expr::BinOp { op: op @ (BinOp::And | BinOp::Or), lhs, rhs } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
@@ -177,8 +167,6 @@ pub fn synth_expr<'src>(
         }
 
         // UNARY-NOT: Logical negation
-        // e  T,  T <: bool
-        //  !e  bool
         Expr::UnaryOp { op: UnaryOp::Not, cond } => {
             let (tcond, ty) = synth_expr(ctx, cond)?;
 
@@ -200,8 +188,6 @@ pub fn synth_expr<'src>(
         }
 
         // ARRAY-INDEX: Array indexing
-        // e1  [T; n],  e2  T_idx,  T_idx <: int
-        //  e1[e2]  T
         Expr::Index { base, index } => {
             let (tbase, base_ty) = synth_expr(ctx, base)?;
             let (tindex, index_ty) = synth_expr(ctx, index)?;
@@ -218,8 +204,8 @@ pub fn synth_expr<'src>(
             // Extract element type from array
             match &base_ty {
                 IType::Array { element_type, size } => {
-                    // Optionally check array bounds if index is statically known
-                    check_array_bounds(ctx, &index_ty, size, index.1)?;
+                    // Check array bounds - returns error if cannot prove safe
+                    check_array_bounds(ctx, &index_ty, size, &base_ty, index.1)?;
 
                     let elem_ty = (**element_type).clone();
                     let texpr = TExpr::Index {
@@ -237,10 +223,6 @@ pub fn synth_expr<'src>(
         }
 
         // FUNC-CALL: Function call
-        // f: (T1, ..., Tn) -> T_ret 
-        // e1  S1, ..., en  Sn
-        // S1 <: T1, ..., Sn <: Tn
-        //  f(e1, ..., en)  T_ret
         Expr::Call { func_name, args } => {
             // Look up function signature
             let sig = ctx.lookup_function(func_name)
@@ -284,19 +266,16 @@ pub fn synth_expr<'src>(
         }
 
         // ARRAY-INIT: Array initialization [e; n]
-        // e  T,  n is a compile-time constant
-        //  [e; n]  [widen(T); n]
         Expr::ArrayInit { value, length } => {
             let (tvalue, elem_ty) = synth_expr(ctx, value)?;
 
-            // Evaluate length to IValue (must be compile-time constant)
             let size = eval_to_ivalue(length)?;
 
             // Synthesize the length expression for the typed AST
             let (tlength, _) = synth_expr(ctx, length)?;
 
             // Widen singleton types for array elements
-            // [0; 10] should have type [int; 10], not [int(0); 10]
+            // Temp fix: [0; 10] has type [int; 10], not [int(0); 10]
             let widened_elem_ty = widen_type(elem_ty);
 
             let array_ty = IType::Array {
@@ -313,16 +292,10 @@ pub fn synth_expr<'src>(
         }
 
         // IF-EXPR: If expression with flow-sensitive typing
-        // ; ;   cond  T_cond,  T_cond <: bool
-        // ; + extract(cond);   then_block  (then_block', T_then, _)
-        // ; + negate(extract(cond));   else_block  (else_block', T_else, _)
-        // T_then <: T,  T_else <: T
-        // ; ;   if cond { then_block } else { else_block }  T
         Expr::If { cond, then_block, else_block } => {
             // Synthesize condition
             let (tcond, cond_ty) = synth_expr(ctx, cond)?;
 
-            // Check condition is bool
             if !is_subtype(ctx, &cond_ty, &IType::Bool) {
                 return Err(TypeError::TypeMismatch {
                     expected: IType::Bool,
@@ -331,7 +304,7 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extract proposition from condition for flow-sensitive typing
+            // Extract proposition from condition
             let mut then_ctx = ctx.clone();
             if let Some(prop) = extract_proposition(&cond.0) {
                 then_ctx = then_ctx.with_proposition(prop);
@@ -340,7 +313,7 @@ pub fn synth_expr<'src>(
             // Check then block
             let (tthen_block, _) = check_stmts(&then_ctx, then_block)?;
 
-            // Type the else block (if present)
+            // Type the else block
             let (telse_block, result_ty) = if let Some(else_stmts) = else_block {
                 // Extract negated proposition for else branch
                 let mut else_ctx = ctx.clone();
@@ -351,11 +324,10 @@ pub fn synth_expr<'src>(
 
                 let (telse_stmts, _) = check_stmts(&else_ctx, else_stmts)?;
 
-                // For now, if-expressions with both branches produce unit type
-                // In a full implementation, we'd need to handle return expressions
+                // Temp fix: if-expressions with both branches produce unit type
+                // In a full implementation, need to handle return expressions
                 (Some(telse_stmts), IType::Unit)
             } else {
-                // If without else produces unit
                 (None, IType::Unit)
             };
 

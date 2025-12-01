@@ -1,9 +1,4 @@
 // Statement and program type checking
-//
-// Implements:
-// - Statement checking: ; ;   s  (s', ', ')
-// - Function checking: Check function bodies and return types
-// - Program checking: Top-level orchestration
 
 use crate::common::ast::{Function, Program, Stmt, Type as AstType};
 use crate::common::span::{Span, Spanned};
@@ -16,7 +11,6 @@ use im::HashMap;
 use std::sync::Arc;
 
 /// Check a statement and produce a typed statement with updated context
-///
 /// Returns (typed_stmt, new_context)
 pub fn check_stmt<'src>(
     ctx: &TypingContext<'src>,
@@ -26,9 +20,6 @@ pub fn check_stmt<'src>(
 
     match &stmt.0 {
         // LET-IMMUT: Immutable variable binding
-        // ; ;   e  T_e
-        // T_e <: T_ann
-        // ; ;   let x: T_ann = e  (let x: T_e = e', [x: T_e], )
         Stmt::Let { name, ty, value, is_mut: false } => {
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
@@ -60,9 +51,6 @@ pub fn check_stmt<'src>(
         }
 
         // LET-MUT: Mutable variable binding
-        // ; ;   e  T_e
-        // T_e <: T_ann
-        // ; ;   let mut x: T_ann = e  (let mut x: T_e = e', , [x: (T_e, M(T_ann))])
         Stmt::Let { name, ty, value, is_mut: true } => {
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
@@ -226,10 +214,6 @@ pub fn check_stmt<'src>(
         }
 
         // FOR-LOOP: For loop with range
-        // ; ;   start  T_start,  T_start <: int
-        // ; ;   end  T_end,  T_end <: int
-        // ; [i: int];   body  (body', _, _)
-        // ; ;   for i in start..end { body }  (for i in start..end { body' }, , )
         Stmt::For { var, start, end, body } => {
             let (tstart, start_ty) = synth_expr(ctx, start)?;
             let (tend, end_ty) = synth_expr(ctx, end)?;
@@ -269,8 +253,6 @@ pub fn check_stmt<'src>(
         }
 
         // EXPR-STMT: Expression statement
-        // ; ;   e  T
-        // ; ;   e;  (e', , )
         Stmt::Expr(expr) => {
             let (texpr, _) = synth_expr(ctx, &expr)?;
 
@@ -282,7 +264,6 @@ pub fn check_stmt<'src>(
 }
 
 /// Check a sequence of statements
-///
 /// Returns (typed_stmts, final_context)
 pub fn check_stmts<'src>(
     ctx: &TypingContext<'src>,
@@ -301,7 +282,6 @@ pub fn check_stmts<'src>(
 }
 
 /// Check a function
-///
 /// Returns typed function
 pub fn check_function<'src>(
     global_ctx: &TypingContext<'src>,
@@ -316,7 +296,6 @@ pub fn check_function<'src>(
         param_types.push(ast_type_to_itype(&param.ty)?);
     }
 
-    // Convert return type
     let return_type = ast_type_to_itype(&func_inner.return_type)?;
 
     // Create context with parameters and expected return type
@@ -328,7 +307,6 @@ pub fn check_function<'src>(
     // Set expected return type for checking return statements
     func_ctx = func_ctx.with_expected_return(return_type.clone());
 
-    // Check body statements
     let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
 
     // Check if body contains any return statements
@@ -362,7 +340,6 @@ pub fn check_function<'src>(
 
         Some(texpr)
     } else {
-        // No trailing expression - check if we have return statements or if return type is unit
         if !matches!(return_type, IType::Unit) && !has_return_stmt(&tbody) {
             return Err(TypeError::MissingReturn {
                 expected: return_type,
@@ -398,13 +375,12 @@ pub fn check_function<'src>(
 pub fn check_program<'src>(
     program: &Program<'src>,
 ) -> Result<TProgram<'src>, TypeError<'src>> {
-    // Collect function signatures
     let mut signatures = HashMap::new();
 
     for spanned_func in &program.functions {
         let (func, func_span) = spanned_func;
 
-        // Convert parameter types (with names)
+        // Convert parameter types
         let mut parameters = Vec::new();
         for spanned_param in &func.parameters {
             let param = &spanned_param.0;
@@ -426,10 +402,8 @@ pub fn check_program<'src>(
         signatures.insert(func.name.to_string(), sig);
     }
 
-    // Create global context with all function signatures
     let global_ctx = TypingContext::with_functions(signatures);
 
-    // Check each function
     let mut tfunctions = Vec::new();
 
     for spanned_func in &program.functions {

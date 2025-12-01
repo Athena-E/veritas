@@ -1,5 +1,5 @@
 // Helper functions for type checking
-// Includes: constant folding, proposition extraction, context joining
+// constant folding, proposition extraction, context joining
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Span;
@@ -30,8 +30,7 @@ pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'
     }
 }
 
-/// Extract a proposition from an expression
-/// Converts comparison expressions into propositions for flow-sensitive typing
+/// Converts comparison expressions into propositions
 pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>> {
     match expr {
         // Simple comparisons: x op n
@@ -51,7 +50,7 @@ pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>
 }
 
 /// Negate a proposition
-/// Creates the negation of a proposition for else-branches
+/// for else-branches
 pub fn negate_proposition<'src>(prop: &IProposition<'src>) -> IProposition<'src> {
     let negated_expr = negate_expr(&prop.predicate.0);
 
@@ -105,13 +104,15 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
 
 /// Check array bounds (proof obligation)
 /// Verifies that 0 <= index < array_size
+/// Returns an error if bounds cannot be proven safe
 pub fn check_array_bounds<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     index_ty: &IType<'src>,
     array_size: &IValue,
-    _span: Span,
+    array_type: &IType<'src>,
+    span: Span,
 ) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
-    use crate::frontend::typechecker::check_provable;
+    use crate::frontend::typechecker::{check_provable, TypeError};
 
     let dummy_span = SimpleSpan::new(0, 0);
 
@@ -141,9 +142,26 @@ pub fn check_array_bounds<'src>(
         )),
     };
 
-    // Check both bounds - for now just return Ok (SMT verification)
-    let _ = check_provable(ctx, &lower_bound);
-    let _ = check_provable(ctx, &upper_bound);
+    // Check lower bound: 0 <= index
+    if !check_provable(ctx, &lower_bound) {
+        return Err(TypeError::InvalidArrayAccess {
+            array_type: array_type.clone(),
+            index_expr: format!("{}", index_ty),
+            reason: "Index may be negative".to_string(),
+            span,
+        });
+    }
+
+    // Check upper bound: index < size
+    if !check_provable(ctx, &upper_bound) {
+        return Err(TypeError::InvalidArrayAccess {
+            array_type: array_type.clone(),
+            index_expr: format!("{}", index_ty),
+            reason: format!("Index may be >= array size ({})", array_size),
+            span,
+        });
+    }
+
     Ok(())
 }
 

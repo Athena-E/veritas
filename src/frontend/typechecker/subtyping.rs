@@ -1,6 +1,4 @@
 // Subtyping relation for refinement types
-//
-// Key rules:
 // - Reflexivity: T <: T
 // - Refinement weakening
 // - Singleton to base: int(n) <: int
@@ -12,9 +10,7 @@ use crate::common::types::{IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypingContext, check_provable};
 use std::sync::Arc;
 
-/// Check if `sub` is a subtype of `sup` in the given typing context
-///
-/// Returns true if every value of type `sub` is also a valid value of type `sup`
+/// Check if sub is a subtype of sup in the given typing context
 pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &IType<'src>) -> bool {
     match (sub, sup) {
         // Reflexivity: T <: T
@@ -62,7 +58,7 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
         }
 
         // Array subtyping: [T1; n] <: [T2; m] if T1 <: T2 and n = m
-        // Note: We allow covariance for immutable arrays since elements are read-only
+        // allow covariance for immutable arrays since elements are read-only
         (
             IType::Array { element_type: elem1, size: size1 },
             IType::Array { element_type: elem2, size: size2 },
@@ -77,7 +73,7 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
         // Mutable reference subtyping: &mut T1 <: &mut T2 if T1 = T2 (invariant)
         (IType::RefMut(t1), IType::RefMut(t2)) => types_equal(t1, t2),
 
-        // Master type unwrapping: M(T) <: T (can use master type as its base)
+        // Master type unwrapping: M(T) <: T (can use master type as base)
         (IType::Master(t), sup) => is_subtype(ctx, t, sup),
 
         // Different type constructors are incompatible
@@ -86,9 +82,6 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
 }
 
 /// Check if two types are structurally equal
-///
-/// This is needed for invariant type constructors (arrays, references)
-/// where we need exact type equality, not subtyping
 fn types_equal(t1: &IType, t2: &IType) -> bool {
     match (t1, t2) {
         (IType::Unit, IType::Unit) => true,
@@ -106,15 +99,13 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
         (IType::RefMut(t1), IType::RefMut(t2)) => types_equal(t1, t2),
         (IType::Master(t1), IType::Master(t2)) => types_equal(t1, t2),
 
-        // For refined types, we can't easily check equality without SMT
-        // For now, require exact structural match
+        // TODO: need SMT for refined types
+        // Temp fix: require exact structural match
         (
             IType::RefinedInt { base: b1, prop: p1 },
             IType::RefinedInt { base: b2, prop: p2 },
         ) => {
             types_equal(b1, b2) && p1.var == p2.var
-            // Note: We're not checking predicate equality - that would require SMT
-            // This is conservative but sound
         }
 
         _ => false,
@@ -122,13 +113,11 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
 }
 
 /// Substitute a value for the bound variable in a proposition
-///
-/// Example: P = "x > 0", n = 5 => "5 > 0"
 fn substitute_value_in_prop<'src>(prop: &IProposition<'src>, value: &'src IValue) -> IProposition<'src> {
     let substituted_expr = substitute_value_in_expr(&prop.predicate.0, &prop.var, value);
 
     IProposition {
-        var: "_".to_string(), // Variable is no longer relevant after substitution
+        var: "_".to_string(), 
         predicate: Arc::new((substituted_expr, prop.predicate.1)),
     }
 }
@@ -171,15 +160,11 @@ fn substitute_value_in_expr<'src>(
             )),
         },
 
-        // For unsupported expression forms, return as-is
-        // This is conservative but safe
         _ => expr.clone(),
     }
 }
 
 /// Rename the bound variable in a proposition
-///
-/// Example: {y: int | y > 0} with new_var = "x" => {x: int | x > 0}
 fn rename_prop_var<'src>(prop: &IProposition<'src>, new_var: &'src str) -> IProposition<'src> {
     let renamed_expr = rename_var_in_expr(&prop.predicate.0, &prop.var, new_var);
 
