@@ -38,6 +38,11 @@ where
         .ignore_then(ty.clone())
         .or_not();
 
+    // Parse optional precondition: requires expr
+    let precondition = just(Token::Requires)
+        .ignore_then(expr.clone())
+        .or_not();
+
     // Parse function body: { stmts* expr? }
     // We need to parse statements, then check if there's a final expression without semicolon
     let body = just(Token::Ctrl('{'))
@@ -56,8 +61,9 @@ where
         .ignore_then(select! { Token::Ident(name) => name })
         .then(parameters)
         .then(return_type)
+        .then(precondition)
         .then(body)
-        .map_with(|(((name, parameters), return_type), body), e| {
+        .map_with(|((((name, parameters), return_type), precondition), body), e| {
             // Default to Unit type if no return type is specified
             let return_type = return_type.unwrap_or_else(|| {
                 let span = e.span();
@@ -68,6 +74,7 @@ where
                     name,
                     parameters,
                     return_type,
+                    precondition,
                     body,
                 },
                 e.span(),

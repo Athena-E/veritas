@@ -158,9 +158,10 @@ pub fn check_stmt<'src>(
                         }),
                     };
 
-                    // Check array bounds
-                    crate::frontend::typechecker::check_array_bounds(
+                    // Check array bounds using the actual index expression
+                    crate::frontend::typechecker::check_array_bounds_expr(
                         ctx,
+                        &index.0,
                         &index_ty,
                         array_size,
                         &base_ty,
@@ -222,8 +223,8 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), ctx.clone()))
         }
 
-        // FOR-LOOP: For loop with range
-        Stmt::For { var, start, end, body } => {
+        // FOR-LOOP: For loop with range and optional invariant
+        Stmt::For { var, start, end, invariant, body } => {
             let (tstart, start_ty) = synth_expr(ctx, start)?;
             let (tend, end_ty) = synth_expr(ctx, end)?;
 
@@ -244,9 +245,66 @@ pub fn check_stmt<'src>(
             }
 
             // Add loop variable to context (immutable)
-            let loop_ctx = ctx.with_immutable(var.to_string(), IType::Int);
+            let mut loop_ctx = ctx.with_immutable(var.to_string(), IType::Int);
 
-            // Check body statements
+            // Add propositions about loop variable bounds: var >= start && var < end
+            // This allows the SMT solver to prove array bounds within the loop
+            let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+
+            // Create proposition: var >= start
+            let lower_bound_expr = crate::common::ast::Expr::BinOp {
+                op: crate::common::ast::BinOp::Gte,
+                lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                rhs: Box::new((*start.clone()).clone()),
+            };
+            let lower_bound_prop = crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new((lower_bound_expr, dummy_span)),
+            };
+            loop_ctx = loop_ctx.with_proposition(lower_bound_prop);
+
+            // Create proposition: var < end
+            let upper_bound_expr = crate::common::ast::Expr::BinOp {
+                op: crate::common::ast::BinOp::Lt,
+                lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                rhs: Box::new((*end.clone()).clone()),
+            };
+            let upper_bound_prop = crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new((upper_bound_expr, dummy_span)),
+            };
+            loop_ctx = loop_ctx.with_proposition(upper_bound_prop);
+
+            // Process invariant if present
+            let tinvariant = if let Some(inv_expr) = invariant {
+                // Type-check the invariant expression (must be bool)
+                let (tinv, inv_ty) = synth_expr(&loop_ctx, inv_expr)?;
+
+                if !is_subtype(&loop_ctx, &inv_ty, &IType::Bool) {
+                    return Err(TypeError::TypeMismatch {
+                        expected: IType::Bool,
+                        found: inv_ty,
+                        span: inv_expr.1,
+                    });
+                }
+
+                // Check that invariant holds at loop entry (with i = start)
+                // For now, we add the invariant as an assumption for the loop body
+                // A full implementation would verify it holds initially and is preserved
+
+                // Add invariant as proposition to loop body context
+                let inv_prop = crate::common::types::IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new(inv_expr.clone()),
+                };
+                loop_ctx = loop_ctx.with_proposition(inv_prop);
+
+                Some(tinv)
+            } else {
+                None
+            };
+
+            // Check body statements with invariant in context
             let (tbody, _) = check_stmts(&loop_ctx, body)?;
 
             let tstmt = TStmt::For {
@@ -254,6 +312,7 @@ pub fn check_stmt<'src>(
                 var_ty: IType::Int,
                 start: Box::new(tstart),
                 end: Box::new(tend),
+                invariant: tinvariant,
                 body: tbody,
             };
 
@@ -385,6 +444,20 @@ pub fn check_function<'src>(
     // Set expected return type for checking return statements
     func_ctx = func_ctx.with_expected_return(return_type.clone());
 
+    // Add precondition to context (if present) - this allows the function body
+    // to assume the precondition holds
+    if let Some(precond_expr) = &func_inner.precondition {
+        let var_name = func_inner.parameters.first()
+            .map(|p| p.0.name.to_string())
+            .unwrap_or_else(|| "_".to_string());
+
+        let precond_prop = crate::common::types::IProposition {
+            var: var_name,
+            predicate: Arc::new(precond_expr.clone()),
+        };
+        func_ctx = func_ctx.with_proposition(precond_prop);
+    }
+
     let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
 
     // Check if body contains any return statements
@@ -469,11 +542,25 @@ pub fn check_program<'src>(
         // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
 
+        // Convert precondition to IProposition
+        let precondition = func.precondition.as_ref().map(|precond_expr| {
+            // For preconditions, the bound variable is typically the first parameter
+            // or we use a generic "_" if there are no parameters
+            let var_name = func.parameters.first()
+                .map(|p| p.0.name.to_string())
+                .unwrap_or_else(|| "_".to_string());
+
+            crate::common::types::IProposition {
+                var: var_name,
+                predicate: Arc::new(precond_expr.clone()),
+            }
+        });
+
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
             return_type,
-            precondition: None,  // TODO: Parse preconditions from AST
+            precondition,
             span: *func_span,
         };
 

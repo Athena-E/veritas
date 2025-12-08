@@ -71,13 +71,19 @@ pub fn display_program(program: &Program) {
                         format_expr(&expr.0)
                     );
                 }
-                Stmt::For { var, start, end, body } => {
+                Stmt::For { var, start, end, invariant, body } => {
+                    let inv_str = if let Some(inv) = invariant {
+                        format!(" invariant {}", format_expr(&inv.0))
+                    } else {
+                        String::new()
+                    };
                     println!(
-                        "    [{}] for {} in {}..{} {{ {} statement(s) }}",
+                        "    [{}] for {} in {}..{}{} {{ {} statement(s) }}",
                         i + 1,
                         var,
                         format_expr(&start.0),
                         format_expr(&end.0),
+                        inv_str,
                         body.len()
                     );
                 }
@@ -166,14 +172,20 @@ pub fn display_typed_program(program: &TProgram) {
                         expr.0.get_type()
                     );
                 }
-                TStmt::For { var, var_ty, start, end, body } => {
+                TStmt::For { var, var_ty, start, end, invariant, body } => {
+                    let inv_str = if let Some(inv) = invariant {
+                        format!(" invariant {}", format_texpr(&inv.0))
+                    } else {
+                        String::new()
+                    };
                     println!(
-                        "    [{}] for {}: {} in {}..{} {{ {} statement(s) }}",
+                        "    [{}] for {}: {} in {}..{}{} {{ {} statement(s) }}",
                         i + 1,
                         var,
                         var_ty,
                         format_texpr(&start.0),
                         format_texpr(&end.0),
+                        inv_str,
                         body.len()
                     );
                 }

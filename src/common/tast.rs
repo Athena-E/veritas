@@ -99,6 +99,7 @@ pub enum TStmt<'src> {
         var_ty: IType<'src>,
         start: Box<Spanned<TExpr<'src>>>,
         end: Box<Spanned<TExpr<'src>>>,
+        invariant: Option<Spanned<TExpr<'src>>>,
         body: Vec<Spanned<TStmt<'src>>>,
     },
 }

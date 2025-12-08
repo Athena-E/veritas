@@ -165,6 +165,69 @@ pub fn check_array_bounds<'src>(
     Ok(())
 }
 
+/// Check array bounds using the actual index expression (not just its type)
+/// This preserves variable names so SMT can use context propositions
+pub fn check_array_bounds_expr<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    index_expr: &Expr<'src>,
+    index_ty: &IType<'src>,
+    array_size: &IValue,
+    array_type: &IType<'src>,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::{check_provable, TypeError};
+
+    let dummy_span = SimpleSpan::new(0, 0);
+
+    // Create proposition: 0 <= index_expr
+    let lower_bound = IProposition {
+        var: "idx".to_string(),
+        predicate: Arc::new((
+            Expr::BinOp {
+                op: BinOp::Gte,
+                lhs: Box::new((index_expr.clone(), dummy_span)),
+                rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy_span)),
+            },
+            dummy_span,
+        )),
+    };
+
+    // Create proposition: index_expr < size
+    let upper_bound = IProposition {
+        var: "idx".to_string(),
+        predicate: Arc::new((
+            Expr::BinOp {
+                op: BinOp::Lt,
+                lhs: Box::new((index_expr.clone(), dummy_span)),
+                rhs: Box::new((value_to_expr_from_ivalue(array_size), dummy_span)),
+            },
+            dummy_span,
+        )),
+    };
+
+    // Check lower bound: 0 <= index
+    if !check_provable(ctx, &lower_bound) {
+        return Err(TypeError::InvalidArrayAccess {
+            array_type: array_type.clone(),
+            index_expr: format!("{}", index_ty),
+            reason: "Index may be negative".to_string(),
+            span,
+        });
+    }
+
+    // Check upper bound: index < size
+    if !check_provable(ctx, &upper_bound) {
+        return Err(TypeError::InvalidArrayAccess {
+            array_type: array_type.clone(),
+            index_expr: format!("{}", index_ty),
+            reason: format!("Index may be >= array size ({})", array_size),
+            span,
+        });
+    }
+
+    Ok(())
+}
+
 /// Convert a type to an expression (for bounds checking)
 fn value_to_expr<'src>(ty: &'src IType<'src>) -> Expr<'src> {
     match ty {

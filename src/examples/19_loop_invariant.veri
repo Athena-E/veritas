@@ -1,0 +1,34 @@
+// Example demonstrating loop invariants
+
+// Simple loop with invariant
+fn sum_loop() {
+    let mut sum: int = 0;
+    // Loop with invariant: i is always within range
+    for i in 0..10 invariant i >= 0 {
+        sum = sum + i;
+    }
+}
+
+// Another example with invariant
+fn count_loop() {
+    let mut count: int = 0;
+    for i in 1..100 invariant i > 0 {
+        count = count + 1;
+    }
+}
+
+// Simple loop without invariant (still works)
+fn no_invariant_loop() {
+    let mut x: int = 0;
+    for i in 0..5 {
+        x = x + 1;
+    }
+}
+
+// Invariant with comparison using loop variable
+fn bounded_loop() {
+    let mut total: int = 0;
+    for i in 0..10 invariant i < 10 {
+        total = total + i;
+    }
+}

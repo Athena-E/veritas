@@ -1,0 +1,15 @@
+// Example demonstrating that function body can use preconditions
+
+// Array access with index precondition
+fn access_array(index: int) requires index >= 0 {
+    let arr: [int; 10] = [0; 10];
+    // Accessing with index should be safe for lower bound
+    // (upper bound still needs to be proven separately)
+}
+
+// Testing that precondition is added to context
+fn with_range_precond(i: int) requires i >= 0 {
+    // Body should have i >= 0 as a known proposition
+    let arr: [int; 5] = [0; 5];
+    // If we had more sophisticated SMT support, we could use this
+}

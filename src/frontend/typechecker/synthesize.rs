@@ -4,7 +4,7 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::TExpr;
 use crate::common::types::{IType, IValue};
-use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds, extract_proposition, negate_proposition, check_stmts};
+use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds_expr, extract_proposition, negate_proposition, check_stmts};
 use std::sync::Arc;
 
 /// Widen singleton types to their base types
@@ -205,7 +205,8 @@ pub fn synth_expr<'src>(
             match &base_ty {
                 IType::Array { element_type, size } => {
                     // Check array bounds - returns error if cannot prove safe
-                    check_array_bounds(ctx, &index_ty, size, &base_ty, index.1)?;
+                    // Use the actual index expression so SMT can use context propositions
+                    check_array_bounds_expr(ctx, &index.0, &index_ty, size, &base_ty, index.1)?;
 
                     let elem_ty = (**element_type).clone();
                     let texpr = TExpr::Index {
@@ -242,6 +243,7 @@ pub fn synth_expr<'src>(
 
             // Synth and check each argument
             let mut typed_args = Vec::new();
+            let mut arg_types = Vec::new();
             for (arg, (_param_name, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
@@ -254,6 +256,22 @@ pub fn synth_expr<'src>(
                 }
 
                 typed_args.push(targ);
+                arg_types.push(arg_ty);
+            }
+
+            // Check precondition if present
+            if let Some(ref precond) = sig.precondition {
+                // Substitute argument values into the precondition
+                // For now, create a modified proposition with actual argument types
+                let substituted_precond = substitute_args_in_precond(precond, &sig.parameters, &arg_types);
+
+                if !crate::frontend::typechecker::check_provable(ctx, &substituted_precond) {
+                    return Err(TypeError::PreconditionViolation {
+                        function: func_name.to_string(),
+                        precondition: precond.clone(),
+                        span,
+                    });
+                }
             }
 
             let ret_ty = sig.return_type.clone();
@@ -356,5 +374,66 @@ fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<
         _ => Err(TypeError::NotAConstant {
             span: expr.1,
         }),
+    }
+}
+
+/// Substitute argument types/values into a precondition
+/// This replaces parameter names with their actual argument values when possible
+fn substitute_args_in_precond<'src>(
+    precond: &crate::common::types::IProposition<'src>,
+    params: &[(String, IType<'src>)],
+    arg_types: &[IType<'src>],
+) -> crate::common::types::IProposition<'src> {
+    use crate::common::types::IProposition;
+    use chumsky::span::SimpleSpan;
+
+    // Build a substitution map from parameter names to argument types
+    let mut substitutions: std::collections::HashMap<&str, &IType> = std::collections::HashMap::new();
+    for ((param_name, _), arg_ty) in params.iter().zip(arg_types.iter()) {
+        substitutions.insert(param_name.as_str(), arg_ty);
+    }
+
+    // Substitute in the predicate expression
+    let substituted_expr = substitute_in_expr(&precond.predicate.0, &substitutions);
+
+    IProposition {
+        var: precond.var.clone(),
+        predicate: Arc::new((substituted_expr, SimpleSpan::new(0, 0))),
+    }
+}
+
+/// Substitute parameter names with argument values in an expression
+fn substitute_in_expr<'src>(
+    expr: &Expr<'src>,
+    subs: &std::collections::HashMap<&str, &IType<'src>>,
+) -> Expr<'src> {
+    match expr {
+        Expr::Variable(name) => {
+            // If this variable is a parameter, substitute with actual value if it's a singleton
+            if let Some(arg_ty) = subs.get(name) {
+                match arg_ty {
+                    IType::SingletonInt(IValue::Int(n)) => Expr::Literal(Literal::Int(*n)),
+                    // For symbolic or non-singleton types, keep the variable reference
+                    // (the variable will be looked up in the context during proof checking)
+                    _ => expr.clone(),
+                }
+            } else {
+                expr.clone()
+            }
+        }
+
+        Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
+            op: *op,
+            lhs: Box::new((substitute_in_expr(&lhs.0, subs), lhs.1)),
+            rhs: Box::new((substitute_in_expr(&rhs.0, subs), rhs.1)),
+        },
+
+        Expr::UnaryOp { op, cond } => Expr::UnaryOp {
+            op: *op,
+            cond: Box::new((substitute_in_expr(&cond.0, subs), cond.1)),
+        },
+
+        // Other expression forms stay as-is
+        _ => expr.clone(),
     }
 }

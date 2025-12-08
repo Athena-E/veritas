@@ -52,25 +52,31 @@ where
                 )
             });
 
-        // For loop: for var in start..end { body }
+        // For loop: for var in start..end [invariant expr] { body }
+        let invariant_clause = just(Token::Invariant)
+            .ignore_then(expr.clone())
+            .or_not();
+
         let for_stmt = just(Token::For)
             .ignore_then(select! { Token::Ident(name) => name })
             .then_ignore(just(Token::In))
             .then(expr.clone())
             .then_ignore(just(Token::Op("..")))
             .then(expr.clone())
+            .then(invariant_clause)
             .then(
                 stmt.clone()
                     .repeated()
                     .collect::<Vec<_>>()
                     .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
             )
-            .map_with(|(((var, start), end), body), e| {
+            .map_with(|((((var, start), end), invariant), body), e| {
                 (
                     Stmt::For {
                         var,
                         start: Box::new(start),
                         end: Box::new(end),
+                        invariant,
                         body,
                     },
                     e.span(),
