@@ -3,8 +3,9 @@ use crate::common::span::{Span, Spanned};
 use std::fmt;
 use std::sync::Arc; 
 
-// Semantic types of compile-time values
+/// Semantic types of compile-time values
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum IValue {
     Int(i64),
     Bool(bool),
@@ -57,6 +58,7 @@ pub struct FunctionSignature<'src> {
     pub parameters: Vec<(String, IType<'src>)>,
     pub return_type: IType<'src>,
     pub precondition: Option<IProposition<'src>>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 

@@ -6,6 +6,7 @@ fn simple_array_assignment() {
     arr[2] = 30;
     arr[3] = 40;
     arr[4] = 50;
+    arr[5] = 50;
 }
 
 // Array indexing assignment with variable index
@@ -39,52 +40,11 @@ fn multiple_assignments() {
 }
 
 // Array assignment in a loop
-fn fill_array_with_loop(n: int) {
+fn fill_array_with_loop() {
     let mut arr: [int; 10] = [0; 10];
     for i in 0..10 {
         arr[i] = i * i;
     }
-}
-
-// Nested array (matrix) indexing assignment
-fn matrix_assignment() {
-    let mut matrix: [[int; 3]; 3] = init_matrix();
-    matrix[0][0] = 1;
-    matrix[0][1] = 2;
-    matrix[1][0] = 3;
-    matrix[2][2] = 9;
-}
-
-// Nested loops with array assignment
-fn fill_matrix(rows: int, cols: int) {
-    let mut matrix: [[int; cols]; rows] = init_matrix();
-    for i in 0..rows {
-        for j in 0..cols {
-            matrix[i][j] = i * cols + j;
-        }
-    }
-}
-
-// Complex pattern: swap elements
-fn swap_elements(arr: &mut [int; 10], i: int, j: int) {
-    let temp: int = arr[i];
-    arr[i] = arr[j];
-    arr[j] = temp;
-}
-
-// Array assignment with computed indices
-fn diagonal_assignment(n: int) {
-    let mut matrix: [[int; n]; n] = [[0; n]; n];
-    for i in 0..n {
-        matrix[i][i] = 1;
-    }
-}
-
-// Using array assignment with function results
-fn assignment_from_function_call() {
-    let mut results: [int; 5] = [0; 5];
-    results[0] = compute_value(0);
-    results[1] = compute_value(1);
 }
 
 // Array assignment in conditional blocks

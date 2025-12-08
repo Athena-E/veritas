@@ -1,0 +1,12 @@
+// Multiple errors in one file (only first is reported)
+// This file demonstrates various type errors
+
+fn bad_function() -> bool {
+    42
+}
+
+fn main() {
+    let x: int = true;
+    let y: bool = 5 + 3;
+    undefined_var = 10;
+}

@@ -1,10 +1,18 @@
 use chumsky::prelude::*;
-use crate::common::ast::Program;
+use crate::common::tast::TProgram;
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
+use crate::frontend::typechecker::{check_program, TypeError};
 
-/// Run the full compilation pipeline: lex and parse
-pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<Program<'src>, String> {
+/// Pipeline error types
+pub enum PipelineError<'src> {
+    LexError(String),
+    ParseError(String),
+    TypeError(TypeError<'src>),
+}
+
+/// Run the full compilation pipeline: lex, parse, and type check
+pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<TProgram<'src>, PipelineError<'src>> {
     // Lexer
     println!("\n[1] Lexing...");
     let (tokens, lex_errors) = lexer().parse(src).into_output_errors();
@@ -20,7 +28,7 @@ pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<Program<'src>
     let tokens = match tokens {
         Some(t) => t,
         None => {
-            return Err("Lexing failed. Aborting.".to_string());
+            return Err(PipelineError::LexError("Lexing failed".to_string()));
         }
     };
 
@@ -51,11 +59,18 @@ pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<Program<'src>
     let program = match program {
         Some(p) => p,
         None => {
-            return Err("Parsing failed. Aborting.".to_string());
+            return Err(PipelineError::ParseError("Parsing failed".to_string()));
         }
     };
 
     println!("Parsed successfully!");
 
-    Ok(program)
+    // Type checker
+    println!("\n[3] Type checking...");
+    let typed_program = check_program(&program)
+        .map_err(PipelineError::TypeError)?;
+
+    println!("Type checking passed!");
+
+    Ok(typed_program)
 }

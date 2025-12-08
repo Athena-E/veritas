@@ -1,0 +1,7 @@
+// Error: Array element assignment type mismatch
+// Expected error: E001 - Type mismatch
+
+fn main() {
+    let mut arr: [int; 3] = [0; 3];
+    arr[0] = true;
+}

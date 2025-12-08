@@ -47,6 +47,8 @@ pub fn lexer<'src>(
         "return" => Token::Return,
         "for" => Token::For,
         "in" => Token::In,
+        "requires" => Token::Requires,
+        "invariant" => Token::Invariant,
         "int" => Token::Int,
         "bool" => Token::Bool,
         "true" => Token::True,

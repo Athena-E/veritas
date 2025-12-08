@@ -1,0 +1,24 @@
+// Example demonstrating preconditions
+
+// Function with a precondition: index must be non-negative
+fn safe_access(index: int) requires index >= 0 {
+    let arr: [int; 10] = [0; 10];
+    // Inside the function body, we can assume index >= 0
+}
+
+// Function with a precondition: divisor must not be zero
+fn safe_divide(dividend: int, divisor: int) requires divisor != 0 {
+    // Body can assume divisor != 0
+}
+
+// Calling a function with a literal that satisfies the precondition
+fn test_safe_call() {
+    safe_access(5);  // 5 >= 0, should pass
+    safe_divide(10, 2);  // 2 != 0, should pass
+}
+
+// Calling with a value that the type checker can prove satisfies precondition
+fn test_refined_call() {
+    let positive: int = 42;
+    safe_access(positive);  // positive is int(42), so 42 >= 0 holds
+}

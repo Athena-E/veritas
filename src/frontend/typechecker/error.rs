@@ -2,7 +2,10 @@ use crate::common::span::Span;
 use crate::common::types::{IProposition, IType};
 use std::fmt;
 
+/// Type errors that can occur during type checking.
+/// Some variants are reserved for future features.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum TypeError<'src> {
     TypeMismatch {
         expected: IType<'src>,
@@ -68,6 +71,36 @@ pub enum TypeError<'src> {
     InvalidOperation {
         operation: String,
         operand_types: Vec<IType<'src>>,
+        span: Span,
+    },
+
+    NotMutable {
+        name: String,
+        span: Span,
+    },
+
+    NotAnArray {
+        found: IType<'src>,
+        span: Span,
+    },
+
+    MissingReturn {
+        expected: IType<'src>,
+        span: Span,
+    },
+
+    WrongNumberOfArguments {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    UnsupportedFeature {
+        feature: String,
+        span: Span,
+    },
+
+    NotAConstant {
         span: Span,
     },
 }
@@ -212,6 +245,54 @@ impl<'src> fmt::Display for TypeError<'src> {
                     f,
                     "Invalid operation `{}` at {:?} for types: {}",
                     operation, span, types_str
+                )
+            }
+
+            TypeError::NotMutable { name, span } => {
+                write!(
+                    f,
+                    "Cannot assign to immutable variable `{}` at {:?}",
+                    name, span
+                )
+            }
+
+            TypeError::NotAnArray { found, span } => {
+                write!(
+                    f,
+                    "Expected array type at {:?}, found `{}`",
+                    span, found
+                )
+            }
+
+            TypeError::MissingReturn { expected, span } => {
+                write!(
+                    f,
+                    "Missing return expression at {:?}: expected `{}`",
+                    span, expected
+                )
+            }
+
+            TypeError::WrongNumberOfArguments { expected, found, span } => {
+                write!(
+                    f,
+                    "Wrong number of arguments at {:?}: expected {}, found {}",
+                    span, expected, found
+                )
+            }
+
+            TypeError::UnsupportedFeature { feature, span } => {
+                write!(
+                    f,
+                    "Unsupported feature at {:?}: {}",
+                    span, feature
+                )
+            }
+
+            TypeError::NotAConstant { span } => {
+                write!(
+                    f,
+                    "Expression at {:?} is not a compile-time constant",
+                    span
                 )
             }
         }

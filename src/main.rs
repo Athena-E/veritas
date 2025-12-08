@@ -2,13 +2,14 @@ mod cli;
 mod common;
 mod frontend;
 
-use cli::frontend::{Config, read_source_file, display_program, run_pipeline};
+use cli::frontend::{Config, read_source_file, display_typed_program, run_pipeline, PipelineError};
+use frontend::typechecker::report_type_error;
 
 fn main() {
     // Parse configuration
     let config = Config::from_args();
 
-    println!("Parsing: {}", config.file_path);
+    println!("\n{}", config.file_path);
     println!("{}", "=".repeat(60));
 
     // Read the source file
@@ -30,24 +31,31 @@ fn main() {
     let program = match run_pipeline(&src, config.verbose) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("\n{}", e);
+            println!();
+            match e {
+                PipelineError::LexError(msg) => eprintln!("Lexer error: {}", msg),
+                PipelineError::ParseError(msg) => eprintln!("Parse error: {}", msg),
+                PipelineError::TypeError(type_error) => {
+                    report_type_error(&config.file_path, &src, &type_error);
+                }
+            }
             return;
         }
     };
 
     // Display results
-    println!("\n[3] Program structure:");
+    println!("\n[4] Program structure:");
     println!("{}", "=".repeat(60));
 
-    display_program(&program);
+    display_typed_program(&program);
 
     // Show detailed AST if requested
     if config.show_ast {
-        println!("\n[4] Detailed AST:");
+        println!("\n[5] Detailed Typed AST:");
         println!("{}", "=".repeat(60));
         println!("{:#?}", program);
     }
 
     println!("\n{}", "=".repeat(60));
-    println!("Successfully parsed {} function(s)", program.functions.len());
+    println!("Successfully type-checked {} function(s)", program.functions.len());
 }

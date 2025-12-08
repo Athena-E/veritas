@@ -17,6 +17,8 @@ pub enum Token<'src> {
     Return,
     For,
     In,
+    Requires,
+    Invariant,
     // Type keywords
     Int,
     Bool,
@@ -39,6 +41,8 @@ impl fmt::Display for Token<'_> {
             Token::Return => write!(f, "return"),
             Token::For => write!(f, "for"),
             Token::In => write!(f, "in"),
+            Token::Requires => write!(f, "requires"),
+            Token::Invariant => write!(f, "invariant"),
             Token::Int => write!(f, "int"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
@@ -48,7 +52,7 @@ impl fmt::Display for Token<'_> {
 }
 
 // Binary operators
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -64,7 +68,7 @@ pub enum BinOp {
 }
 
 // Unary operators
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UnaryOp {
     Not,
 }
@@ -150,6 +154,7 @@ pub enum Stmt<'src> {
         var: &'src str,
         start: Box<Spanned<Expr<'src>>>,
         end: Box<Spanned<Expr<'src>>>,
+        invariant: Option<Spanned<Expr<'src>>>,
         body: Vec<Spanned<Stmt<'src>>>,
     },
 }
@@ -174,6 +179,7 @@ pub struct Function<'src> {
     pub name: &'src str,
     pub parameters: Vec<Spanned<Parameter<'src>>>,
     pub return_type: Spanned<Type<'src>>,
+    pub precondition: Option<Spanned<Expr<'src>>>,
     pub body: FunctionBody<'src>,
 }
 
