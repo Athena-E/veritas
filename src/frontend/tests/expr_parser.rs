@@ -1,7 +1,7 @@
+use super::common::parse_tokens;
 use crate::common::ast::{Expr, Literal};
 use crate::frontend::parser::expr_parser_for_types;
 use chumsky::prelude::*;
-use super::common::parse_tokens;
 
 #[test]
 fn test_expr_parser_integer_literal() {

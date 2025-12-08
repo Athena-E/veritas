@@ -1,7 +1,7 @@
+use super::common::parse_tokens;
 use crate::common::ast::Type;
 use crate::frontend::parser::type_parser;
 use chumsky::prelude::*;
-use super::common::parse_tokens;
 
 #[test]
 fn test_type_parser_int() {

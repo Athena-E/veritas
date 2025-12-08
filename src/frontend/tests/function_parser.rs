@@ -1,7 +1,7 @@
-use crate::frontend::parser::function_parser;
-use crate::common::ast::Type;
-use chumsky::prelude::*;
 use super::common::parse_tokens;
+use crate::common::ast::Type;
+use crate::frontend::parser::function_parser;
+use chumsky::prelude::*;
 
 #[test]
 fn test_simple_function() {

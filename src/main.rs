@@ -2,7 +2,7 @@ mod cli;
 mod common;
 mod frontend;
 
-use cli::frontend::{Config, read_source_file, display_typed_program, run_pipeline, PipelineError};
+use cli::frontend::{Config, PipelineError, display_typed_program, read_source_file, run_pipeline};
 use frontend::typechecker::report_type_error;
 
 fn main() {
@@ -57,5 +57,8 @@ fn main() {
     }
 
     println!("\n{}", "=".repeat(60));
-    println!("Successfully type-checked {} function(s)", program.functions.len());
+    println!(
+        "Successfully type-checked {} function(s)",
+        program.functions.len()
+    );
 }

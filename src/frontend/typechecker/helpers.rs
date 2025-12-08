@@ -12,15 +12,21 @@ use std::sync::Arc;
 pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'src> {
     match (op, ty1, ty2) {
         // Arithmetic on singleton ints
-        (BinOp::Add, IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) => {
-            IType::SingletonInt(IValue::Int(n1 + n2))
-        }
-        (BinOp::Sub, IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) => {
-            IType::SingletonInt(IValue::Int(n1 - n2))
-        }
-        (BinOp::Mul, IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) => {
-            IType::SingletonInt(IValue::Int(n1 * n2))
-        }
+        (
+            BinOp::Add,
+            IType::SingletonInt(IValue::Int(n1)),
+            IType::SingletonInt(IValue::Int(n2)),
+        ) => IType::SingletonInt(IValue::Int(n1 + n2)),
+        (
+            BinOp::Sub,
+            IType::SingletonInt(IValue::Int(n1)),
+            IType::SingletonInt(IValue::Int(n2)),
+        ) => IType::SingletonInt(IValue::Int(n1 - n2)),
+        (
+            BinOp::Mul,
+            IType::SingletonInt(IValue::Int(n1)),
+            IType::SingletonInt(IValue::Int(n2)),
+        ) => IType::SingletonInt(IValue::Int(n1 * n2)),
 
         // Fallback to base int type
         (BinOp::Add | BinOp::Sub | BinOp::Mul, _, _) => IType::Int,
@@ -34,7 +40,11 @@ pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'
 pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>> {
     match expr {
         // Simple comparisons: x op n
-        Expr::BinOp { op: BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq, lhs, .. } => {
+        Expr::BinOp {
+            op: BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq,
+            lhs,
+            ..
+        } => {
             // Check if lhs is a variable
             if let Expr::Variable(var_name) = &lhs.0 {
                 Some(IProposition {
@@ -64,32 +74,56 @@ pub fn negate_proposition<'src>(prop: &IProposition<'src>) -> IProposition<'src>
 fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
     match expr {
         // Negate comparisons by flipping the operator
-        Expr::BinOp { op: BinOp::Lt, lhs, rhs } => Expr::BinOp {
+        Expr::BinOp {
+            op: BinOp::Lt,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
             op: BinOp::Gte,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         },
-        Expr::BinOp { op: BinOp::Lte, lhs, rhs } => Expr::BinOp {
+        Expr::BinOp {
+            op: BinOp::Lte,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
             op: BinOp::Gt,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         },
-        Expr::BinOp { op: BinOp::Gt, lhs, rhs } => Expr::BinOp {
+        Expr::BinOp {
+            op: BinOp::Gt,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
             op: BinOp::Lte,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         },
-        Expr::BinOp { op: BinOp::Gte, lhs, rhs } => Expr::BinOp {
+        Expr::BinOp {
+            op: BinOp::Gte,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
             op: BinOp::Lt,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         },
-        Expr::BinOp { op: BinOp::Eq, lhs, rhs } => Expr::BinOp {
+        Expr::BinOp {
+            op: BinOp::Eq,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
             op: BinOp::NotEq,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
         },
-        Expr::BinOp { op: BinOp::NotEq, lhs, rhs } => Expr::BinOp {
+        Expr::BinOp {
+            op: BinOp::NotEq,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
             op: BinOp::Eq,
             lhs: lhs.clone(),
             rhs: rhs.clone(),
@@ -112,7 +146,7 @@ pub fn check_array_bounds_expr<'src>(
     array_type: &IType<'src>,
     span: Span,
 ) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
-    use crate::frontend::typechecker::{check_provable, TypeError};
+    use crate::frontend::typechecker::{TypeError, check_provable};
 
     let dummy_span = SimpleSpan::new(0, 0);
 

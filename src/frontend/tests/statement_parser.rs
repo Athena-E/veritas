@@ -1,7 +1,7 @@
+use super::common::parse_tokens;
 use crate::common::ast::Stmt;
 use crate::frontend::parser::function_parser;
 use chumsky::prelude::*;
-use super::common::parse_tokens;
 
 #[test]
 fn test_let_statement_immutable() {
@@ -128,10 +128,10 @@ fn test_for_loop_with_multiple_statements() {
         )
         .into_result();
     assert!(result.is_ok());
-    if let Ok((func, _)) = result {
-        if let Stmt::For { body, .. } = &func.body.statements[0].0 {
-            assert_eq!(body.len(), 3);
-        }
+    if let Ok((func, _)) = result
+        && let Stmt::For { body, .. } = &func.body.statements[0].0
+    {
+        assert_eq!(body.len(), 3);
     }
 }
 
@@ -178,7 +178,10 @@ fn test_let_statement_with_array_init() {
     if let Ok((func, _)) = result {
         if let Stmt::Let { name, value, .. } = &func.body.statements[0].0 {
             assert_eq!(name, &"arr");
-            assert!(matches!(value.0, crate::common::ast::Expr::ArrayInit { .. }));
+            assert!(matches!(
+                value.0,
+                crate::common::ast::Expr::ArrayInit { .. }
+            ));
         } else {
             panic!("Expected Let statement");
         }

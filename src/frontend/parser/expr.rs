@@ -1,12 +1,11 @@
-use chumsky::{input::ValueInput, prelude::*};
-use crate::common::span::{Span, Spanned};
-use crate::common::ast::{Token, Expr, Literal, BinOp, UnaryOp, Stmt};
 use super::types::type_parser;
+use crate::common::ast::{BinOp, Expr, Literal, Stmt, Token, UnaryOp};
+use crate::common::span::{Span, Spanned};
+use chumsky::{input::ValueInput, prelude::*};
 
 // Expression parser for use in type contexts
-pub fn expr_parser_for_types<'tokens, 'src: 'tokens, I>(
-) -> impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>>
-       + Clone
+pub fn expr_parser_for_types<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
@@ -89,34 +88,32 @@ where
 
         // Unary operators
         let op_not = just(Token::Op("!")).to(UnaryOp::Not);
-        let unary = op_not
-            .repeated()
-            .foldr_with(indexed, |op, operand, e| {
-                (
-                    Expr::UnaryOp {
-                        op,
-                        cond: Box::new(operand),
-                    },
-                    e.span(),
-                )
-            });
+        let unary = op_not.repeated().foldr_with(indexed, |op, operand, e| {
+            (
+                Expr::UnaryOp {
+                    op,
+                    cond: Box::new(operand),
+                },
+                e.span(),
+            )
+        });
 
         // Binary operators with precedence
         // Multiplication
         let op_mul = just(Token::Op("*")).to(BinOp::Mul);
-        let product = unary.clone().foldl_with(
-            op_mul.then(unary).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        );
+        let product =
+            unary
+                .clone()
+                .foldl_with(op_mul.then(unary).repeated(), |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                });
 
         // Addition and subtraction
         let op_add = just(Token::Op("+")).to(BinOp::Add);
@@ -181,9 +178,8 @@ where
 }
 
 // Full expression parser
-pub fn expr_parser<'tokens, 'src: 'tokens, I>(
-) -> impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>>
-       + Clone
+pub fn expr_parser<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
@@ -267,36 +263,34 @@ where
                 },
             );
 
-            // Unary operators 
+            // Unary operators
             let op_not = just(Token::Op("!")).to(UnaryOp::Not);
-            let unary = op_not
-                .repeated()
-                .foldr_with(indexed, |op, operand, e| {
-                    (
-                        Expr::UnaryOp {
-                            op,
-                            cond: Box::new(operand),
-                        },
-                        e.span(),
-                    )
-                });
+            let unary = op_not.repeated().foldr_with(indexed, |op, operand, e| {
+                (
+                    Expr::UnaryOp {
+                        op,
+                        cond: Box::new(operand),
+                    },
+                    e.span(),
+                )
+            });
 
             // Binary operators with precedence
             // Multiplication
             let op_mul = just(Token::Op("*")).to(BinOp::Mul);
-            let product = unary.clone().foldl_with(
-                op_mul.then(unary).repeated(),
-                |lhs, (op, rhs), e| {
-                    (
-                        Expr::BinOp {
-                            op,
-                            lhs: Box::new(lhs),
-                            rhs: Box::new(rhs),
-                        },
-                        e.span(),
-                    )
-                },
-            );
+            let product =
+                unary
+                    .clone()
+                    .foldl_with(op_mul.then(unary).repeated(), |lhs, (op, rhs), e| {
+                        (
+                            Expr::BinOp {
+                                op,
+                                lhs: Box::new(lhs),
+                                rhs: Box::new(rhs),
+                            },
+                            e.span(),
+                        )
+                    });
 
             // Addition and subtraction
             let op_add = just(Token::Op("+")).to(BinOp::Add);
@@ -358,7 +352,7 @@ where
             logical.labelled("expression").as_context()
         });
 
-        // Statements 
+        // Statements
         let ty = type_parser();
 
         let let_stmt = just(Token::Let)
@@ -405,8 +399,16 @@ where
                             (Token::Ctrl('('), Token::Ctrl(')')),
                             (Token::Ctrl('['), Token::Ctrl(']')),
                         ],
-                        |span| vec![(Stmt::Assignment { lhs: (Expr::Error, span), rhs: (Expr::Error, span) }, span)],
-                    )))
+                        |span| {
+                            vec![(
+                                Stmt::Assignment {
+                                    lhs: (Expr::Error, span),
+                                    rhs: (Expr::Error, span),
+                                },
+                                span,
+                            )]
+                        },
+                    ))),
             )
             .then(
                 just(Token::Else)
@@ -421,10 +423,18 @@ where
                                     (Token::Ctrl('('), Token::Ctrl(')')),
                                     (Token::Ctrl('['), Token::Ctrl(']')),
                                 ],
-                                |span| vec![(Stmt::Assignment { lhs: (Expr::Error, span), rhs: (Expr::Error, span) }, span)],
-                            )))
+                                |span| {
+                                    vec![(
+                                        Stmt::Assignment {
+                                            lhs: (Expr::Error, span),
+                                            rhs: (Expr::Error, span),
+                                        },
+                                        span,
+                                    )]
+                                },
+                            ))),
                     )
-                    .or_not()
+                    .or_not(),
             )
             .map_with(|((cond, then_block), else_block), e| {
                 (

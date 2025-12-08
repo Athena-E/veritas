@@ -1,4 +1,4 @@
-pub mod span;
 pub mod ast;
-pub mod types;
+pub mod span;
 pub mod tast;
+pub mod types;

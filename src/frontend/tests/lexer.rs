@@ -1,5 +1,5 @@
-use crate::common::ast::Token;
 use super::common::parse_tokens;
+use crate::common::ast::Token;
 
 #[test]
 fn test_lexer_basic_statement() {

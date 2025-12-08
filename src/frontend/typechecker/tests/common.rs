@@ -33,6 +33,7 @@ pub fn make_comparison<'src>(var: &'src str, op: BinOp, value: i64) -> Expr<'src
 }
 
 /// Create an equality expression: var == other_var
+#[allow(dead_code)]
 pub fn make_var_equality<'src>(var1: &'src str, var2: &'src str) -> Expr<'src> {
     Expr::BinOp {
         op: BinOp::Eq,
@@ -42,6 +43,7 @@ pub fn make_var_equality<'src>(var1: &'src str, var2: &'src str) -> Expr<'src> {
 }
 
 /// Create an arithmetic expression: var + offset
+#[allow(dead_code)]
 pub fn make_add_expr<'src>(var: &'src str, offset: i64) -> Expr<'src> {
     Expr::BinOp {
         op: BinOp::Add,
@@ -71,6 +73,7 @@ pub fn assert_unprovable(ctx: &TypingContext, prop: &IProposition) {
 }
 
 /// Create a typing context with some immutable variables
+#[allow(dead_code)]
 pub fn make_context_with_vars<'src>(vars: Vec<(&str, IType<'src>)>) -> TypingContext<'src> {
     let mut ctx = TypingContext::new();
     for (name, ty) in vars {
@@ -80,6 +83,7 @@ pub fn make_context_with_vars<'src>(vars: Vec<(&str, IType<'src>)>) -> TypingCon
 }
 
 /// Create a typing context with propositions
+#[allow(dead_code)]
 pub fn make_context_with_props<'src>(props: Vec<IProposition<'src>>) -> TypingContext<'src> {
     let mut ctx = TypingContext::new();
     for prop in props {

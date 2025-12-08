@@ -1,5 +1,5 @@
 use crate::common::ast::{BinOp, Expr, Literal, Program, Stmt, Type, UnaryOp};
-use crate::common::tast::{TProgram, TStmt, TExpr};
+use crate::common::tast::{TExpr, TProgram, TStmt};
 
 /// Display the untyped AST (useful for debugging the parser)
 #[allow(dead_code)]
@@ -26,9 +26,14 @@ pub fn display_program(program: &Program) {
 
         let stmt_count = func.body.statements.len();
         let has_return_expr = func.body.return_expr.is_some();
-        println!("    Body: {} statement(s){}\n",
+        println!(
+            "    Body: {} statement(s){}\n",
             stmt_count,
-            if has_return_expr { " + implicit return" } else { "" }
+            if has_return_expr {
+                " + implicit return"
+            } else {
+                ""
+            }
         );
 
         for (i, (stmt, _)) in func.body.statements.iter().enumerate() {
@@ -58,20 +63,18 @@ pub fn display_program(program: &Program) {
                     );
                 }
                 Stmt::Return { expr } => {
-                    println!(
-                        "    [{}] return {};",
-                        i + 1,
-                        format_expr(&expr.0)
-                    );
+                    println!("    [{}] return {};", i + 1, format_expr(&expr.0));
                 }
                 Stmt::Expr(expr) => {
-                    println!(
-                        "    [{}] {};",
-                        i + 1,
-                        format_expr(&expr.0)
-                    );
+                    println!("    [{}] {};", i + 1, format_expr(&expr.0));
                 }
-                Stmt::For { var, start, end, invariant, body } => {
+                Stmt::For {
+                    var,
+                    start,
+                    end,
+                    invariant,
+                    body,
+                } => {
                     let inv_str = if let Some(inv) = invariant {
                         format!(" invariant {}", format_expr(&inv.0))
                     } else {
@@ -99,7 +102,10 @@ pub fn display_program(program: &Program) {
 
 /// Display the typed program structure in a human-readable format
 pub fn display_typed_program(program: &TProgram) {
-    println!("\nTyped Program with {} function(s):", program.functions.len());
+    println!(
+        "\nTyped Program with {} function(s):",
+        program.functions.len()
+    );
 
     for func in &program.functions {
         println!("\n  Function: '{}'", func.name);
@@ -121,9 +127,14 @@ pub fn display_typed_program(program: &TProgram) {
 
         let stmt_count = func.body.statements.len();
         let has_return_expr = func.body.return_expr.is_some();
-        println!("    Body: {} statement(s){}\n",
+        println!(
+            "    Body: {} statement(s){}\n",
             stmt_count,
-            if has_return_expr { " + implicit return" } else { "" }
+            if has_return_expr {
+                " + implicit return"
+            } else {
+                ""
+            }
         );
 
         for (i, (stmt, _)) in func.body.statements.iter().enumerate() {
@@ -172,7 +183,14 @@ pub fn display_typed_program(program: &TProgram) {
                         expr.0.get_type()
                     );
                 }
-                TStmt::For { var, var_ty, start, end, invariant, body } => {
+                TStmt::For {
+                    var,
+                    var_ty,
+                    start,
+                    end,
+                    invariant,
+                    body,
+                } => {
                     let inv_str = if let Some(inv) = invariant {
                         format!(" invariant {}", format_texpr(&inv.0))
                     } else {
@@ -194,7 +212,8 @@ pub fn display_typed_program(program: &TProgram) {
 
         // Display implicit return if present
         if let Some(return_expr) = &func.body.return_expr {
-            println!("    [return] {} // : {}",
+            println!(
+                "    [return] {} // : {}",
                 format_texpr(&return_expr.0),
                 return_expr.0.get_type()
             );
@@ -238,7 +257,9 @@ fn format_texpr(expr: &TExpr) -> String {
             };
             format!("({} {})", u_op_str, format_texpr(&operand.0))
         }
-        TExpr::Call { func_name, args, .. } => {
+        TExpr::Call {
+            func_name, args, ..
+        } => {
             let arg_strs: Vec<String> = args.iter().map(|(e, _)| format_texpr(e)).collect();
             format!("{}({})", func_name, arg_strs.join(", "))
         }
@@ -275,10 +296,7 @@ pub fn format_type(ty: &Type) -> String {
     match ty {
         Type::Int => "int".to_string(),
         Type::Bool => "bool".to_string(),
-        Type::Array {
-            element_type,
-            size,
-        } => {
+        Type::Array { element_type, size } => {
             format!(
                 "[{}; {}]",
                 format_type(&element_type.0),
@@ -290,7 +308,7 @@ pub fn format_type(ty: &Type) -> String {
         Type::SingletonInt(expr) => format!("int({})", format_expr(&expr.0)),
         Type::RefinedInt { var, predicate } => {
             format!("{{{}: int | {}}}", var, format_expr(&predicate.0))
-        },
+        }
         Type::Unit => "()".to_string(),
     }
 }

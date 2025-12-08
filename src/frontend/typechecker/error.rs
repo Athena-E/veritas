@@ -20,20 +20,26 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
-    UndefinedVariable { name: String, span: Span },
+    UndefinedVariable {
+        name: String,
+        span: Span,
+    },
 
-    UndefinedFunction { name: String, span: Span },
+    UndefinedFunction {
+        name: String,
+        span: Span,
+    },
 
     InvalidArrayAccess {
         array_type: IType<'src>,
-        index_expr: String, 
-        reason: String,     
+        index_expr: String,
+        reason: String,
         span: Span,
     },
 
     InvalidAssignment {
         variable: String,
-        reason: String, 
+        reason: String,
         span: Span,
     },
 
@@ -58,9 +64,15 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
-    InvalidArraySize { size: String, span: Span },
+    InvalidArraySize {
+        size: String,
+        span: Span,
+    },
 
-    AssignToImmutable { variable: String, span: Span },
+    AssignToImmutable {
+        variable: String,
+        span: Span,
+    },
 
     ReturnTypeMismatch {
         expected: IType<'src>,
@@ -257,11 +269,7 @@ impl<'src> fmt::Display for TypeError<'src> {
             }
 
             TypeError::NotAnArray { found, span } => {
-                write!(
-                    f,
-                    "Expected array type at {:?}, found `{}`",
-                    span, found
-                )
+                write!(f, "Expected array type at {:?}, found `{}`", span, found)
             }
 
             TypeError::MissingReturn { expected, span } => {
@@ -272,7 +280,11 @@ impl<'src> fmt::Display for TypeError<'src> {
                 )
             }
 
-            TypeError::WrongNumberOfArguments { expected, found, span } => {
+            TypeError::WrongNumberOfArguments {
+                expected,
+                found,
+                span,
+            } => {
                 write!(
                     f,
                     "Wrong number of arguments at {:?}: expected {}, found {}",
@@ -281,19 +293,11 @@ impl<'src> fmt::Display for TypeError<'src> {
             }
 
             TypeError::UnsupportedFeature { feature, span } => {
-                write!(
-                    f,
-                    "Unsupported feature at {:?}: {}",
-                    span, feature
-                )
+                write!(f, "Unsupported feature at {:?}: {}", span, feature)
             }
 
             TypeError::NotAConstant { span } => {
-                write!(
-                    f,
-                    "Expression at {:?} is not a compile-time constant",
-                    span
-                )
+                write!(f, "Expression at {:?} is not a compile-time constant", span)
             }
         }
     }

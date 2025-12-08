@@ -1,10 +1,11 @@
-use chumsky::prelude::*;
 use crate::common::tast::TProgram;
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
-use crate::frontend::typechecker::{check_program, TypeError};
+use crate::frontend::typechecker::{TypeError, check_program};
+use chumsky::prelude::*;
 
 /// Pipeline error types
+#[allow(clippy::enum_variant_names)]
 pub enum PipelineError<'src> {
     LexError(String),
     ParseError(String),
@@ -12,7 +13,10 @@ pub enum PipelineError<'src> {
 }
 
 /// Run the full compilation pipeline: lex, parse, and type check
-pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<TProgram<'src>, PipelineError<'src>> {
+pub fn run_pipeline<'src>(
+    src: &'src str,
+    verbose: bool,
+) -> Result<TProgram<'src>, PipelineError<'src>> {
     // Lexer
     println!("\n[1] Lexing...");
     let (tokens, lex_errors) = lexer().parse(src).into_output_errors();
@@ -45,7 +49,11 @@ pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<TProgram<'src
     // Parser
     println!("\n[2] Parsing...");
     let (program, parse_errors) = program_parser()
-        .parse(tokens.as_slice().map((src.len()..src.len()).into(), |(t, s)| (t, s)))
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
         .into_output_errors();
 
     // Handle parse errors
@@ -67,8 +75,7 @@ pub fn run_pipeline<'src>(src: &'src str, verbose: bool) -> Result<TProgram<'src
 
     // Type checker
     println!("\n[3] Type checking...");
-    let typed_program = check_program(&program)
-        .map_err(PipelineError::TypeError)?;
+    let typed_program = check_program(&program).map_err(PipelineError::TypeError)?;
 
     println!("Type checking passed!");
 

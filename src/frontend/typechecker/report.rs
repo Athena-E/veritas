@@ -1,7 +1,7 @@
 // Pretty error reporting with source highlighting using ariadne
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
 use crate::frontend::typechecker::TypeError;
+use ariadne::{Color, Label, Report, ReportKind, Source};
 
 /// Report a type error with source highlighting
 pub fn report_type_error(filename: &str, source: &str, error: &TypeError) {
@@ -11,7 +11,11 @@ pub fn report_type_error(filename: &str, source: &str, error: &TypeError) {
         .expect("Failed to print error report");
 
     // Print filename for context
-    eprintln!("  --> {}:{}", filename, get_line_col(source, get_span_start(error)));
+    eprintln!(
+        "  --> {}:{}",
+        filename,
+        get_line_col(source, get_span_start(error))
+    );
 }
 
 fn get_span_start(error: &TypeError) -> usize {
@@ -58,18 +62,23 @@ fn get_line_col(source: &str, offset: usize) -> String {
 /// Build an ariadne Report from a TypeError
 fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
     match error {
-        TypeError::TypeMismatch { expected, found, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E001")
-                .with_message("Type mismatch")
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(format!("expected `{}`, found `{}`", expected, found))
-                        .with_color(Color::Red),
-                )
-                .with_help(format!("The expression has type `{}` but `{}` was expected", found, expected))
-                .finish()
-        }
+        TypeError::TypeMismatch {
+            expected,
+            found,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E001")
+            .with_message("Type mismatch")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(format!("expected `{}`, found `{}`", expected, found))
+                    .with_color(Color::Red),
+            )
+            .with_help(format!(
+                "The expression has type `{}` but `{}` was expected",
+                found, expected
+            ))
+            .finish(),
 
         TypeError::UndefinedVariable { name, span } => {
             Report::build(ReportKind::Error, span.start..span.end)
@@ -106,35 +115,46 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                         .with_message("cannot assign twice to immutable variable")
                         .with_color(Color::Red),
                 )
-                .with_help(format!("Consider making `{}` mutable: `let mut {}`", name, name))
+                .with_help(format!(
+                    "Consider making `{}` mutable: `let mut {}`",
+                    name, name
+                ))
                 .finish()
         }
 
         TypeError::AssignToImmutable { variable, span } => {
             Report::build(ReportKind::Error, span.start..span.end)
                 .with_code("E004")
-                .with_message(format!("Cannot assign to immutable variable `{}`", variable))
+                .with_message(format!(
+                    "Cannot assign to immutable variable `{}`",
+                    variable
+                ))
                 .with_label(
                     Label::new(span.start..span.end)
                         .with_message("cannot assign twice to immutable variable")
                         .with_color(Color::Red),
                 )
-                .with_help(format!("Consider making `{}` mutable: `let mut {}`", variable, variable))
+                .with_help(format!(
+                    "Consider making `{}` mutable: `let mut {}`",
+                    variable, variable
+                ))
                 .finish()
         }
 
-        TypeError::ReturnTypeMismatch { expected, found, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E005")
-                .with_message("Mismatched return type")
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(format!("expected `{}`, found `{}`", expected, found))
-                        .with_color(Color::Red),
-                )
-                .with_help(format!("The function expects to return `{}`", expected))
-                .finish()
-        }
+        TypeError::ReturnTypeMismatch {
+            expected,
+            found,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E005")
+            .with_message("Mismatched return type")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(format!("expected `{}`, found `{}`", expected, found))
+                    .with_color(Color::Red),
+            )
+            .with_help(format!("The function expects to return `{}`", expected))
+            .finish(),
 
         TypeError::MissingReturn { expected, span } => {
             Report::build(ReportKind::Error, span.start..span.end)
@@ -162,94 +182,129 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                 .finish()
         }
 
-        TypeError::InvalidArrayAccess { array_type, index_expr, reason, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E008")
-                .with_message("Invalid array access")
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(reason.clone())
-                        .with_color(Color::Red),
-                )
-                .with_note(format!("Array type: `{}`\nIndex expression: `{}`", array_type, index_expr))
-                .finish()
-        }
+        TypeError::InvalidArrayAccess {
+            array_type,
+            index_expr,
+            reason,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E008")
+            .with_message("Invalid array access")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(reason.clone())
+                    .with_color(Color::Red),
+            )
+            .with_note(format!(
+                "Array type: `{}`\nIndex expression: `{}`",
+                array_type, index_expr
+            ))
+            .finish(),
 
-        TypeError::WrongNumberOfArguments { expected, found, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E009")
-                .with_message("Wrong number of arguments")
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(format!("expected {} argument(s), found {}", expected, found))
-                        .with_color(Color::Red),
-                )
-                .finish()
-        }
+        TypeError::WrongNumberOfArguments {
+            expected,
+            found,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E009")
+            .with_message("Wrong number of arguments")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(format!(
+                        "expected {} argument(s), found {}",
+                        expected, found
+                    ))
+                    .with_color(Color::Red),
+            )
+            .finish(),
 
-        TypeError::ArityMismatch { function, expected, found, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E009")
-                .with_message(format!("Function `{}` expects {} argument(s)", function, expected))
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(format!("supplied {} argument(s)", found))
-                        .with_color(Color::Red),
-                )
-                .finish()
-        }
+        TypeError::ArityMismatch {
+            function,
+            expected,
+            found,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E009")
+            .with_message(format!(
+                "Function `{}` expects {} argument(s)",
+                function, expected
+            ))
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(format!("supplied {} argument(s)", found))
+                    .with_color(Color::Red),
+            )
+            .finish(),
 
-        TypeError::InvalidAssignment { variable, reason, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E010")
-                .with_message(format!("Invalid assignment to `{}`", variable))
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(reason.clone())
-                        .with_color(Color::Red),
-                )
-                .finish()
-        }
+        TypeError::InvalidAssignment {
+            variable,
+            reason,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E010")
+            .with_message(format!("Invalid assignment to `{}`", variable))
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(reason.clone())
+                    .with_color(Color::Red),
+            )
+            .finish(),
 
-        TypeError::MasterTypeMismatch { variable, master_type, assigned_type, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E011")
-                .with_message(format!("Assignment violates type constraint for `{}`", variable))
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(format!("cannot assign `{}` to variable of type `{}`", assigned_type, master_type))
-                        .with_color(Color::Red),
-                )
-                .with_note(format!("Variable `{}` was declared with type `{}`", variable, master_type))
-                .finish()
-        }
+        TypeError::MasterTypeMismatch {
+            variable,
+            master_type,
+            assigned_type,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E011")
+            .with_message(format!(
+                "Assignment violates type constraint for `{}`",
+                variable
+            ))
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(format!(
+                        "cannot assign `{}` to variable of type `{}`",
+                        assigned_type, master_type
+                    ))
+                    .with_color(Color::Red),
+            )
+            .with_note(format!(
+                "Variable `{}` was declared with type `{}`",
+                variable, master_type
+            ))
+            .finish(),
 
-        TypeError::Unprovable { proposition, context, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E012")
-                .with_message("Could not verify refinement")
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message(context.clone())
-                        .with_color(Color::Red),
-                )
-                .with_note(format!("Required to prove: {}", proposition))
-                .with_help("Consider adding assertions or preconditions to help the solver")
-                .finish()
-        }
+        TypeError::Unprovable {
+            proposition,
+            context,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E012")
+            .with_message("Could not verify refinement")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(context.clone())
+                    .with_color(Color::Red),
+            )
+            .with_note(format!("Required to prove: {}", proposition))
+            .with_help("Consider adding assertions or preconditions to help the solver")
+            .finish(),
 
-        TypeError::PreconditionViolation { function, precondition, span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E013")
-                .with_message(format!("Precondition not satisfied for `{}`", function))
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message("precondition may not hold")
-                        .with_color(Color::Red),
-                )
-                .with_note(format!("Required: {}", precondition))
-                .finish()
-        }
+        TypeError::PreconditionViolation {
+            function,
+            precondition,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E013")
+            .with_message(format!("Precondition not satisfied for `{}`", function))
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message("precondition may not hold")
+                    .with_color(Color::Red),
+            )
+            .with_note(format!("Required: {}", precondition))
+            .finish(),
 
         TypeError::InvalidArraySize { size, span } => {
             Report::build(ReportKind::Error, span.start..span.end)
@@ -264,7 +319,11 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                 .finish()
         }
 
-        TypeError::InvalidOperation { operation, operand_types, span } => {
+        TypeError::InvalidOperation {
+            operation,
+            operand_types,
+            span,
+        } => {
             let types_str = operand_types
                 .iter()
                 .map(|t| format!("`{}`", t))
@@ -293,17 +352,15 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                 .finish()
         }
 
-        TypeError::NotAConstant { span } => {
-            Report::build(ReportKind::Error, span.start..span.end)
-                .with_code("E017")
-                .with_message("Expected compile-time constant")
-                .with_label(
-                    Label::new(span.start..span.end)
-                        .with_message("this expression is not a constant")
-                        .with_color(Color::Red),
-                )
-                .with_help("Array sizes must be known at compile time")
-                .finish()
-        }
+        TypeError::NotAConstant { span } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E017")
+            .with_message("Expected compile-time constant")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message("this expression is not a constant")
+                    .with_color(Color::Red),
+            )
+            .with_help("Array sizes must be known at compile time")
+            .finish(),
     }
 }

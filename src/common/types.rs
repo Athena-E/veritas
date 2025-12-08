@@ -1,7 +1,7 @@
 use crate::common::ast::Expr;
 use crate::common::span::{Span, Spanned};
 use std::fmt;
-use std::sync::Arc; 
+use std::sync::Arc;
 
 /// Semantic types of compile-time values
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -25,8 +25,8 @@ impl fmt::Display for IValue {
 // Semantic types of propositions
 #[derive(Clone, Debug)]
 pub struct IProposition<'src> {
-    pub var: String, 
-    pub predicate: Arc<Spanned<Expr<'src>>>, 
+    pub var: String,
+    pub predicate: Arc<Spanned<Expr<'src>>>,
 }
 
 // Internal, semantic representation of a type
@@ -37,7 +37,7 @@ pub enum IType<'src> {
     Bool,
     Array {
         element_type: Arc<Self>,
-        size: IValue, 
+        size: IValue,
     },
     Ref(Arc<Self>),
     RefMut(Arc<Self>),
@@ -147,7 +147,11 @@ impl<'src> fmt::Display for FunctionSignature<'src> {
             .collect::<Vec<_>>()
             .join(", ");
 
-        write!(f, "fn {}({}) -> {}", self.name, params_str, self.return_type)?;
+        write!(
+            f,
+            "fn {}({}) -> {}",
+            self.name, params_str, self.return_type
+        )?;
 
         if let Some(ref precond) = self.precondition {
             write!(f, " requires {}", precond)?;

@@ -1,8 +1,8 @@
 // Tests for Display trait implementations on semantic types
 
-use crate::common::types::{FunctionSignature, IType, IValue};
 use super::common::*;
 use crate::common::ast::BinOp;
+use crate::common::types::{FunctionSignature, IType, IValue};
 use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
 
@@ -78,7 +78,10 @@ fn test_display_function_signature() {
         precondition: None,
         span: SimpleSpan::new(0, 0),
     };
-    assert_eq!(format!("{}", sig_multiple), "fn bar(a: int, b: bool, c: ()) -> int");
+    assert_eq!(
+        format!("{}", sig_multiple),
+        "fn bar(a: int, b: bool, c: ()) -> int"
+    );
 
     let sig_no_params = FunctionSignature {
         name: "empty".to_string(),

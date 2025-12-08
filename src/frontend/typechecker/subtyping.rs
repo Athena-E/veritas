@@ -35,8 +35,14 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
 
         // Refined to refined: {x: int | P} <: {x: int | Q} if Phi /\ P |- Q
         (
-            IType::RefinedInt { base: base1, prop: prop1 },
-            IType::RefinedInt { base: base2, prop: prop2 },
+            IType::RefinedInt {
+                base: base1,
+                prop: prop1,
+            },
+            IType::RefinedInt {
+                base: base2,
+                prop: prop2,
+            },
         ) => {
             // First check base types are compatible
             if !is_subtype(ctx, base1, base2) {
@@ -59,8 +65,14 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
         // Array subtyping: [T1; n] <: [T2; m] if T1 <: T2 and n = m
         // allow covariance for immutable arrays since elements are read-only
         (
-            IType::Array { element_type: elem1, size: size1 },
-            IType::Array { element_type: elem2, size: size2 },
+            IType::Array {
+                element_type: elem1,
+                size: size1,
+            },
+            IType::Array {
+                element_type: elem2,
+                size: size2,
+            },
         ) => {
             // Sizes must match, element type is covariant for immutable arrays
             size1 == size2 && is_subtype(ctx, elem1, elem2)
@@ -90,8 +102,14 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
         (IType::SingletonInt(v1), IType::SingletonInt(v2)) => v1 == v2,
 
         (
-            IType::Array { element_type: e1, size: s1 },
-            IType::Array { element_type: e2, size: s2 },
+            IType::Array {
+                element_type: e1,
+                size: s1,
+            },
+            IType::Array {
+                element_type: e2,
+                size: s2,
+            },
         ) => s1 == s2 && types_equal(e1, e2),
 
         (IType::Ref(t1), IType::Ref(t2)) => types_equal(t1, t2),
@@ -100,10 +118,7 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
 
         // TODO: need SMT for refined types
         // Temp fix: require exact structural match
-        (
-            IType::RefinedInt { base: b1, prop: p1 },
-            IType::RefinedInt { base: b2, prop: p2 },
-        ) => {
+        (IType::RefinedInt { base: b1, prop: p1 }, IType::RefinedInt { base: b2, prop: p2 }) => {
             types_equal(b1, b2) && p1.var == p2.var
         }
 
@@ -112,21 +127,20 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
 }
 
 /// Substitute a value for the bound variable in a proposition
-fn substitute_value_in_prop<'src>(prop: &IProposition<'src>, value: &'src IValue) -> IProposition<'src> {
+fn substitute_value_in_prop<'src>(
+    prop: &IProposition<'src>,
+    value: &'src IValue,
+) -> IProposition<'src> {
     let substituted_expr = substitute_value_in_expr(&prop.predicate.0, &prop.var, value);
 
     IProposition {
-        var: "_".to_string(), 
+        var: "_".to_string(),
         predicate: Arc::new((substituted_expr, prop.predicate.1)),
     }
 }
 
 /// Substitute a value for a variable in an expression
-fn substitute_value_in_expr<'src>(
-    expr: &Expr<'src>,
-    var: &str,
-    value: &'src IValue,
-) -> Expr<'src> {
+fn substitute_value_in_expr<'src>(expr: &Expr<'src>, var: &str, value: &'src IValue) -> Expr<'src> {
     match expr {
         Expr::Variable(name) if *name == var => {
             // Replace variable with value
@@ -141,22 +155,13 @@ fn substitute_value_in_expr<'src>(
 
         Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
-            lhs: Box::new((
-                substitute_value_in_expr(&lhs.0, var, value),
-                lhs.1,
-            )),
-            rhs: Box::new((
-                substitute_value_in_expr(&rhs.0, var, value),
-                rhs.1,
-            )),
+            lhs: Box::new((substitute_value_in_expr(&lhs.0, var, value), lhs.1)),
+            rhs: Box::new((substitute_value_in_expr(&rhs.0, var, value), rhs.1)),
         },
 
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
-            cond: Box::new((
-                substitute_value_in_expr(&cond.0, var, value),
-                cond.1,
-            )),
+            cond: Box::new((substitute_value_in_expr(&cond.0, var, value), cond.1)),
         },
 
         _ => expr.clone(),
@@ -174,11 +179,7 @@ fn rename_prop_var<'src>(prop: &IProposition<'src>, new_var: &'src str) -> IProp
 }
 
 /// Rename a variable in an expression
-fn rename_var_in_expr<'src>(
-    expr: &Expr<'src>,
-    old_var: &str,
-    new_var: &'src str,
-) -> Expr<'src> {
+fn rename_var_in_expr<'src>(expr: &Expr<'src>, old_var: &str, new_var: &'src str) -> Expr<'src> {
     match expr {
         Expr::Variable(name) if *name == old_var => Expr::Variable(new_var),
 
@@ -186,22 +187,13 @@ fn rename_var_in_expr<'src>(
 
         Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
-            lhs: Box::new((
-                rename_var_in_expr(&lhs.0, old_var, new_var),
-                lhs.1,
-            )),
-            rhs: Box::new((
-                rename_var_in_expr(&rhs.0, old_var, new_var),
-                rhs.1,
-            )),
+            lhs: Box::new((rename_var_in_expr(&lhs.0, old_var, new_var), lhs.1)),
+            rhs: Box::new((rename_var_in_expr(&rhs.0, old_var, new_var), rhs.1)),
         },
 
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
-            cond: Box::new((
-                rename_var_in_expr(&cond.0, old_var, new_var),
-                cond.1,
-            )),
+            cond: Box::new((rename_var_in_expr(&cond.0, old_var, new_var), cond.1)),
         },
 
         _ => expr.clone(),

@@ -4,9 +4,7 @@ use crate::common::ast::{Function, Program, Stmt, Type as AstType};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IType, IValue};
-use crate::frontend::typechecker::{
-    TypeError, TypingContext, is_subtype, synth_expr,
-};
+use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_expr};
 use im::HashMap;
 use std::sync::Arc;
 
@@ -20,7 +18,12 @@ pub fn check_stmt<'src>(
 
     match &stmt.0 {
         // LET-IMMUT: Immutable variable binding
-        Stmt::Let { name, ty, value, is_mut: false } => {
+        Stmt::Let {
+            name,
+            ty,
+            value,
+            is_mut: false,
+        } => {
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
@@ -51,7 +54,12 @@ pub fn check_stmt<'src>(
         }
 
         // LET-MUT: Mutable variable binding
-        Stmt::Let { name, ty, value, is_mut: true } => {
+        Stmt::Let {
+            name,
+            ty,
+            value,
+            is_mut: true,
+        } => {
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
@@ -93,11 +101,12 @@ pub fn check_stmt<'src>(
                 // Variable assignment
                 crate::common::ast::Expr::Variable(var_name) => {
                     // Look up mutable variable
-                    let binding = ctx.lookup_mutable(var_name)
-                        .ok_or_else(|| TypeError::NotMutable {
-                            name: var_name.to_string(),
-                            span,
-                        })?;
+                    let binding =
+                        ctx.lookup_mutable(var_name)
+                            .ok_or_else(|| TypeError::NotMutable {
+                                name: var_name.to_string(),
+                                span,
+                            })?;
 
                     // Extract master type and check subtyping
                     let master_base = match &binding.master_type {
@@ -114,12 +123,13 @@ pub fn check_stmt<'src>(
                     }
 
                     // Update mutable variable's current type
-                    let new_ctx = ctx.with_mutable_update(var_name, rhs_ty.clone())
-                        .map_err(|e| TypeError::InvalidAssignment {
-                            variable: var_name.to_string(),
-                            reason: e,
-                            span,
-                        })?;
+                    let new_ctx =
+                        ctx.with_mutable_update(var_name, rhs_ty.clone())
+                            .map_err(|e| TypeError::InvalidAssignment {
+                                variable: var_name.to_string(),
+                                reason: e,
+                                span,
+                            })?;
 
                     // Create TExpr for the left-hand side
                     let tlhs_expr = TExpr::Variable {
@@ -152,20 +162,17 @@ pub fn check_stmt<'src>(
                     // Check array type and extract element type
                     let (elem_ty, array_size) = match &base_ty {
                         IType::Array { element_type, size } => (element_type.as_ref(), size),
-                        _ => return Err(TypeError::NotAnArray {
-                            found: base_ty,
-                            span: base.1,
-                        }),
+                        _ => {
+                            return Err(TypeError::NotAnArray {
+                                found: base_ty,
+                                span: base.1,
+                            });
+                        }
                     };
 
                     // Check array bounds using the actual index expression
                     crate::frontend::typechecker::check_array_bounds_expr(
-                        ctx,
-                        &index.0,
-                        &index_ty,
-                        array_size,
-                        &base_ty,
-                        index.1,
+                        ctx, &index.0, &index_ty, array_size, &base_ty, index.1,
                     )?;
 
                     // Check value type matches element type
@@ -206,14 +213,14 @@ pub fn check_stmt<'src>(
             let (texpr, ret_ty) = synth_expr(ctx, expr)?;
 
             // Check return type matches expected return type
-            if let Some(expected) = ctx.get_expected_return() {
-                if !is_subtype(ctx, &ret_ty, expected) {
-                    return Err(TypeError::ReturnTypeMismatch {
-                        expected: expected.clone(),
-                        found: ret_ty,
-                        span: expr.1,
-                    });
-                }
+            if let Some(expected) = ctx.get_expected_return()
+                && !is_subtype(ctx, &ret_ty, expected)
+            {
+                return Err(TypeError::ReturnTypeMismatch {
+                    expected: expected.clone(),
+                    found: ret_ty,
+                    span: expr.1,
+                });
             }
 
             let tstmt = TStmt::Return {
@@ -224,7 +231,13 @@ pub fn check_stmt<'src>(
         }
 
         // FOR-LOOP: For loop with range and optional invariant
-        Stmt::For { var, start, end, invariant, body } => {
+        Stmt::For {
+            var,
+            start,
+            end,
+            invariant,
+            body,
+        } => {
             let (tstart, start_ty) = synth_expr(ctx, start)?;
             let (tend, end_ty) = synth_expr(ctx, end)?;
 
@@ -325,12 +338,14 @@ pub fn check_stmt<'src>(
         Stmt::Expr(expr) => {
             match &expr.0 {
                 // If-expression as statement: handle context joining
-                crate::common::ast::Expr::If { cond, then_block, else_block } => {
-                    check_if_stmt(ctx, cond, then_block, else_block.as_ref(), span)
-                }
+                crate::common::ast::Expr::If {
+                    cond,
+                    then_block,
+                    else_block,
+                } => check_if_stmt(ctx, cond, then_block, else_block.as_ref(), span),
                 // Other expressions: context unchanged
                 _ => {
-                    let (texpr, _) = synth_expr(ctx, &expr)?;
+                    let (texpr, _) = synth_expr(ctx, expr)?;
                     let tstmt = TStmt::Expr(texpr);
                     Ok(((tstmt, span), ctx.clone()))
                 }
@@ -343,7 +358,7 @@ pub fn check_stmt<'src>(
 /// Returns the joined context after both branches merge
 fn check_if_stmt<'src>(
     ctx: &TypingContext<'src>,
-    cond: &Box<Spanned<crate::common::ast::Expr<'src>>>,
+    cond: &Spanned<crate::common::ast::Expr<'src>>,
     then_block: &[Spanned<crate::common::ast::Stmt<'src>>],
     else_block: Option<&Vec<Spanned<crate::common::ast::Stmt<'src>>>>,
     span: Span,
@@ -447,7 +462,9 @@ pub fn check_function<'src>(
     // Add precondition to context (if present) - this allows the function body
     // to assume the precondition holds
     if let Some(precond_expr) = &func_inner.precondition {
-        let var_name = func_inner.parameters.first()
+        let var_name = func_inner
+            .parameters
+            .first()
             .map(|p| p.0.name.to_string())
             .unwrap_or_else(|| "_".to_string());
 
@@ -501,7 +518,10 @@ pub fn check_function<'src>(
     };
 
     // Build typed function
-    let tparams: Vec<TParameter> = func_inner.parameters.iter().zip(param_types.iter())
+    let tparams: Vec<TParameter> = func_inner
+        .parameters
+        .iter()
+        .zip(param_types.iter())
         .map(|(spanned_param, ty)| TParameter {
             name: spanned_param.0.name.to_string(),
             ty: ty.clone(),
@@ -523,9 +543,7 @@ pub fn check_function<'src>(
 }
 
 /// Check an entire program
-pub fn check_program<'src>(
-    program: &Program<'src>,
-) -> Result<TProgram<'src>, TypeError<'src>> {
+pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, TypeError<'src>> {
     let mut signatures = HashMap::new();
 
     for spanned_func in &program.functions {
@@ -546,7 +564,9 @@ pub fn check_program<'src>(
         let precondition = func.precondition.as_ref().map(|precond_expr| {
             // For preconditions, the bound variable is typically the first parameter
             // or we use a generic "_" if there are no parameters
-            let var_name = func.parameters.first()
+            let var_name = func
+                .parameters
+                .first()
                 .map(|p| p.0.name.to_string())
                 .unwrap_or_else(|| "_".to_string());
 
@@ -632,14 +652,14 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
 }
 
 /// Evaluate array size expression to IValue
-fn eval_array_size<'src>(expr: &Spanned<crate::common::ast::Expr<'src>>) -> Result<IValue, TypeError<'src>> {
+fn eval_array_size<'src>(
+    expr: &Spanned<crate::common::ast::Expr<'src>>,
+) -> Result<IValue, TypeError<'src>> {
     use crate::common::ast::{Expr, Literal};
 
     match &expr.0 {
         Expr::Literal(Literal::Int(n)) => Ok(IValue::Int(*n)),
         Expr::Variable(name) => Ok(IValue::Symbolic(name.to_string())),
-        _ => Err(TypeError::NotAConstant {
-            span: expr.1,
-        }),
+        _ => Err(TypeError::NotAConstant { span: expr.1 }),
     }
 }

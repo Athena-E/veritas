@@ -1,12 +1,11 @@
-use chumsky::{input::ValueInput, prelude::*};
-use crate::common::span::{Span, Spanned};
-use crate::common::ast::{Token, Type};
 use super::expr::expr_parser_for_types;
+use crate::common::ast::{Token, Type};
+use crate::common::span::{Span, Spanned};
+use chumsky::{input::ValueInput, prelude::*};
 
 // Type parser
-pub fn type_parser<'tokens, 'src: 'tokens, I>(
-) -> impl Parser<'tokens, I, Spanned<Type<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>>
-       + Clone
+pub fn type_parser<'tokens, 'src: 'tokens, I>()
+-> impl Parser<'tokens, I, Spanned<Type<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
@@ -70,8 +69,14 @@ where
             )
             .map_with(|t, e| (t, e.span()));
 
-        choice((array_type, singleton_type, refined_type, ref_type, basic_type))
-            .labelled("type")
+        choice((
+            array_type,
+            singleton_type,
+            refined_type,
+            ref_type,
+            basic_type,
+        ))
+        .labelled("type")
     })
     .boxed()
 }

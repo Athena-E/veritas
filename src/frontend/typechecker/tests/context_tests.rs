@@ -1,9 +1,9 @@
 // Tests for TypingContext
 
-use crate::common::types::{FunctionSignature, IType};
-use crate::frontend::typechecker::{TypingContext, VarBinding};
 use super::common::*;
 use crate::common::ast::BinOp;
+use crate::common::types::{FunctionSignature, IType};
+use crate::frontend::typechecker::{TypingContext, VarBinding};
 
 #[test]
 fn test_context_new() {

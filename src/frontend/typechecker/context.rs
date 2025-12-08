@@ -1,12 +1,10 @@
 use crate::common::types::{FunctionSignature, IProposition, IType};
 use im::{HashMap, Vector};
 
-
 // phi: Refinement propositions known to be true
 // gamma: Immutable variable bindings
 // delta: Mutable variable bindings with master types
 // sigma_f: Global function signatures
-
 
 // delta: Mutable variable bindings with master types
 #[derive(Clone, Debug)]
@@ -45,7 +43,6 @@ pub struct TypingContext<'src> {
 }
 
 impl<'src> TypingContext<'src> {
-
     pub fn new() -> Self {
         Self {
             phi: Vector::new(),
@@ -123,11 +120,7 @@ impl<'src> TypingContext<'src> {
         new_ctx
     }
 
-    pub fn with_mutable_update(
-        &self,
-        name: &str,
-        new_type: IType<'src>,
-    ) -> Result<Self, String> {
+    pub fn with_mutable_update(&self, name: &str, new_type: IType<'src>) -> Result<Self, String> {
         let binding = self
             .delta
             .get(name)
@@ -239,14 +232,18 @@ fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
 
         // Arrays with same structure
         (
-            IType::Array { element_type: e1, size: s1 },
-            IType::Array { element_type: e2, size: s2 },
-        ) if s1 == s2 => {
             IType::Array {
-                element_type: std::sync::Arc::new(join_types(e1, e2)),
-                size: s1.clone(),
-            }
-        }
+                element_type: e1,
+                size: s1,
+            },
+            IType::Array {
+                element_type: e2,
+                size: s2,
+            },
+        ) if s1 == s2 => IType::Array {
+            element_type: std::sync::Arc::new(join_types(e1, e2)),
+            size: s1.clone(),
+        },
 
         // References - must be exactly equal, otherwise error
         // For now, just return t1 (caller should ensure compatibility)

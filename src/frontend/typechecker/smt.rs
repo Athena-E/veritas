@@ -132,8 +132,8 @@ impl SmtOracle {
         solver.assert(&negated_goal);
 
         match solver.check() {
-            SatResult::Unsat => true,  // Goal is provable
-            SatResult::Sat => false,   // Counterexample exists
+            SatResult::Unsat => true,    // Goal is provable
+            SatResult::Sat => false,     // Counterexample exists
             SatResult::Unknown => false, // Solver couldn't determine
         }
     }

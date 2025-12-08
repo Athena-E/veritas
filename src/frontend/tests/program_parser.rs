@@ -1,6 +1,6 @@
+use super::common::parse_tokens;
 use crate::frontend::parser::program_parser;
 use chumsky::prelude::*;
-use super::common::parse_tokens;
 
 #[test]
 fn test_program_single_function() {

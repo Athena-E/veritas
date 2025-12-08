@@ -1,10 +1,10 @@
-use chumsky::prelude::*;
-use crate::common::span::{Span, Spanned};
 use crate::common::ast::Token;
+use crate::common::span::{Span, Spanned};
+use chumsky::prelude::*;
 
 // Lexer
-pub fn lexer<'src>(
-) -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char, Span>>> {
+pub fn lexer<'src>()
+-> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char, Span>>> {
     // A parser for numbers
     let num = text::int(10)
         .to_slice()

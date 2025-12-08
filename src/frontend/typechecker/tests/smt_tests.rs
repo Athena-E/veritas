@@ -1,9 +1,9 @@
 // Tests for SMT Oracle
 
+use super::common::*;
 use crate::common::ast::{BinOp, Expr, Literal};
 use crate::frontend::typechecker::TypingContext;
 use chumsky::prelude::SimpleSpan;
-use super::common::*;
 
 #[test]
 fn test_smt_simple_implication() {

@@ -5,8 +5,8 @@ use crate::common::span::Spanned;
 use crate::common::tast::TExpr;
 use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{
-    TypeError, TypingContext, VarBinding, is_subtype, join_op,
-    check_array_bounds_expr, extract_proposition, negate_proposition, check_stmts
+    TypeError, TypingContext, VarBinding, check_array_bounds_expr, check_stmts,
+    extract_proposition, is_subtype, join_op, negate_proposition,
 };
 use std::sync::Arc;
 
@@ -76,7 +76,11 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-ARITH: Arithmetic operations
-        Expr::BinOp { op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), lhs, rhs } => {
+        Expr::BinOp {
+            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul),
+            lhs,
+            rhs,
+        } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
 
@@ -108,7 +112,11 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-CMP: Comparison operations
-        Expr::BinOp { op: op @ (BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq), lhs, rhs } => {
+        Expr::BinOp {
+            op: op @ (BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq),
+            lhs,
+            rhs,
+        } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
 
@@ -139,7 +147,11 @@ pub fn synth_expr<'src>(
         }
 
         // BINOP-BOOL: Boolean operations
-        Expr::BinOp { op: op @ (BinOp::And | BinOp::Or), lhs, rhs } => {
+        Expr::BinOp {
+            op: op @ (BinOp::And | BinOp::Or),
+            lhs,
+            rhs,
+        } => {
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
 
@@ -170,7 +182,10 @@ pub fn synth_expr<'src>(
         }
 
         // UNARY-NOT: Logical negation
-        Expr::UnaryOp { op: UnaryOp::Not, cond } => {
+        Expr::UnaryOp {
+            op: UnaryOp::Not,
+            cond,
+        } => {
             let (tcond, ty) = synth_expr(ctx, cond)?;
 
             if !is_subtype(ctx, &ty, &IType::Bool) {
@@ -229,11 +244,12 @@ pub fn synth_expr<'src>(
         // FUNC-CALL: Function call
         Expr::Call { func_name, args } => {
             // Look up function signature
-            let sig = ctx.lookup_function(func_name)
-                .ok_or_else(|| TypeError::UndefinedFunction {
-                    name: func_name.to_string(),
-                    span,
-                })?;
+            let sig =
+                ctx.lookup_function(func_name)
+                    .ok_or_else(|| TypeError::UndefinedFunction {
+                        name: func_name.to_string(),
+                        span,
+                    })?;
 
             // Check argument count
             if args.0.len() != sig.parameters.len() {
@@ -266,7 +282,8 @@ pub fn synth_expr<'src>(
             if let Some(ref precond) = sig.precondition {
                 // Substitute argument values into the precondition
                 // For now, create a modified proposition with actual argument types
-                let substituted_precond = substitute_args_in_precond(precond, &sig.parameters, &arg_types);
+                let substituted_precond =
+                    substitute_args_in_precond(precond, &sig.parameters, &arg_types);
 
                 if !crate::frontend::typechecker::check_provable(ctx, &substituted_precond) {
                     return Err(TypeError::PreconditionViolation {
@@ -313,7 +330,11 @@ pub fn synth_expr<'src>(
         }
 
         // IF-EXPR: If expression with flow-sensitive typing
-        Expr::If { cond, then_block, else_block } => {
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
             // Synthesize condition
             let (tcond, cond_ty) = synth_expr(ctx, cond)?;
 
@@ -374,9 +395,7 @@ fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<
     match &expr.0 {
         Expr::Literal(Literal::Int(n)) => Ok(IValue::Int(*n)),
         Expr::Variable(name) => Ok(IValue::Symbolic(name.to_string())),
-        _ => Err(TypeError::NotAConstant {
-            span: expr.1,
-        }),
+        _ => Err(TypeError::NotAConstant { span: expr.1 }),
     }
 }
 
@@ -391,7 +410,8 @@ fn substitute_args_in_precond<'src>(
     use chumsky::span::SimpleSpan;
 
     // Build a substitution map from parameter names to argument types
-    let mut substitutions: std::collections::HashMap<&str, &IType> = std::collections::HashMap::new();
+    let mut substitutions: std::collections::HashMap<&str, &IType> =
+        std::collections::HashMap::new();
     for ((param_name, _), arg_ty) in params.iter().zip(arg_types.iter()) {
         substitutions.insert(param_name.as_str(), arg_ty);
     }

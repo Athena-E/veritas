@@ -1,15 +1,15 @@
-use chumsky::{input::ValueInput, prelude::*};
-use crate::common::span::{Span, Spanned};
-use crate::common::ast::{Token, Stmt, Expr};
 use super::types::type_parser;
+use crate::common::ast::{Expr, Stmt, Token};
+use crate::common::span::{Span, Spanned};
+use chumsky::{input::ValueInput, prelude::*};
 
 // Note: Expr is used for constructing if-statements
 
 // Statement parser
 pub fn stmt_parser<'tokens, 'src: 'tokens, I>(
     expr: impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>>
-        + Clone
-        + 'tokens,
+    + Clone
+    + 'tokens,
 ) -> impl Parser<'tokens, I, Spanned<Stmt<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>>
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
@@ -53,9 +53,7 @@ where
             });
 
         // For loop: for var in start..end [invariant expr] { body }
-        let invariant_clause = just(Token::Invariant)
-            .ignore_then(expr.clone())
-            .or_not();
+        let invariant_clause = just(Token::Invariant).ignore_then(expr.clone()).or_not();
 
         let for_stmt = just(Token::For)
             .ignore_then(select! { Token::Ident(name) => name })
@@ -68,7 +66,7 @@ where
                 stmt.clone()
                     .repeated()
                     .collect::<Vec<_>>()
-                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
             )
             .map_with(|((((var, start), end), invariant), body), e| {
                 (
@@ -98,7 +96,7 @@ where
                 stmt.clone()
                     .repeated()
                     .collect::<Vec<_>>()
-                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
             )
             .then(
                 just(Token::Else)
@@ -106,9 +104,9 @@ where
                         stmt.clone()
                             .repeated()
                             .collect::<Vec<_>>()
-                            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+                            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
                     )
-                    .or_not()
+                    .or_not(),
             )
             .map_with(|((cond, then_block), else_block), e| {
                 (
@@ -130,8 +128,15 @@ where
             .then_ignore(just(Token::Ctrl(';')))
             .map_with(|expr, e| (Stmt::Expr(expr), e.span()));
 
-        choice((let_stmt, return_stmt, for_stmt, if_stmt, assign_stmt, expr_stmt))
-            .labelled("statement")
+        choice((
+            let_stmt,
+            return_stmt,
+            for_stmt,
+            if_stmt,
+            assign_stmt,
+            expr_stmt,
+        ))
+        .labelled("statement")
     })
     .boxed()
 }
