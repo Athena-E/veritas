@@ -2,8 +2,11 @@ use crate::common::ast::{BinOp, Literal, UnaryOp};
 use crate::common::span::{Span, Spanned};
 use crate::common::types::IType;
 
+/// Typed expression AST - output of type checking
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum TExpr<'src> {
+    /// Error recovery node (reserved for future error recovery)
     Error {
         ty: IType<'src>,
     },
@@ -116,12 +119,14 @@ pub struct TFunctionBody<'src> {
     pub return_expr: Option<Box<Spanned<TExpr<'src>>>>,
 }
 
+/// Typed function - output of type checking a function
 #[derive(Clone, Debug)]
 pub struct TFunction<'src> {
     pub name: String,
     pub parameters: Vec<TParameter<'src>>,
     pub return_type: IType<'src>,
     pub body: TFunctionBody<'src>,
+    #[allow(dead_code)]
     pub span: Span,
 }
 

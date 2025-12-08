@@ -1,8 +1,8 @@
 use crate::common::ast::{BinOp, Expr, Literal, Program, Stmt, Type, UnaryOp};
 use crate::common::tast::{TProgram, TStmt, TExpr};
-use crate::common::types::IType;
 
-/// Display the program structure in a human-readable format
+/// Display the untyped AST (useful for debugging the parser)
+#[allow(dead_code)]
 pub fn display_program(program: &Program) {
     println!("\nProgram with {} function(s):", program.functions.len());
 
@@ -269,7 +269,8 @@ fn format_texpr(expr: &TExpr) -> String {
     }
 }
 
-/// Format a type as a string
+/// Format a type as a string (for untyped AST display)
+#[allow(dead_code)]
 pub fn format_type(ty: &Type) -> String {
     match ty {
         Type::Int => "int".to_string(),
@@ -294,7 +295,8 @@ pub fn format_type(ty: &Type) -> String {
     }
 }
 
-/// Format an expression as a string
+/// Format an expression as a string (for untyped AST display)
+#[allow(dead_code)]
 pub fn format_expr(expr: &Expr) -> String {
     match expr {
         Expr::Error => "<error>".to_string(),

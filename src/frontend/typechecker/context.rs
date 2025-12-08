@@ -99,6 +99,7 @@ impl<'src> TypingContext<'src> {
         new_ctx
     }
 
+    #[allow(dead_code)]
     pub fn lookup_immutable(&self, name: &str) -> Option<&IType<'src>> {
         self.gamma.get(name)
     }
@@ -148,6 +149,7 @@ impl<'src> TypingContext<'src> {
         self.delta.get(name)
     }
 
+    #[allow(dead_code)]
     pub fn get_master_type(&self, name: &str) -> Option<&IType<'src>> {
         self.delta.get(name).map(|binding| &binding.master_type)
     }

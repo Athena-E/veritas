@@ -50,12 +50,12 @@ impl SmtOracle {
                 BinOp::Eq => {
                     let left = Self::translate_expr(&lhs.0);
                     let right = Self::translate_expr(&rhs.0);
-                    left._eq(&right)
+                    Int::eq(&left, &right)
                 }
                 BinOp::NotEq => {
                     let left = Self::translate_expr(&lhs.0);
                     let right = Self::translate_expr(&rhs.0);
-                    left._eq(&right).not()
+                    Int::eq(&left, &right).not()
                 }
                 BinOp::Lt => {
                     let left = Self::translate_expr(&lhs.0);

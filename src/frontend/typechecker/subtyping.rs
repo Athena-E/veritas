@@ -4,8 +4,7 @@
 // - Singleton to base: int(n) <: int
 // - Structural: &T <: &T, [T; n] <: [T; n] (invariant)
 
-use crate::common::ast::{BinOp, Expr, Literal};
-use crate::common::span::{Span, Spanned};
+use crate::common::ast::{Expr, Literal};
 use crate::common::types::{IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypingContext, check_provable};
 use std::sync::Arc;

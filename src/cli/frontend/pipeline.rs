@@ -1,5 +1,4 @@
 use chumsky::prelude::*;
-use crate::common::ast::Program;
 use crate::common::tast::TProgram;
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;

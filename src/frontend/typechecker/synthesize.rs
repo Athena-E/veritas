@@ -1,10 +1,13 @@
 // Given an expression e, synthesize its type T and produce a typed expression e'
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
-use crate::common::span::{Span, Spanned};
+use crate::common::span::Spanned;
 use crate::common::tast::TExpr;
 use crate::common::types::{IType, IValue};
-use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, join_op, check_array_bounds_expr, extract_proposition, negate_proposition, check_stmts};
+use crate::frontend::typechecker::{
+    TypeError, TypingContext, VarBinding, is_subtype, join_op,
+    check_array_bounds_expr, extract_proposition, negate_proposition, check_stmts
+};
 use std::sync::Arc;
 
 /// Widen singleton types to their base types

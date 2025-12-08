@@ -2,7 +2,10 @@ use crate::common::span::Span;
 use crate::common::types::{IProposition, IType};
 use std::fmt;
 
+/// Type errors that can occur during type checking.
+/// Some variants are reserved for future features.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum TypeError<'src> {
     TypeMismatch {
         expected: IType<'src>,
