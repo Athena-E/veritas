@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]  # Windows temporarily disabled due to Z3 linking issues
         rust: [stable, nightly]
     runs-on: ${{ matrix.os }}
 
