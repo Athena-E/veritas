@@ -16,8 +16,10 @@
 //!
 //! - `dtal`: DTAL AST definitions (target language)
 //! - `tir`: Typed Intermediate Representation with SSA
+//! - `lower`: TAST to TIR lowering
 
 pub mod dtal;
+pub mod lower;
 pub mod tir;
 
 // Re-export commonly used types from dtal
@@ -25,3 +27,6 @@ pub use dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
 
 // Re-export commonly used types from tir
 pub use tir::{BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr, TirProgram};
+
+// Re-export lowering function
+pub use lower::lower_program;
