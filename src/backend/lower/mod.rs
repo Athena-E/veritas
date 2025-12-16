@@ -23,6 +23,9 @@ pub mod expr;
 pub mod function;
 pub mod stmt;
 
+#[cfg(test)]
+mod tests;
+
 // Re-exports
 pub use context::LoweringContext;
 pub use function::lower_function;
