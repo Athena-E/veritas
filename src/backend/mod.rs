@@ -20,6 +20,8 @@
 pub mod dtal;
 pub mod tir;
 
-// Re-export commonly used types
-pub use dtal::{VirtualReg, VirtualRegAllocator};
-pub use tir::{BlockId, TirBuilder, TirFunction, TirProgram};
+// Re-export commonly used types from dtal
+pub use dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
+
+// Re-export commonly used types from tir
+pub use tir::{BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr, TirProgram};
