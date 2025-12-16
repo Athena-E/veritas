@@ -32,7 +32,7 @@ pub fn lower_expr<'src>(
 
         TExpr::Literal { value, ty } => lower_literal(ctx, value, ty),
 
-        TExpr::Variable { name, ty } => {
+        TExpr::Variable { name, ty: _ } => {
             // Look up the variable in the current scope
             ctx.lookup_var(name).unwrap_or_else(|| {
                 panic!("Undefined variable during lowering: {}", name)
@@ -307,8 +307,6 @@ pub fn lower_if_expr<'src>(
     else_stmts: Option<&Vec<Spanned<TStmt<'src>>>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    use crate::backend::lower::stmt::lower_stmts;
-
     // 1. Lower the condition expression in the current block
     let cond_reg = lower_expr(ctx, cond);
     let cond_block = ctx.current_block().expect("Should be in a block");
