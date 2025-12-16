@@ -4,9 +4,7 @@
 //! including variable-to-register mappings and the current block.
 
 use crate::backend::dtal::{Constraint, VirtualReg};
-use crate::backend::tir::{
-    BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr,
-};
+use crate::backend::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
 use crate::common::types::IType;
 use std::collections::HashMap;
 

@@ -5,9 +5,7 @@
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
-use crate::backend::tir::{
-    BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
-};
+use crate::backend::tir::{BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
@@ -285,15 +283,206 @@ fn lower_array_init<'src>(
 
 /// Lower an if expression to control flow with phi nodes
 ///
-/// This is a placeholder - full implementation in Step 4
+/// CFG structure:
+/// ```text
+///             ┌─────────┐
+///             │  cond   │  (current block)
+///             └────┬────┘
+///            true/ \false
+///               /   \
+///     ┌────────▼┐   ┌▼────────┐
+///     │  then   │   │  else   │
+///     └────┬────┘   └────┬────┘
+///          \           /
+///           \         /
+///          ┌─▼───────▼─┐
+///          │   merge   │
+///          │  φ(v1,v2) │
+///          └───────────┘
+/// ```
 pub fn lower_if_expr<'src>(
     ctx: &mut LoweringContext<'src>,
     cond: &Spanned<TExpr<'src>>,
-    then_block: &[Spanned<TStmt<'src>>],
-    else_block: Option<&Vec<Spanned<TStmt<'src>>>>,
+    then_stmts: &[Spanned<TStmt<'src>>],
+    else_stmts: Option<&Vec<Spanned<TStmt<'src>>>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    // TODO: Full implementation in Step 4
-    // For now, panic to indicate this needs to be implemented
-    panic!("If expression lowering not yet implemented - see Step 4")
+    use crate::backend::lower::stmt::lower_stmts;
+
+    // 1. Lower the condition expression in the current block
+    let cond_reg = lower_expr(ctx, cond);
+    let cond_block = ctx.current_block().expect("Should be in a block");
+
+    // 2. Create blocks for then, else, and merge
+    let then_block = ctx.new_block();
+    let else_block = ctx.new_block();
+    let merge_block = ctx.new_block();
+
+    // 3. Finish the condition block with a branch
+    // For constraints, we use the condition register itself
+    ctx.finish_block(
+        Terminator::Branch {
+            cond: cond_reg,
+            true_target: then_block,
+            false_target: else_block,
+            true_constraint: Constraint::True,  // TODO: derive from cond
+            false_constraint: Constraint::True, // TODO: derive from cond
+        },
+        vec![], // predecessors filled by builder
+    );
+
+    // 4. Lower the then branch
+    ctx.start_block(then_block);
+
+    // Snapshot variable state before then branch
+    let vars_before_then = ctx.snapshot_var_map();
+
+    // Lower all statements except possibly the last (which might be the result expr)
+    let then_result = lower_block_with_result(ctx, then_stmts, ty);
+
+    // Record then block's end for phi
+    let then_end_block = ctx.current_block().expect("Should be in then block");
+    let vars_after_then = ctx.snapshot_var_map();
+
+    // Jump to merge
+    ctx.finish_block(
+        Terminator::Jump { target: merge_block },
+        vec![cond_block],
+    );
+
+    // 5. Lower the else branch
+    ctx.start_block(else_block);
+
+    // Restore variable state to before the if (for else branch)
+    // Note: We don't literally restore - else sees vars as they were before if
+    // But since we're using SSA, we track both paths
+
+    let else_result = if let Some(else_stmts) = else_stmts {
+        lower_block_with_result(ctx, else_stmts, ty)
+    } else {
+        // No else block - produce a default value
+        // For Unit type, this is fine; for other types this shouldn't happen
+        // (type checker should have caught it)
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst,
+            value: 0,
+            ty: ty.clone(),
+        });
+        dst
+    };
+
+    let else_end_block = ctx.current_block().expect("Should be in else block");
+    let vars_after_else = ctx.snapshot_var_map();
+
+    // Jump to merge
+    ctx.finish_block(
+        Terminator::Jump { target: merge_block },
+        vec![cond_block],
+    );
+
+    // 6. Create merge block with phi nodes
+    ctx.start_block(merge_block);
+
+    // Create phi node for the result value
+    let result_reg = ctx.fresh_reg();
+    let mut result_phi = PhiNode::new(result_reg, ty.clone());
+    result_phi.add_incoming(then_end_block, then_result);
+    result_phi.add_incoming(else_end_block, else_result);
+    ctx.emit_phi(result_phi);
+
+    // Create phi nodes for any variables modified in either branch
+    // Compare vars_after_then and vars_after_else with vars_before_then
+    create_phi_nodes_for_modified_vars(
+        ctx,
+        &vars_before_then,
+        &vars_after_then,
+        &vars_after_else,
+        then_end_block,
+        else_end_block,
+    );
+
+    result_reg
+}
+
+/// Lower a block of statements and return the result register
+///
+/// If the last statement is an expression statement, that's the result.
+/// Otherwise, return a unit/default value.
+fn lower_block_with_result<'src>(
+    ctx: &mut LoweringContext<'src>,
+    stmts: &[Spanned<TStmt<'src>>],
+    ty: &IType<'src>,
+) -> VirtualReg {
+    use crate::backend::lower::stmt::lower_stmt;
+
+    if stmts.is_empty() {
+        // Empty block - produce default value
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst,
+            value: 0,
+            ty: ty.clone(),
+        });
+        return dst;
+    }
+
+    // Lower all statements except the last
+    for stmt in &stmts[..stmts.len() - 1] {
+        lower_stmt(ctx, stmt);
+    }
+
+    // Check if last statement is an expression
+    let last = &stmts[stmts.len() - 1];
+    match &last.0 {
+        TStmt::Expr(expr) => {
+            // The expression's value is the block's result
+            lower_expr(ctx, expr)
+        }
+        _ => {
+            // Not an expression - lower it and return default
+            lower_stmt(ctx, last);
+            let dst = ctx.fresh_reg();
+            ctx.emit(TirInstr::LoadImm {
+                dst,
+                value: 0,
+                ty: ty.clone(),
+            });
+            dst
+        }
+    }
+}
+
+/// Create phi nodes for variables that were modified differently in two branches
+fn create_phi_nodes_for_modified_vars<'src>(
+    ctx: &mut LoweringContext<'src>,
+    vars_before: &std::collections::HashMap<String, VirtualReg>,
+    vars_after_then: &std::collections::HashMap<String, VirtualReg>,
+    vars_after_else: &std::collections::HashMap<String, VirtualReg>,
+    then_block: BlockId,
+    else_block: BlockId,
+) {
+    // Find variables that were modified in either branch
+    for (name, &before_reg) in vars_before {
+        let then_reg = vars_after_then.get(name).copied().unwrap_or(before_reg);
+        let else_reg = vars_after_else.get(name).copied().unwrap_or(before_reg);
+
+        // If the variable has different values in then vs else (or vs before)
+        if then_reg != else_reg {
+            // Need a phi node
+            let phi_dst = ctx.fresh_reg();
+            // We don't have type info here - use Int as placeholder
+            // In a production compiler, we'd track types in the var_map
+            let mut phi = PhiNode::new(phi_dst, IType::Int);
+            phi.add_incoming(then_block, then_reg);
+            phi.add_incoming(else_block, else_reg);
+            ctx.emit_phi(phi);
+
+            // Update var_map to point to the phi result
+            ctx.bind_var(name, phi_dst);
+        } else if then_reg != before_reg {
+            // Both branches modified it the same way - just update binding
+            ctx.bind_var(name, then_reg);
+        }
+    }
 }

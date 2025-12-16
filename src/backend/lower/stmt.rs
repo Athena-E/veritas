@@ -3,10 +3,10 @@
 //! This module converts typed statements (`TStmt`) into TIR instructions
 //! and control flow structures.
 
-use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
+use crate::backend::dtal::Constraint;
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
-use crate::backend::tir::{BoundsProof, ProofJustification, Terminator, TirInstr};
+use crate::backend::tir::{BoundsProof, ProofJustification, TirInstr};
 use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
 use crate::common::types::IType;
