@@ -4,9 +4,11 @@
 //! The format is human-readable and includes type state information
 //! for verification purposes.
 
-use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram};
-use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::Constraint;
+use crate::backend::dtal::instr::{
+    BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram,
+};
+use crate::backend::dtal::regs::Reg;
 use crate::common::types::IType;
 use std::fmt::Write;
 
@@ -109,7 +111,12 @@ fn emit_instruction<'src>(output: &mut String, instr: &DtalInstr<'src>) {
             .unwrap();
         }
 
-        DtalInstr::Load { dst, base, offset, ty } => {
+        DtalInstr::Load {
+            dst,
+            base,
+            offset,
+            ty,
+        } => {
             writeln!(
                 output,
                 "    load {}, [{} + {}]    ; {}",
@@ -132,7 +139,13 @@ fn emit_instruction<'src>(output: &mut String, instr: &DtalInstr<'src>) {
             .unwrap();
         }
 
-        DtalInstr::BinOp { op, dst, lhs, rhs, ty } => {
+        DtalInstr::BinOp {
+            op,
+            dst,
+            lhs,
+            rhs,
+            ty,
+        } => {
             writeln!(
                 output,
                 "    {} {}, {}, {}    ; {}",
@@ -313,8 +326,8 @@ fn emit_constraint(constraint: &Constraint) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::TypeState;
     use crate::backend::dtal::VirtualReg;
+    use crate::backend::dtal::instr::TypeState;
 
     #[test]
     fn test_emit_simple_function() {

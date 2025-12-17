@@ -5,7 +5,9 @@
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
-use crate::backend::tir::{BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp};
+use crate::backend::tir::{
+    BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
+};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
@@ -34,9 +36,8 @@ pub fn lower_expr<'src>(
 
         TExpr::Variable { name, ty: _ } => {
             // Look up the variable in the current scope
-            ctx.lookup_var(name).unwrap_or_else(|| {
-                panic!("Undefined variable during lowering: {}", name)
-            })
+            ctx.lookup_var(name)
+                .unwrap_or_else(|| panic!("Undefined variable during lowering: {}", name))
         }
 
         TExpr::BinOp { op, lhs, rhs, ty } => lower_binop(ctx, *op, lhs, rhs, ty),
@@ -258,14 +259,8 @@ fn lower_array_init<'src>(
 
         let bounds_proof = BoundsProof {
             constraint: Constraint::And(
-                Box::new(Constraint::Ge(
-                    IndexExpr::Const(i),
-                    IndexExpr::Const(0),
-                )),
-                Box::new(Constraint::Lt(
-                    IndexExpr::Const(i),
-                    IndexExpr::Const(size),
-                )),
+                Box::new(Constraint::Ge(IndexExpr::Const(i), IndexExpr::Const(0))),
+                Box::new(Constraint::Lt(IndexExpr::Const(i), IndexExpr::Const(size))),
             ),
             justification: ProofJustification::FromFrontend,
         };
@@ -323,7 +318,7 @@ pub fn lower_if_expr<'src>(
             cond: cond_reg,
             true_target: then_block,
             false_target: else_block,
-            true_constraint: Constraint::True,  // TODO: derive from cond
+            true_constraint: Constraint::True, // TODO: derive from cond
             false_constraint: Constraint::True, // TODO: derive from cond
         },
         vec![], // predecessors filled by builder
@@ -344,7 +339,9 @@ pub fn lower_if_expr<'src>(
 
     // Jump to merge
     ctx.finish_block(
-        Terminator::Jump { target: merge_block },
+        Terminator::Jump {
+            target: merge_block,
+        },
         vec![cond_block],
     );
 
@@ -375,7 +372,9 @@ pub fn lower_if_expr<'src>(
 
     // Jump to merge
     ctx.finish_block(
-        Terminator::Jump { target: merge_block },
+        Terminator::Jump {
+            target: merge_block,
+        },
         vec![cond_block],
     );
 

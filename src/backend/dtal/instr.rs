@@ -114,17 +114,9 @@ impl fmt::Display for CmpOp {
 pub enum DtalInstr<'src> {
     // Data movement
     /// mov rd, imm
-    MovImm {
-        dst: Reg,
-        imm: i64,
-        ty: IType<'src>,
-    },
+    MovImm { dst: Reg, imm: i64, ty: IType<'src> },
     /// mov rd, rs
-    MovReg {
-        dst: Reg,
-        src: Reg,
-        ty: IType<'src>,
-    },
+    MovReg { dst: Reg, src: Reg, ty: IType<'src> },
     /// load rd, [base + offset]
     Load {
         dst: Reg,
@@ -133,11 +125,7 @@ pub enum DtalInstr<'src> {
         ty: IType<'src>,
     },
     /// store [base + offset], src
-    Store {
-        base: Reg,
-        offset: Reg,
-        src: Reg,
-    },
+    Store { base: Reg, offset: Reg, src: Reg },
 
     // Arithmetic
     /// rd = lhs op rhs
@@ -158,52 +146,29 @@ pub enum DtalInstr<'src> {
 
     // Comparison
     /// cmp lhs, rhs
-    Cmp {
-        lhs: Reg,
-        rhs: Reg,
-    },
+    Cmp { lhs: Reg, rhs: Reg },
     /// cmp lhs, imm
-    CmpImm {
-        lhs: Reg,
-        imm: i64,
-    },
+    CmpImm { lhs: Reg, imm: i64 },
 
     // Logical
     /// not rd, rs
-    Not {
-        dst: Reg,
-        src: Reg,
-        ty: IType<'src>,
-    },
+    Not { dst: Reg, src: Reg, ty: IType<'src> },
 
     // Control flow
     /// jmp label
-    Jmp {
-        target: String,
-    },
+    Jmp { target: String },
     /// branch if condition
-    Branch {
-        cond: CmpOp,
-        target: String,
-    },
+    Branch { cond: CmpOp, target: String },
     /// call function
-    Call {
-        target: String,
-    },
+    Call { target: String },
     /// ret
     Ret,
 
     // Stack operations
     /// push rs
-    Push {
-        src: Reg,
-        ty: IType<'src>,
-    },
+    Push { src: Reg, ty: IType<'src> },
     /// pop rd
-    Pop {
-        dst: Reg,
-        ty: IType<'src>,
-    },
+    Pop { dst: Reg, ty: IType<'src> },
     /// alloca rd, size
     Alloca {
         dst: Reg,
@@ -213,17 +178,9 @@ pub enum DtalInstr<'src> {
 
     // Annotations (for verification)
     /// Type annotation for a register
-    TypeAnnotation {
-        reg: Reg,
-        ty: IType<'src>,
-    },
+    TypeAnnotation { reg: Reg, ty: IType<'src> },
     /// Assume a constraint
-    ConstraintAssume {
-        constraint: Constraint,
-    },
+    ConstraintAssume { constraint: Constraint },
     /// Assert a constraint (for bounds checks)
-    ConstraintAssert {
-        constraint: Constraint,
-        msg: String,
-    },
+    ConstraintAssert { constraint: Constraint, msg: String },
 }

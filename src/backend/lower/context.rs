@@ -75,10 +75,10 @@ impl<'src> LoweringContext<'src> {
     ) -> Vec<(String, VirtualReg, VirtualReg)> {
         let mut diffs = Vec::new();
         for (name, &after_reg) in after {
-            if let Some(&before_reg) = before.get(name) {
-                if before_reg != after_reg {
-                    diffs.push((name.clone(), before_reg, after_reg));
-                }
+            if let Some(&before_reg) = before.get(name)
+                && before_reg != after_reg
+            {
+                diffs.push((name.clone(), before_reg, after_reg));
             }
         }
         diffs

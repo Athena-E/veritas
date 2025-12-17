@@ -72,10 +72,7 @@ impl<'src> TirBuilder<'src> {
 
     /// Finish the current block with a terminator
     pub fn finish_block(&mut self, terminator: Terminator, predecessors: Vec<BlockId>) {
-        let id = self
-            .current_block
-            .take()
-            .expect("No block to finish");
+        let id = self.current_block.take().expect("No block to finish");
 
         let block = BasicBlock {
             id,
@@ -155,12 +152,14 @@ pub fn negate_constraint(c: Constraint) -> Constraint {
         Constraint::Le(l, r) => Constraint::Gt(l, r),
         Constraint::Gt(l, r) => Constraint::Le(l, r),
         Constraint::Ge(l, r) => Constraint::Lt(l, r),
-        Constraint::And(l, r) => {
-            Constraint::Or(Box::new(negate_constraint(*l)), Box::new(negate_constraint(*r)))
-        }
-        Constraint::Or(l, r) => {
-            Constraint::And(Box::new(negate_constraint(*l)), Box::new(negate_constraint(*r)))
-        }
+        Constraint::And(l, r) => Constraint::Or(
+            Box::new(negate_constraint(*l)),
+            Box::new(negate_constraint(*r)),
+        ),
+        Constraint::Or(l, r) => Constraint::And(
+            Box::new(negate_constraint(*l)),
+            Box::new(negate_constraint(*r)),
+        ),
         Constraint::Not(c) => *c,
     }
 }

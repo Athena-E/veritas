@@ -28,7 +28,9 @@ pub mod tir;
 pub use dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
 
 // Re-export commonly used types from tir
-pub use tir::{BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr, TirProgram};
+pub use tir::{
+    BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr, TirProgram,
+};
 
 // Re-export lowering function
 pub use lower::lower_program;

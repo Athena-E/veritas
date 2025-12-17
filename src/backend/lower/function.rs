@@ -31,11 +31,11 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     lower_stmts(&mut ctx, &func.body.statements);
 
     // Lower the return expression (if any) and create the return terminator
-    let return_value = if let Some(ref return_expr) = func.body.return_expr {
-        Some(lower_expr(&mut ctx, return_expr))
-    } else {
-        None
-    };
+    let return_value = func
+        .body
+        .return_expr
+        .as_ref()
+        .map(|return_expr| lower_expr(&mut ctx, return_expr));
 
     // Finish the entry block with a return terminator
     ctx.finish_block(

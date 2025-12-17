@@ -19,8 +19,12 @@ pub mod program;
 pub mod types;
 
 // Re-export commonly used types
-pub use builder::{and_constraints, constraint_from_binop, negate_constraint, or_constraints, TirBuilder};
+pub use builder::{
+    TirBuilder, and_constraints, constraint_from_binop, negate_constraint, or_constraints,
+};
 pub use instr::{Terminator, TirInstr};
 pub use phi::PhiNode;
 pub use program::{BasicBlock, TirFunction, TirProgram};
-pub use types::{BinaryOp, BlockId, BlockIdAllocator, BoundsProof, ProofJustification, RegisterState, UnaryOp};
+pub use types::{
+    BinaryOp, BlockId, BlockIdAllocator, BoundsProof, ProofJustification, RegisterState, UnaryOp,
+};

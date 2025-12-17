@@ -216,7 +216,9 @@ fn lower_terminator<'src>(
             });
 
             // Fall through to false target
-            instrs.push(DtalInstr::Jmp { target: false_label });
+            instrs.push(DtalInstr::Jmp {
+                target: false_label,
+            });
         }
 
         Terminator::Return { value } => {

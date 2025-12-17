@@ -73,9 +73,7 @@ pub enum TirInstr<'src> {
     },
 
     /// Assume a constraint (from branch or precondition)
-    AssumeConstraint {
-        constraint: Constraint,
-    },
+    AssumeConstraint { constraint: Constraint },
 }
 
 impl<'src> TirInstr<'src> {
@@ -114,9 +112,7 @@ impl<'src> TirInstr<'src> {
 #[derive(Clone, Debug)]
 pub enum Terminator {
     /// Unconditional jump
-    Jump {
-        target: BlockId,
-    },
+    Jump { target: BlockId },
 
     /// Conditional branch
     Branch {
@@ -130,9 +126,7 @@ pub enum Terminator {
     },
 
     /// Return from function
-    Return {
-        value: Option<VirtualReg>,
-    },
+    Return { value: Option<VirtualReg> },
 
     /// Unreachable (after error or infinite loop)
     Unreachable,

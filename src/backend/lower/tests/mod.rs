@@ -2,10 +2,10 @@
 
 use crate::backend::lower::lower_function;
 use crate::backend::tir::{Terminator, TirInstr};
+use crate::common::ast::Literal;
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TExpr, TFunction, TFunctionBody, TParameter, TStmt};
 use crate::common::types::IType;
-use crate::common::ast::Literal;
 
 /// Helper to create a spanned value with a dummy span
 fn spanned<T>(value: T) -> Spanned<T> {
@@ -132,9 +132,10 @@ fn test_lower_function_returning_literal() {
 
     // The entry block should have a LoadImm instruction
     let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
-    let has_loadimm = entry_block.instructions.iter().any(|instr| {
-        matches!(instr, TirInstr::LoadImm { value: 5, .. })
-    });
+    let has_loadimm = entry_block
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::LoadImm { value: 5, .. }));
     assert!(has_loadimm, "Expected a LoadImm(5) instruction");
 }
 
@@ -197,12 +198,16 @@ fn test_lower_if_expression() {
     );
 
     // Verify there's a Branch terminator somewhere
-    let has_branch = tir_func.blocks.values().any(|block| {
-        matches!(block.terminator, Terminator::Branch { .. })
-    });
+    let has_branch = tir_func
+        .blocks
+        .values()
+        .any(|block| matches!(block.terminator, Terminator::Branch { .. }));
     assert!(has_branch, "Expected a Branch terminator for if expression");
 
     // Verify there's a phi node in the merge block
-    let has_phi = tir_func.blocks.values().any(|block| !block.phi_nodes.is_empty());
+    let has_phi = tir_func
+        .blocks
+        .values()
+        .any(|block| !block.phi_nodes.is_empty());
     assert!(has_phi, "Expected phi nodes for if expression merge");
 }

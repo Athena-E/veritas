@@ -6,7 +6,9 @@
 use crate::backend::dtal::Constraint;
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
-use crate::backend::tir::{BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr};
+use crate::backend::tir::{
+    BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
+};
 use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
 use crate::common::types::IType;
@@ -185,7 +187,9 @@ fn lower_for_loop<'src>(
 
     // Jump from entry to header
     ctx.finish_block(
-        Terminator::Jump { target: header_block },
+        Terminator::Jump {
+            target: header_block,
+        },
         vec![],
     );
 
@@ -223,7 +227,7 @@ fn lower_for_loop<'src>(
             cond: cmp_reg,
             true_target: body_block,
             false_target: exit_block,
-            true_constraint: Constraint::True,  // TODO: derive constraint
+            true_constraint: Constraint::True, // TODO: derive constraint
             false_constraint: Constraint::True,
         },
         vec![entry_block], // Predecessor from entry's jump
@@ -261,7 +265,9 @@ fn lower_for_loop<'src>(
 
     // Jump back to header
     ctx.finish_block(
-        Terminator::Jump { target: header_block },
+        Terminator::Jump {
+            target: header_block,
+        },
         vec![header_block], // Body is a successor of header
     );
 
@@ -295,14 +301,14 @@ fn create_loop_exit_phi_nodes<'src>(
     // For variables modified in the loop body, we need phi nodes
     // at the exit point to select between "never entered loop" and "after loop iterations"
     for (name, &before_reg) in vars_before {
-        if let Some(&after_reg) = vars_after_body.get(name) {
-            if before_reg != after_reg {
-                // Variable was modified in the loop
-                // At exit, we use the value from the header's phi (for loop-carried state)
-                // For simplicity, just update binding to the after value
-                // (A full implementation would need proper loop phi handling)
-                ctx.bind_var(name, after_reg);
-            }
+        if let Some(&after_reg) = vars_after_body.get(name)
+            && before_reg != after_reg
+        {
+            // Variable was modified in the loop
+            // At exit, we use the value from the header's phi (for loop-carried state)
+            // For simplicity, just update binding to the after value
+            // (A full implementation would need proper loop phi handling)
+            ctx.bind_var(name, after_reg);
         }
     }
 }
