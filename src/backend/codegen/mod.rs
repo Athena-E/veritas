@@ -15,6 +15,9 @@
 
 pub mod isel;
 
+#[cfg(test)]
+mod tests;
+
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::tir::{BasicBlock, BlockId, PhiNode, Terminator, TirFunction, TirProgram};
