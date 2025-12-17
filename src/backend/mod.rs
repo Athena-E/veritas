@@ -18,7 +18,9 @@
 //! - `tir`: Typed Intermediate Representation with SSA
 //! - `lower`: TAST to TIR lowering
 
+pub mod codegen;
 pub mod dtal;
+pub mod emit;
 pub mod lower;
 pub mod tir;
 
@@ -30,3 +32,9 @@ pub use tir::{BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction,
 
 // Re-export lowering function
 pub use lower::lower_program;
+
+// Re-export codegen function
+pub use codegen::codegen_program;
+
+// Re-export emit function
+pub use emit::emit_program;

@@ -106,14 +106,17 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
             element_ty,
             size,
         } => {
+            use crate::common::types::IValue;
+            use std::sync::Arc;
+
             // Calculate total size in bytes (assuming 8 bytes per element)
             let element_size = 8u32; // Simplified: all elements are 8 bytes
             let total_size = element_size * (*size as u32);
 
             // Create array type for annotation
             let array_ty = IType::Array {
-                element_type: Box::new(element_ty.clone()),
-                size: *size,
+                element_type: Arc::new(element_ty.clone()),
+                size: IValue::Int(*size),
             };
 
             instrs.push(DtalInstr::Alloca {
@@ -299,6 +302,24 @@ fn lower_unaryop<'src>(
             instrs.push(DtalInstr::Not {
                 dst: Reg::Virtual(dst),
                 src: Reg::Virtual(operand),
+                ty: ty.clone(),
+            });
+        }
+        TirUnaryOp::Neg => {
+            // Negate: dst = 0 - operand
+            // First load 0, then subtract
+            // For simplicity, we emit: dst = 0 - operand as sub instruction
+            // This requires a temporary, but we can use the destination
+            instrs.push(DtalInstr::MovImm {
+                dst: Reg::Virtual(dst),
+                imm: 0,
+                ty: ty.clone(),
+            });
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::Sub,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(dst),
+                rhs: Reg::Virtual(operand),
                 ty: ty.clone(),
             });
         }
