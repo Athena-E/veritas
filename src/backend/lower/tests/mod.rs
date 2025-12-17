@@ -44,7 +44,7 @@ fn test_lower_identity_function() {
 
     // The entry block should have a Return terminator
     let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
-    assert!(matches!(entry_block.terminator, Some(Terminator::Return { .. })));
+    assert!(matches!(entry_block.terminator, Terminator::Return { .. }));
 }
 
 /// Test: fn add(x: int, y: int) -> int { let z = x + y; z }
@@ -198,7 +198,7 @@ fn test_lower_if_expression() {
 
     // Verify there's a Branch terminator somewhere
     let has_branch = tir_func.blocks.values().any(|block| {
-        matches!(block.terminator, Some(Terminator::Branch { .. }))
+        matches!(block.terminator, Terminator::Branch { .. })
     });
     assert!(has_branch, "Expected a Branch terminator for if expression");
 
