@@ -1,0 +1,17 @@
+{
+    "rust-analyzer.cargo.buildScripts.overrideCommand": null,
+    "rust-analyzer.cargo.buildScripts.rebuildOnSave": false,
+    "rust-analyzer.check.overrideCommand": [
+        "cargo",
+        "check",
+        "--message-format=json",
+        "--all-targets"
+    ],
+    "rust-analyzer.cargo.targetDir": "target/rust-analyzer",
+    "rust-analyzer.cargo.extraEnv": {
+        "Z3_SYS_Z3_HEADER": "/usr/include/z3.h"
+    },
+    "rust-analyzer.procMacro.enable": true,
+    "rust-analyzer.diagnostics.disabled": [],
+    "rust-analyzer.checkOnSave": true
+}
