@@ -243,11 +243,13 @@ mod tests {
     fn test_compile_conditional() {
         let source = r#"
             fn abs(x: int) -> int {
+                let mut result: int = 0;
                 if x >= 0 {
-                    x
+                    result = x;
                 } else {
-                    0 - x
+                    result = 0 - x;
                 }
+                result
             }
         "#;
 
