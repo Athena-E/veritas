@@ -62,6 +62,18 @@ pub struct CompileOutput {
     pub dtal: String,
 }
 
+/// Verbose compilation output with all intermediate stages
+pub struct VerboseOutput<'src> {
+    /// Tokens produced by lexer (token, span as string)
+    pub tokens: Vec<(String, String)>,
+    /// The typed AST
+    pub tast: crate::common::tast::TProgram<'src>,
+    /// The TIR (SSA form)
+    pub tir: crate::backend::TirProgram<'src>,
+    /// The generated DTAL assembly as text
+    pub dtal: String,
+}
+
 /// Compile source code to DTAL assembly
 ///
 /// This is the main entry point for the compiler pipeline.
@@ -77,12 +89,12 @@ pub struct CompileOutput {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use veritas::pipeline::compile;
 ///
 /// let source = "fn add(x: int, y: int) -> int { x + y }";
-/// let output = compile(source)?;
-/// println!("{}", output.dtal);
+/// let output = compile(source).unwrap();
+/// assert!(output.dtal.contains(".function add"));
 /// ```
 pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
     // Stage 1: Lexical analysis
@@ -125,6 +137,64 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
     let dtal = emit_program(&dtal_program);
 
     Ok(CompileOutput { dtal })
+}
+
+/// Compile source code with verbose output, returning all intermediate stages
+///
+/// This function is useful for debugging and understanding the compilation process.
+/// It returns all intermediate representations including the typed AST and TIR.
+pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
+    // Stage 1: Lexical analysis
+    let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
+        CompileError::LexError(
+            errors
+                .iter()
+                .map(|e| format!("{:?}", e))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    })?;
+
+    // Capture tokens as strings for display
+    let token_strings: Vec<(String, String)> = raw_tokens
+        .iter()
+        .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
+        .collect();
+
+    // Stage 2: Parsing
+    let eoi = (source.len()..source.len()).into();
+    let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
+    let ast = program_parser()
+        .parse(token_stream)
+        .into_result()
+        .map_err(|errors| {
+            CompileError::ParseError(
+                errors
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        })?;
+
+    // Stage 3: Type checking
+    let tast = check_program(&ast).map_err(CompileError::TypeError)?;
+
+    // Stage 4: Lower to TIR (SSA form)
+    let tir = lower_program(&tast);
+
+    // Stage 5: Generate DTAL
+    let dtal_program = codegen_program(&tir);
+
+    // Stage 6: Emit text
+    let dtal = emit_program(&dtal_program);
+
+    Ok(VerboseOutput {
+        tokens: token_strings,
+        tast,
+        tir,
+        dtal,
+    })
 }
 
 /// Compile source code and report errors with source context

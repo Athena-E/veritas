@@ -12,10 +12,15 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use veritas::backend::lower::lower_program;
-//!
+//! ```no_run
+//! use veritas::backend::lower_program;
+//! use veritas::frontend::typechecker::check_program;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Given a typed program from the frontend
+//! # let tast_program: veritas::common::tast::TProgram = todo!();
 //! let tir_program = lower_program(&tast_program);
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod context;
