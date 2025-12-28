@@ -82,7 +82,11 @@ jobs:
 
       - name: Install Z3 (macOS)
         if: runner.os == 'macOS'
-        run: brew install z3
+        run: |
+          brew install z3
+          echo "Z3_SYS_Z3_HEADER=$(brew --prefix z3)/include/z3.h" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix z3)/lib" >> $GITHUB_ENV
+          echo "DYLD_LIBRARY_PATH=$(brew --prefix z3)/lib" >> $GITHUB_ENV
 
       - name: Install Z3 (Windows)
         if: runner.os == 'Windows'
