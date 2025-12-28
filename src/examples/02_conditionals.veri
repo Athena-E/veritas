@@ -6,7 +6,7 @@ fn check_value() {
         result = x + 10;
     } else {
         result = x - 10;
-    };
+    }
 }
 
 // Function with nested conditionals
@@ -18,5 +18,5 @@ fn nested_conditionals() {
         max = a;
     } else {
         max = b;
-    };
+    }
 }

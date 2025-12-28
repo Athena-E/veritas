@@ -1,23 +1,37 @@
-mod cli;
-mod common;
-mod frontend;
-
-use cli::frontend::{Config, PipelineError, display_typed_program, read_source_file, run_pipeline};
-use frontend::typechecker::report_type_error;
+use std::env;
+use std::fs;
+use veritas::pipeline::{compile_verbose, CompileError};
 
 fn main() {
-    // Parse configuration
-    let config = Config::from_args();
+    // Parse command line arguments
+    let args: Vec<String> = env::args().collect();
 
-    println!("\n{}", config.file_path);
+    if args.len() < 2 {
+        eprintln!("Usage: {} <source_file> [OPTIONS]", args[0]);
+        eprintln!();
+        eprintln!("Options:");
+        eprintln!("  --verbose, -v    Show compilation stages");
+        eprintln!("  --tokens         Show lexer tokens");
+        eprintln!("  --ast            Show typed AST");
+        eprintln!("  --tir            Show TIR (SSA form)");
+        std::process::exit(1);
+    }
+
+    let file_path = &args[1];
+    let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
+    let show_tokens = args.iter().any(|a| a == "--tokens");
+    let show_ast = args.iter().any(|a| a == "--ast");
+    let show_tir = args.iter().any(|a| a == "--tir");
+
+    println!("\n{}", file_path);
     println!("{}", "=".repeat(60));
 
     // Read the source file
-    let src = match read_source_file(&config.file_path) {
+    let src = match fs::read_to_string(file_path) {
         Ok(content) => content,
         Err(e) => {
-            eprintln!("{}", e);
-            return;
+            eprintln!("Error reading file '{}': {}", file_path, e);
+            std::process::exit(1);
         }
     };
 
@@ -27,38 +41,100 @@ fn main() {
     println!("{}", src);
     println!("{}", "-".repeat(60));
 
-    // Run the compilation pipeline
-    let program = match run_pipeline(&src, config.verbose) {
-        Ok(p) => p,
+    // Run the full compilation pipeline
+    if verbose {
+        println!("\n[1] Lexing...");
+    }
+
+    match compile_verbose(&src) {
+        Ok(output) => {
+            if verbose {
+                println!("Lexed {} tokens", output.tokens.len());
+                println!("\n[2] Parsing...");
+                println!("Parsed successfully!");
+                println!("\n[3] Type checking...");
+                println!("Type checking passed!");
+                println!(
+                    "\n[4] Lowering to TIR ({} function(s))...",
+                    output.tir.functions.len()
+                );
+                println!("\n[5] Generating DTAL...");
+                println!("\n[6] Emitting output...");
+            } else {
+                println!("\nCompilation successful!");
+            }
+
+            // Show tokens if requested
+            if show_tokens {
+                println!("\n{}", "=".repeat(60));
+                println!("Tokens ({}):", output.tokens.len());
+                println!("{}", "=".repeat(60));
+                for (i, (token, span)) in output.tokens.iter().enumerate() {
+                    println!("  {:3}: {} @ {}", i, token, span);
+                }
+            }
+
+            // Show typed AST if requested
+            if show_ast {
+                println!("\n{}", "=".repeat(60));
+                println!("Typed AST:");
+                println!("{}", "=".repeat(60));
+                for func in &output.tast.functions {
+                    println!("\nFunction: {}", func.name);
+                    println!("  Parameters:");
+                    for param in &func.parameters {
+                        println!("    {}: {:?}", param.name, param.ty);
+                    }
+                    println!("  Return type: {:?}", func.return_type);
+                    println!("  Body: {:#?}", func.body);
+                }
+            }
+
+            // Show TIR if requested
+            if show_tir {
+                println!("\n{}", "=".repeat(60));
+                println!("TIR (SSA form):");
+                println!("{}", "=".repeat(60));
+                for func in &output.tir.functions {
+                    println!("\nFunction: {}", func.name);
+                    println!("  Entry block: {:?}", func.entry_block);
+                    println!("  Blocks:");
+                    for (id, block) in &func.blocks {
+                        println!("    Block {:?}:", id);
+                        if !block.phi_nodes.is_empty() {
+                            println!("      Phi nodes:");
+                            for phi in &block.phi_nodes {
+                                println!("        {:?}", phi);
+                            }
+                        }
+                        println!("      Instructions:");
+                        for instr in &block.instructions {
+                            println!("        {:?}", instr);
+                        }
+                        println!("      Terminator: {:?}", block.terminator);
+                    }
+                }
+            }
+
+            println!("\n{}", "=".repeat(60));
+            println!("DTAL Output:");
+            println!("{}", "=".repeat(60));
+            println!("{}", output.dtal);
+        }
         Err(e) => {
             println!();
             match e {
-                PipelineError::LexError(msg) => eprintln!("Lexer error: {}", msg),
-                PipelineError::ParseError(msg) => eprintln!("Parse error: {}", msg),
-                PipelineError::TypeError(type_error) => {
-                    report_type_error(&config.file_path, &src, &type_error);
+                CompileError::LexError(msg) => {
+                    eprintln!("Lexer error:\n{}", msg);
+                }
+                CompileError::ParseError(msg) => {
+                    eprintln!("Parse error:\n{}", msg);
+                }
+                CompileError::TypeError(type_error) => {
+                    veritas::frontend::typechecker::report_type_error(file_path, &src, &type_error);
                 }
             }
-            return;
+            std::process::exit(1);
         }
-    };
-
-    // Display results
-    println!("\n[4] Program structure:");
-    println!("{}", "=".repeat(60));
-
-    display_typed_program(&program);
-
-    // Show detailed AST if requested
-    if config.show_ast {
-        println!("\n[5] Detailed Typed AST:");
-        println!("{}", "=".repeat(60));
-        println!("{:#?}", program);
     }
-
-    println!("\n{}", "=".repeat(60));
-    println!(
-        "Successfully type-checked {} function(s)",
-        program.functions.len()
-    );
 }

@@ -1,0 +1,14 @@
+fn add(x: int, y: int) -> int {
+    x + y
+}
+
+fn double(n: int) -> int {
+    let result: int = n + n;
+    result
+}
+
+fn main() -> int {
+    let a: int = add(10, 20);
+    let b: int = double(a);
+    b
+}

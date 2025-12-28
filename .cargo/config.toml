@@ -1,0 +1,31 @@
+# Cargo configuration for veritas
+#
+# This configuration uses the system-installed Z3 library instead of
+# compiling Z3 from source, which dramatically speeds up build times.
+#
+# IMPORTANT: You must install Z3 on your system first!
+#
+# Linux (Debian/Ubuntu):
+#   sudo apt-get install z3 libz3-dev
+#
+# Linux (Arch):
+#   sudo pacman -S z3
+#
+# macOS:
+#   brew install z3
+#
+# Without Z3 installed, z3-sys will attempt to compile Z3 from source,
+# which takes 10-30+ minutes and may cause IDE timeouts/crashes.
+
+[env]
+# Use system Z3 library - prevents compiling Z3 from source
+# Linux paths (apt/pacman installed)
+Z3_SYS_Z3_HEADER = "/usr/include/z3.h"
+
+# Uncomment for macOS (Homebrew):
+# Z3_SYS_Z3_HEADER = "/opt/homebrew/include/z3.h"
+# Z3_LIBRARY_PATH_OVERRIDE = "/opt/homebrew/lib"
+
+[build]
+# Set build jobs to limit parallelism if needed (helps with memory on low-RAM systems)
+# jobs = 4
