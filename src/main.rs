@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use veritas::pipeline::{compile_verbose, CompileError};
+use veritas::pipeline::{CompileError, compile_verbose};
 
 fn main() {
     // Parse command line arguments

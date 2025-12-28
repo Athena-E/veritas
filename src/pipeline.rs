@@ -30,7 +30,7 @@
 use crate::backend::{codegen_program, emit_program, lower_program};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
-use crate::frontend::typechecker::{check_program, report_type_error, TypeError};
+use crate::frontend::typechecker::{TypeError, check_program, report_type_error};
 use chumsky::prelude::*;
 use std::fmt;
 
@@ -211,6 +211,7 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
 ///
 /// * `Ok(String)` - The generated DTAL assembly
 /// * `Err(())` - Compilation failed (errors printed to stderr)
+#[allow(clippy::result_unit_err)]
 pub fn compile_and_report(filename: &str, source: &str) -> Result<String, ()> {
     match compile(source) {
         Ok(output) => Ok(output.dtal),
