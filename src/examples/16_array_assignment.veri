@@ -6,7 +6,6 @@ fn simple_array_assignment() {
     arr[2] = 30;
     arr[3] = 40;
     arr[4] = 50;
-    arr[5] = 50;
 }
 
 // Array indexing assignment with variable index

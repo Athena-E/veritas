@@ -1,6 +1,6 @@
 // Simple function with basic arithmetic
 fn main() {
-    let x: bool = 42;
+    let x: int = 42;
     let y: int = 10;
     let sum: int = x + y;
     let product: int = x * y;
