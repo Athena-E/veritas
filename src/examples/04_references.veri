@@ -1,6 +1,12 @@
-// Function with reference types
+// Demonstrating reference types in function parameters
+fn use_reference(r: &int) {
+    let value: int = 100;
+}
+
+fn use_mut_reference(mr: &mut int) {
+    let value: int = 200;
+}
+
 fn reference_example() {
     let x: int = 100;
-    let r: &int = get_ref();
-    let mr: &mut int = get_mut_ref();
 }

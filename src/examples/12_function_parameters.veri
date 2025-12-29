@@ -7,8 +7,8 @@ fn is_positive(n: int) {
     let check: bool = n > 0;
 }
 
-fn process_array(arr: [int; 10], index: int) {
-    let elem: int = arr[index];
+fn process_array(arr: [int; 10]) {
+    let elem: int = arr[0];
     let doubled: int = elem * 2;
 }
 

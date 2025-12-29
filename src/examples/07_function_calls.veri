@@ -1,4 +1,16 @@
 // Function with function calls
+fn add(a: int, b: int) -> int {
+    a + b
+}
+
+fn multiply(a: int, b: int) -> int {
+    a * b
+}
+
+fn complex_calc(x: int, y: int, z: int) -> int {
+    x + y * z
+}
+
 fn compute() {
     let x: int = add(5, 10);
     let y: int = multiply(x, 2);
@@ -6,5 +18,6 @@ fn compute() {
 }
 
 fn helper() {
-    let result: int = compute();
+    compute();
+    let result: int = add(1, 2);
 }
