@@ -9,6 +9,8 @@
 //! DTAL (virtual regs) → Liveness Analysis → Register Allocation → DTAL (physical regs)
 //! ```
 
+pub mod allocator;
 pub mod liveness;
 
-pub use liveness::{LivenessAnalysis, LivenessInfo};
+pub use allocator::{AllocationResult, GraphColoringAllocator, LinearScanAllocator};
+pub use liveness::{InterferenceGraph, LivenessAnalysis, LivenessInfo};
