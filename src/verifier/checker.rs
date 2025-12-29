@@ -2,6 +2,8 @@
 //!
 //! This module verifies individual DTAL instructions maintain type invariants.
 
+#![allow(clippy::result_large_err)]
+
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{BinaryOp, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
@@ -105,14 +107,14 @@ fn verify_mov_imm<'src>(
     block_label: &str,
 ) -> Result<(), VerifyError<'src>> {
     // For singleton types, check the value matches
-    if let IType::SingletonInt(IValue::Int(expected)) = ty {
-        if imm != *expected {
-            return Err(VerifyError::SingletonMismatch {
-                block: block_label.to_string(),
-                expected_value: *expected,
-                actual_value: imm,
-            });
-        }
+    if let IType::SingletonInt(IValue::Int(expected)) = ty
+        && imm != *expected
+    {
+        return Err(VerifyError::SingletonMismatch {
+            block: block_label.to_string(),
+            expected_value: *expected,
+            actual_value: imm,
+        });
     }
 
     // For refined types, we would check the predicate here
@@ -183,14 +185,14 @@ fn verify_binop<'src>(
             BinaryOp::Or => *l | *r,
         };
 
-        if let IType::SingletonInt(IValue::Int(declared)) = ty {
-            if *declared != expected_result {
-                return Err(VerifyError::SingletonMismatch {
-                    block: block_label.to_string(),
-                    expected_value: expected_result,
-                    actual_value: *declared,
-                });
-            }
+        if let IType::SingletonInt(IValue::Int(declared)) = ty
+            && *declared != expected_result
+        {
+            return Err(VerifyError::SingletonMismatch {
+                block: block_label.to_string(),
+                expected_value: expected_result,
+                actual_value: *declared,
+            });
         }
     }
 
@@ -222,14 +224,14 @@ fn verify_add_imm<'src>(
     if let IType::SingletonInt(IValue::Int(src_val)) = &src_ty {
         let expected_result = src_val + imm;
 
-        if let IType::SingletonInt(IValue::Int(declared)) = ty {
-            if *declared != expected_result {
-                return Err(VerifyError::SingletonMismatch {
-                    block: block_label.to_string(),
-                    expected_value: expected_result,
-                    actual_value: *declared,
-                });
-            }
+        if let IType::SingletonInt(IValue::Int(declared)) = ty
+            && *declared != expected_result
+        {
+            return Err(VerifyError::SingletonMismatch {
+                block: block_label.to_string(),
+                expected_value: expected_result,
+                actual_value: *declared,
+            });
         }
     }
 
@@ -424,8 +426,7 @@ fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
         }
         (Constraint::Ge(a1, b1), Constraint::Ge(a2, b2)) => {
             // a >= c1 implies a >= c2 if c1 >= c2
-            a1 == a2
-                && matches!((b1, b2), (IndexExpr::Const(x), IndexExpr::Const(y)) if *x >= *y)
+            a1 == a2 && matches!((b1, b2), (IndexExpr::Const(x), IndexExpr::Const(y)) if *x >= *y)
         }
         _ => false,
     }

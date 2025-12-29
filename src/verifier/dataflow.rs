@@ -2,6 +2,8 @@
 //!
 //! This module computes type states at block entries using forward dataflow analysis.
 
+#![allow(clippy::result_large_err)]
+
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::common::types::IType;
@@ -10,6 +12,7 @@ use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
 /// Result of dataflow analysis
+#[allow(dead_code)]
 pub struct DataflowResult<'src> {
     /// Type state at entry of each block
     pub entry_states: HashMap<String, TypeState<'src>>,
@@ -77,7 +80,10 @@ pub fn analyze_function<'src>(
 
             // Check if exit state changed
             let old_exit = exit_states.get(&block.label);
-            if old_exit.map(|s| !states_equal(s, &exit_state)).unwrap_or(true) {
+            if old_exit
+                .map(|s| !states_equal(s, &exit_state))
+                .unwrap_or(true)
+            {
                 changed = true;
                 exit_states.insert(block.label.clone(), exit_state);
             }
@@ -161,10 +167,10 @@ fn join_states<'src>(
         let mut types: Vec<IType<'src>> = Vec::new();
 
         for label in pred_labels {
-            if let Some(state) = exit_states.get(label) {
-                if let Some(ty) = state.register_types.get(&reg) {
-                    types.push(ty.clone());
-                }
+            if let Some(state) = exit_states.get(label)
+                && let Some(ty) = state.register_types.get(&reg)
+            {
+                types.push(ty.clone());
             }
         }
 
@@ -177,19 +183,19 @@ fn join_states<'src>(
 
     // Join constraints - take intersection (constraints true on all paths)
     // For simplicity, start with first predecessor's constraints
-    if let Some(first_label) = pred_labels.first() {
-        if let Some(first_state) = exit_states.get(first_label) {
-            // Only keep constraints that appear in all predecessors
-            for constraint in &first_state.constraints {
-                let in_all = pred_labels.iter().skip(1).all(|label| {
-                    exit_states
-                        .get(label)
-                        .map(|s| s.constraints.contains(constraint))
-                        .unwrap_or(false)
-                });
-                if in_all {
-                    result.constraints.push(constraint.clone());
-                }
+    if let Some(first_label) = pred_labels.first()
+        && let Some(first_state) = exit_states.get(first_label)
+    {
+        // Only keep constraints that appear in all predecessors
+        for constraint in &first_state.constraints {
+            let in_all = pred_labels.iter().skip(1).all(|label| {
+                exit_states
+                    .get(label)
+                    .map(|s| s.constraints.contains(constraint))
+                    .unwrap_or(false)
+            });
+            if in_all {
+                result.constraints.push(constraint.clone());
             }
         }
     }

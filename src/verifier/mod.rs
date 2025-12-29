@@ -34,6 +34,8 @@
 //! - All constraint assertions are provable
 //! - Type states are compatible at control flow merge points
 
+#![allow(clippy::result_large_err)]
+
 mod checker;
 mod dataflow;
 mod error;
@@ -133,7 +135,7 @@ fn types_compatible<'src>(
         (IType::SingletonInt(_), IType::Int) => true,
         (IType::RefinedInt { .. }, IType::Int) => true,
         (IType::Int, IType::RefinedInt { .. }) => false, // int is not subtype of refined
-        _ => true, // Conservative: trust for now
+        _ => true,                                       // Conservative: trust for now
     }
 }
 
