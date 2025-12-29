@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use veritas::pipeline::{CompileError, compile_verbose};
+use veritas::verifier::verify_dtal;
 
 fn main() {
     // Parse command line arguments
@@ -14,6 +15,8 @@ fn main() {
         eprintln!("  --tokens         Show lexer tokens");
         eprintln!("  --ast            Show typed AST");
         eprintln!("  --tir            Show TIR (SSA form)");
+        eprintln!("  --verify         Verify DTAL output");
+        eprintln!("  --verify-only    Verify DTAL and exit (no output)");
         std::process::exit(1);
     }
 
@@ -22,6 +25,8 @@ fn main() {
     let show_tokens = args.iter().any(|a| a == "--tokens");
     let show_ast = args.iter().any(|a| a == "--ast");
     let show_tir = args.iter().any(|a| a == "--tir");
+    let verify = args.iter().any(|a| a == "--verify" || a == "--verify-only");
+    let verify_only = args.iter().any(|a| a == "--verify-only");
 
     println!("\n{}", file_path);
     println!("{}", "=".repeat(60));
@@ -62,6 +67,26 @@ fn main() {
                 println!("\n[6] Emitting output...");
             } else {
                 println!("\nCompilation successful!");
+            }
+
+            // Verify DTAL if requested
+            if verify {
+                if verbose {
+                    println!("\n[7] Verifying DTAL...");
+                }
+                match verify_dtal(&output.dtal_program) {
+                    Ok(()) => {
+                        println!("\nVerification passed!");
+                    }
+                    Err(e) => {
+                        eprintln!("\nVerification FAILED: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+
+                if verify_only {
+                    return;
+                }
             }
 
             // Show tokens if requested

@@ -70,6 +70,8 @@ pub struct VerboseOutput<'src> {
     pub tast: crate::common::tast::TProgram<'src>,
     /// The TIR (SSA form)
     pub tir: crate::backend::TirProgram<'src>,
+    /// The DTAL program (for verification)
+    pub dtal_program: crate::backend::dtal::instr::DtalProgram<'src>,
     /// The generated DTAL assembly as text
     pub dtal: String,
 }
@@ -193,6 +195,7 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
         tokens: token_strings,
         tast,
         tir,
+        dtal_program,
         dtal,
     })
 }
