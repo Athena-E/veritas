@@ -30,6 +30,7 @@ pub mod codegen;
 pub mod dtal;
 pub mod emit;
 pub mod lower;
+pub mod regalloc;
 pub mod tir;
 pub mod x86_64;
 
