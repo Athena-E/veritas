@@ -22,7 +22,9 @@
 //! ```
 
 pub mod instr;
+pub mod lower;
 pub mod regs;
 
 pub use instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
+pub use lower::lower_program;
 pub use regs::{Location, X86Reg};
