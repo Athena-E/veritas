@@ -20,6 +20,8 @@ fn main() {
         eprintln!("  --tir            Show TIR (SSA form)");
         eprintln!("  --verify         Verify DTAL output");
         eprintln!("  --verify-only    Verify DTAL and exit (no output)");
+        eprintln!("  -o <file>        Output native executable (ELF)");
+        eprintln!("  --native         Generate native x86-64 code (to stdout)");
         std::process::exit(1);
     }
 
@@ -30,6 +32,8 @@ fn main() {
     let show_tir = args.iter().any(|a| a == "--tir");
     let verify = args.iter().any(|a| a == "--verify" || a == "--verify-only");
     let verify_only = args.iter().any(|a| a == "--verify-only");
+    let native = args.iter().any(|a| a == "--native");
+    let output_file = args.iter().position(|a| a == "-o").and_then(|i| args.get(i + 1));
 
     println!("\n{}", file_path);
     println!("{}", "=".repeat(60));
@@ -144,10 +148,89 @@ fn main() {
                 }
             }
 
-            println!("\n{}", "=".repeat(60));
-            println!("DTAL Output:");
-            println!("{}", "=".repeat(60));
-            println!("{}", output.dtal);
+            // Show DTAL output unless generating native code
+            if !native && output_file.is_none() {
+                println!("\n{}", "=".repeat(60));
+                println!("DTAL Output:");
+                println!("{}", "=".repeat(60));
+                println!("{}", output.dtal);
+            }
+
+            // Generate native code if requested
+            if native || output_file.is_some() {
+                if verbose {
+                    println!("\n[8] Lowering to x86-64...");
+                }
+
+                // Lower DTAL to x86-64
+                let x86_program = lower_to_x86(&output.dtal_program);
+
+                if verbose {
+                    println!("Generated {} function(s)", x86_program.functions.len());
+                    println!("\n[9] Encoding x86-64 instructions...");
+                }
+
+                // Encode to machine code
+                let mut encoder = Encoder::new();
+                let encoded = encoder.encode_program(&x86_program);
+
+                if verbose {
+                    println!("Encoded {} bytes of machine code", encoded.code.len());
+                }
+
+                if let Some(out_path) = output_file {
+                    if verbose {
+                        println!("\n[10] Generating ELF executable...");
+                    }
+
+                    // Determine entry point (use "main" or first function)
+                    let entry = if encoded.symbols.contains_key("main") {
+                        "main"
+                    } else {
+                        x86_program.functions.first().map(|f| f.name.as_str()).unwrap_or("main")
+                    };
+
+                    // Generate ELF
+                    let elf = generate_elf(&encoded, entry);
+
+                    // Write executable
+                    if let Err(e) = fs::write(out_path, &elf) {
+                        eprintln!("Error writing output file '{}': {}", out_path, e);
+                        std::process::exit(1);
+                    }
+
+                    // Make executable
+                    if let Ok(metadata) = fs::metadata(out_path) {
+                        let mut perms = metadata.permissions();
+                        perms.set_mode(0o755);
+                        let _ = fs::set_permissions(out_path, perms);
+                    }
+
+                    println!("\nGenerated executable: {} ({} bytes)", out_path, elf.len());
+                } else if native {
+                    // Print x86-64 assembly
+                    println!("\n{}", "=".repeat(60));
+                    println!("x86-64 Assembly:");
+                    println!("{}", "=".repeat(60));
+                    for func in &x86_program.functions {
+                        println!("\n{}:", func.name);
+                        for instr in &func.instructions {
+                            println!("    {}", instr);
+                        }
+                    }
+
+                    println!("\n{}", "=".repeat(60));
+                    println!("Machine Code ({} bytes):", encoded.code.len());
+                    println!("{}", "=".repeat(60));
+                    for (i, chunk) in encoded.code.chunks(16).enumerate() {
+                        print!("{:08x}  ", i * 16);
+                        for byte in chunk {
+                            print!("{:02x} ", byte);
+                        }
+                        println!();
+                    }
+                }
+            }
         }
         Err(e) => {
             println!();
