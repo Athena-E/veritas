@@ -1,5 +1,8 @@
 use std::env;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use veritas::backend::elf::generate_elf;
+use veritas::backend::x86_64::{lower_program as lower_to_x86, Encoder};
 use veritas::pipeline::{CompileError, compile_verbose};
 use veritas::verifier::verify_dtal;
 
