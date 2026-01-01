@@ -28,6 +28,7 @@
 
 pub mod codegen;
 pub mod dtal;
+pub mod elf;
 pub mod emit;
 pub mod lower;
 pub mod regalloc;
