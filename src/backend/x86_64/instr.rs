@@ -35,16 +35,16 @@ impl Condition {
     /// Get the condition code byte for Jcc instructions
     pub fn cc_byte(self) -> u8 {
         match self {
-            Condition::E => 0x84,   // JE/JZ
-            Condition::Ne => 0x85,  // JNE/JNZ
-            Condition::L => 0x8C,   // JL/JNGE
-            Condition::Le => 0x8E,  // JLE/JNG
-            Condition::G => 0x8F,   // JG/JNLE
-            Condition::Ge => 0x8D,  // JGE/JNL
-            Condition::B => 0x82,   // JB/JNAE/JC
-            Condition::Be => 0x86,  // JBE/JNA
-            Condition::A => 0x87,   // JA/JNBE
-            Condition::Ae => 0x83,  // JAE/JNB/JNC
+            Condition::E => 0x84,  // JE/JZ
+            Condition::Ne => 0x85, // JNE/JNZ
+            Condition::L => 0x8C,  // JL/JNGE
+            Condition::Le => 0x8E, // JLE/JNG
+            Condition::G => 0x8F,  // JG/JNLE
+            Condition::Ge => 0x8D, // JGE/JNL
+            Condition::B => 0x82,  // JB/JNAE/JC
+            Condition::Be => 0x86, // JBE/JNA
+            Condition::A => 0x87,  // JA/JNBE
+            Condition::Ae => 0x83, // JAE/JNB/JNC
         }
     }
 

@@ -204,7 +204,8 @@ impl LinearScanAllocator {
             // Allocate stack slot for spilled register
             let slot = self.next_spill_slot;
             self.next_spill_slot -= 8;
-            self.allocation.insert(spilled_interval.vreg, Location::Stack(slot));
+            self.allocation
+                .insert(spilled_interval.vreg, Location::Stack(slot));
 
             // Give the freed register to the new interval
             self.allocation.insert(interval.vreg, Location::Reg(reg));
@@ -341,10 +342,10 @@ impl GraphColoringAllocator {
                     removed.insert(node);
 
                     for neighbor in graph.neighbors(node) {
-                        if !removed.contains(&neighbor) {
-                            if let Some(deg) = current_degree.get_mut(&neighbor) {
-                                *deg = deg.saturating_sub(1);
-                            }
+                        if !removed.contains(&neighbor)
+                            && let Some(deg) = current_degree.get_mut(&neighbor)
+                        {
+                            *deg = deg.saturating_sub(1);
                         }
                     }
                 }

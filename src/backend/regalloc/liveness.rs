@@ -108,7 +108,9 @@ impl LivenessAnalysis {
     }
 
     /// Build control flow graph from function
-    fn build_cfg(func: &DtalFunction) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
+    fn build_cfg(
+        func: &DtalFunction,
+    ) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
         let mut successors: HashMap<String, Vec<String>> = HashMap::new();
         let mut predecessors: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -122,7 +124,10 @@ impl LivenessAnalysis {
         for (i, block) in func.blocks.iter().enumerate() {
             let succs = Self::get_block_successors(block, func, i);
             for succ in &succs {
-                predecessors.get_mut(succ).unwrap().push(block.label.clone());
+                predecessors
+                    .get_mut(succ)
+                    .unwrap()
+                    .push(block.label.clone());
             }
             successors.insert(block.label.clone(), succs);
         }
@@ -131,7 +136,11 @@ impl LivenessAnalysis {
     }
 
     /// Get successors of a block based on its terminator instruction
-    fn get_block_successors(block: &DtalBlock, func: &DtalFunction, block_idx: usize) -> Vec<String> {
+    fn get_block_successors(
+        block: &DtalBlock,
+        func: &DtalFunction,
+        block_idx: usize,
+    ) -> Vec<String> {
         let mut succs = Vec::new();
 
         // Find terminator instruction
@@ -417,8 +426,7 @@ mod tests {
         let block = &func.blocks[0];
         let block_info = &liveness.blocks["entry"];
 
-        let live_sets =
-            LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
+        let live_sets = LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
 
         // After v0 = 10: v0 is live
         // After v1 = 20: v0, v1 are live

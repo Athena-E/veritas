@@ -254,7 +254,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 
             DtalInstr::Alloca { dst, size, .. } => {
                 // Allocate stack space
-                let alloc_size = ((*size as i32 + 15) & !15) as i32; // 16-byte align
+                let alloc_size = (*size as i32 + 15) & !15; // 16-byte align
                 self.instructions.push(X86Instr::SubRI {
                     dst: X86Reg::Rsp,
                     imm: alloc_size,
@@ -302,8 +302,10 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                         imm: imm as i32,
                     });
                 } else {
-                    self.instructions
-                        .push(X86Instr::MovRI { dst: X86Reg::R11, imm });
+                    self.instructions.push(X86Instr::MovRI {
+                        dst: X86Reg::R11,
+                        imm,
+                    });
                     let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
                     self.instructions.push(X86Instr::MovMR {
                         dst: mem,
@@ -411,8 +413,10 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             });
         } else {
             // Large immediate: load to scratch and add
-            self.instructions
-                .push(X86Instr::MovRI { dst: X86Reg::R11, imm });
+            self.instructions.push(X86Instr::MovRI {
+                dst: X86Reg::R11,
+                imm,
+            });
             self.instructions.push(X86Instr::AddRR {
                 dst: src_reg,
                 src: X86Reg::R11,
@@ -464,7 +468,10 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 
         // Store to [base + offset * 8]
         let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
-        self.instructions.push(X86Instr::MovMR { dst: mem, src: src_reg });
+        self.instructions.push(X86Instr::MovMR {
+            dst: mem,
+            src: src_reg,
+        });
     }
 
     /// Lower cmp instruction
@@ -476,12 +483,17 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 
         match rhs_loc {
             Location::Reg(r) => {
-                self.instructions.push(X86Instr::CmpRR { lhs: lhs_reg, rhs: r });
+                self.instructions.push(X86Instr::CmpRR {
+                    lhs: lhs_reg,
+                    rhs: r,
+                });
             }
             Location::Stack(offset) => {
                 let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
-                self.instructions
-                    .push(X86Instr::CmpRM { lhs: lhs_reg, rhs: mem });
+                self.instructions.push(X86Instr::CmpRM {
+                    lhs: lhs_reg,
+                    rhs: mem,
+                });
             }
         }
     }
@@ -498,8 +510,10 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             });
         } else {
             // Large immediate
-            self.instructions
-                .push(X86Instr::MovRI { dst: X86Reg::R11, imm });
+            self.instructions.push(X86Instr::MovRI {
+                dst: X86Reg::R11,
+                imm,
+            });
             self.instructions.push(X86Instr::CmpRR {
                 lhs: lhs_reg,
                 rhs: X86Reg::R11,
@@ -521,7 +535,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
     fn get_reg_location(&self, reg: Reg) -> Location {
         match reg {
             Reg::Virtual(vreg) => self.get_vreg_location(Reg::Virtual(vreg)),
-            Reg::Physical(preg) => {
+            Reg::Physical(_preg) => {
                 // Map DTAL physical registers to x86 registers
                 // For now, assume direct mapping (simplified)
                 Location::Reg(X86Reg::Rax) // Placeholder
@@ -567,7 +581,8 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             }
             Location::Stack(offset) => {
                 let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
-                self.instructions.push(X86Instr::MovMR { dst: mem, src: reg });
+                self.instructions
+                    .push(X86Instr::MovMR { dst: mem, src: reg });
             }
         }
     }
@@ -715,8 +730,14 @@ mod tests {
         let x86_func = &x86_program.functions[0];
 
         // Should have branch instructions
-        let has_jcc = x86_func.instructions.iter().any(|i| matches!(i, X86Instr::Jcc { .. }));
-        let has_jmp = x86_func.instructions.iter().any(|i| matches!(i, X86Instr::Jmp { .. }));
+        let has_jcc = x86_func
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instr::Jcc { .. }));
+        let has_jmp = x86_func
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instr::Jmp { .. }));
 
         assert!(has_jcc, "Should have conditional jump");
         assert!(has_jmp, "Should have unconditional jump");

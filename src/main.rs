@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use veritas::backend::elf::generate_elf;
-use veritas::backend::x86_64::{lower_program as lower_to_x86, Encoder};
+use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
 use veritas::pipeline::{CompileError, compile_verbose};
 use veritas::verifier::verify_dtal;
 
@@ -33,7 +33,10 @@ fn main() {
     let verify = args.iter().any(|a| a == "--verify" || a == "--verify-only");
     let verify_only = args.iter().any(|a| a == "--verify-only");
     let native = args.iter().any(|a| a == "--native");
-    let output_file = args.iter().position(|a| a == "-o").and_then(|i| args.get(i + 1));
+    let output_file = args
+        .iter()
+        .position(|a| a == "-o")
+        .and_then(|i| args.get(i + 1));
 
     println!("\n{}", file_path);
     println!("{}", "=".repeat(60));
@@ -187,7 +190,11 @@ fn main() {
                     let entry = if encoded.symbols.contains_key("main") {
                         "main"
                     } else {
-                        x86_program.functions.first().map(|f| f.name.as_str()).unwrap_or("main")
+                        x86_program
+                            .functions
+                            .first()
+                            .map(|f| f.name.as_str())
+                            .unwrap_or("main")
                     };
 
                     // Generate ELF

@@ -46,6 +46,7 @@ const PT_LOAD: u32 = 1;
 
 /// Segment flags
 const PF_X: u32 = 1; // Execute
+#[allow(dead_code)]
 const PF_W: u32 = 2; // Write
 const PF_R: u32 = 4; // Read
 
@@ -81,7 +82,8 @@ impl ElfGenerator {
     pub fn set_entry(&mut self, symbol: &str, encoded: &EncodedProgram) {
         if let Some(&offset) = encoded.symbols.get(symbol) {
             // Entry point is virtual address + offset in code
-            self.entry_point = CODE_VADDR + ELF64_EHDR_SIZE as u64 + ELF64_PHDR_SIZE as u64 + offset as u64;
+            self.entry_point =
+                CODE_VADDR + ELF64_EHDR_SIZE as u64 + ELF64_PHDR_SIZE as u64 + offset as u64;
         }
     }
 
@@ -115,14 +117,14 @@ impl ElfGenerator {
     }
 
     /// Write ELF64 header
-    fn write_elf_header<W: Write>(&self, out: &mut W, file_size: usize) -> io::Result<()> {
+    fn write_elf_header<W: Write>(&self, out: &mut W, _file_size: usize) -> io::Result<()> {
         // e_ident
-        out.write_all(&ELF_MAGIC)?;           // Magic
-        out.write_all(&[ELFCLASS64])?;        // Class (64-bit)
-        out.write_all(&[ELFDATA2LSB])?;       // Data (little endian)
-        out.write_all(&[EV_CURRENT])?;        // Version
-        out.write_all(&[ELFOSABI_NONE])?;     // OS/ABI
-        out.write_all(&[0; 8])?;              // Padding
+        out.write_all(&ELF_MAGIC)?; // Magic
+        out.write_all(&[ELFCLASS64])?; // Class (64-bit)
+        out.write_all(&[ELFDATA2LSB])?; // Data (little endian)
+        out.write_all(&[EV_CURRENT])?; // Version
+        out.write_all(&[ELFOSABI_NONE])?; // OS/ABI
+        out.write_all(&[0; 8])?; // Padding
 
         // e_type
         out.write_all(&ET_EXEC.to_le_bytes())?;
@@ -222,7 +224,11 @@ impl ElfGenerator {
         let startup_size = startup.len();
 
         // Patch the call offset
-        if let Some(symbol_offset) = self.symbols.get(entry_symbol).map(|v| v - CODE_VADDR - ELF64_EHDR_SIZE as u64 - ELF64_PHDR_SIZE as u64) {
+        if let Some(symbol_offset) = self
+            .symbols
+            .get(entry_symbol)
+            .map(|v| v - CODE_VADDR - ELF64_EHDR_SIZE as u64 - ELF64_PHDR_SIZE as u64)
+        {
             let call_offset = (symbol_offset as i64 + startup_size as i64 - 5) as i32;
             startup[1..5].copy_from_slice(&call_offset.to_le_bytes());
         }
@@ -249,7 +255,12 @@ impl ElfGenerator {
     }
 
     /// Write ELF header with custom entry point
-    fn write_elf_header_with_entry<W: Write>(&self, out: &mut W, file_size: usize, entry: u64) -> io::Result<()> {
+    fn write_elf_header_with_entry<W: Write>(
+        &self,
+        out: &mut W,
+        _file_size: usize,
+        entry: u64,
+    ) -> io::Result<()> {
         // e_ident
         out.write_all(&ELF_MAGIC)?;
         out.write_all(&[ELFCLASS64])?;
@@ -289,7 +300,9 @@ pub fn generate_elf(encoded: &EncodedProgram, entry: &str) -> Vec<u8> {
     generator.set_entry(entry, encoded);
 
     let mut output = Vec::new();
-    generator.generate_standalone(&mut output, entry).expect("ELF generation failed");
+    generator
+        .generate_standalone(&mut output, entry)
+        .expect("ELF generation failed");
     output
 }
 
@@ -309,8 +322,7 @@ mod tests {
         let encoded = EncodedProgram {
             code: vec![
                 // mov rax, 42
-                0x48, 0xC7, 0xC0, 42, 0, 0, 0,
-                // ret
+                0x48, 0xC7, 0xC0, 42, 0, 0, 0, // ret
                 0xC3,
             ],
             symbols: {

@@ -127,7 +127,7 @@ impl Encoder {
                 if rex { 3 } else { 2 }
             }
 
-            X86Instr::MovRI { dst, imm } => {
+            X86Instr::MovRI { dst, imm: _ } => {
                 let rex = Self::needs_rex_w() || dst.needs_rex_b();
                 // REX + opcode + imm64
                 if rex { 1 + 1 + 8 } else { 1 + 8 }
@@ -144,13 +144,21 @@ impl Encoder {
 
             X86Instr::Lea { dst, src } => self.mem_instr_size(*dst, src),
 
-            X86Instr::AddRR { .. } | X86Instr::SubRR { .. } | X86Instr::ImulRR { .. }
-            | X86Instr::CmpRR { .. } | X86Instr::TestRR { .. } | X86Instr::AndRR { .. }
-            | X86Instr::OrRR { .. } | X86Instr::XorRR { .. } => 3, // REX.W + opcode + ModR/M
+            X86Instr::AddRR { .. }
+            | X86Instr::SubRR { .. }
+            | X86Instr::ImulRR { .. }
+            | X86Instr::CmpRR { .. }
+            | X86Instr::TestRR { .. }
+            | X86Instr::AndRR { .. }
+            | X86Instr::OrRR { .. }
+            | X86Instr::XorRR { .. } => 3, // REX.W + opcode + ModR/M
 
-            X86Instr::AddRI { dst, imm } | X86Instr::SubRI { dst, imm }
-            | X86Instr::CmpRI { lhs: dst, imm } | X86Instr::AndRI { dst, imm }
-            | X86Instr::OrRI { dst, imm } | X86Instr::XorRI { dst, imm }
+            X86Instr::AddRI { dst, imm }
+            | X86Instr::SubRI { dst, imm }
+            | X86Instr::CmpRI { lhs: dst, imm }
+            | X86Instr::AndRI { dst, imm }
+            | X86Instr::OrRI { dst, imm }
+            | X86Instr::XorRI { dst, imm }
             | X86Instr::TestRI { lhs: dst, imm } => {
                 let rex = Self::needs_rex_w() || dst.needs_rex_b();
                 let base = if rex { 3 } else { 2 };
@@ -179,13 +187,25 @@ impl Encoder {
             X86Instr::Syscall => 2,
 
             X86Instr::Push { src } => {
-                if src.needs_rex_b() { 2 } else { 1 }
+                if src.needs_rex_b() {
+                    2
+                } else {
+                    1
+                }
             }
             X86Instr::PushI { imm } => {
-                if *imm >= -128 && *imm <= 127 { 2 } else { 5 }
+                if *imm >= -128 && *imm <= 127 {
+                    2
+                } else {
+                    5
+                }
             }
             X86Instr::Pop { dst } => {
-                if dst.needs_rex_b() { 2 } else { 1 }
+                if dst.needs_rex_b() {
+                    2
+                } else {
+                    1
+                }
             }
         }
     }
@@ -452,7 +472,11 @@ impl Encoder {
         let rex = 0x48
             | if reg.needs_rex_r() { 0x04 } else { 0 }
             | if mem.base.needs_rex_b() { 0x01 } else { 0 }
-            | if mem.index.map_or(false, |(r, _)| r.needs_rex_b()) { 0x02 } else { 0 };
+            | if mem.index.is_some_and(|(r, _)| r.needs_rex_b()) {
+                0x02
+            } else {
+                0
+            };
         self.emit_byte(rex);
         self.emit_byte(opcode);
         self.encode_mem_operand(reg.reg3(), mem);
@@ -467,7 +491,11 @@ impl Encoder {
     fn encode_mi(&mut self, opcode: u8, ext: u8, mem: &MemOperand, imm: i32) {
         let rex = 0x48
             | if mem.base.needs_rex_b() { 0x01 } else { 0 }
-            | if mem.index.map_or(false, |(r, _)| r.needs_rex_b()) { 0x02 } else { 0 };
+            | if mem.index.is_some_and(|(r, _)| r.needs_rex_b()) {
+                0x02
+            } else {
+                0
+            };
         self.emit_byte(rex);
         self.emit_byte(opcode);
         self.encode_mem_operand(ext, mem);
@@ -479,7 +507,7 @@ impl Encoder {
         let rex = 0x48 | if dst.needs_rex_b() { 0x01 } else { 0 };
         self.emit_byte(rex);
 
-        if imm >= -128 && imm <= 127 {
+        if (-128..=127).contains(&imm) {
             self.emit_byte(opcode8);
             self.emit_modrm(0b11, ext, dst.reg3());
             self.emit_byte(imm as u8);
@@ -504,10 +532,7 @@ impl Encoder {
         let base3 = base.reg3();
 
         // Determine mod and displacement size
-        let (mod_bits, disp_size) = if mem.disp == 0
-            && base != X86Reg::Rbp
-            && base != X86Reg::R13
-        {
+        let (mod_bits, disp_size) = if mem.disp == 0 && base != X86Reg::Rbp && base != X86Reg::R13 {
             (0b00, 0)
         } else if mem.disp >= -128 && mem.disp <= 127 {
             (0b01, 1)
