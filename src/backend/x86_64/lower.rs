@@ -535,10 +535,29 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
     fn get_reg_location(&self, reg: Reg) -> Location {
         match reg {
             Reg::Virtual(vreg) => self.get_vreg_location(Reg::Virtual(vreg)),
-            Reg::Physical(_preg) => {
-                // Map DTAL physical registers to x86 registers
-                // For now, assume direct mapping (simplified)
-                Location::Reg(X86Reg::Rax) // Placeholder
+            Reg::Physical(preg) => {
+                use crate::backend::dtal::regs::PhysicalReg;
+                // Map DTAL physical registers to x86-64 ABI registers
+                let x86_reg = match preg {
+                    PhysicalReg::R0 => X86Reg::Rdi,  // 1st arg
+                    PhysicalReg::R1 => X86Reg::Rsi,  // 2nd arg
+                    PhysicalReg::R2 => X86Reg::Rdx,  // 3rd arg
+                    PhysicalReg::R3 => X86Reg::Rcx,  // 4th arg
+                    PhysicalReg::R4 => X86Reg::R8,   // 5th arg
+                    PhysicalReg::R5 => X86Reg::R9,   // 6th arg
+                    PhysicalReg::R6 => X86Reg::R10,
+                    PhysicalReg::R7 => X86Reg::R11,
+                    PhysicalReg::R8 => X86Reg::Rbx,
+                    PhysicalReg::R9 => X86Reg::R12,
+                    PhysicalReg::R10 => X86Reg::R13,
+                    PhysicalReg::R11 => X86Reg::R14,
+                    PhysicalReg::R12 => X86Reg::R15,
+                    PhysicalReg::R13 | PhysicalReg::R14 | PhysicalReg::R15 => X86Reg::Rax,
+                    PhysicalReg::SP => X86Reg::Rsp,
+                    PhysicalReg::FP => X86Reg::Rbp,
+                    PhysicalReg::LR => X86Reg::Rax,
+                };
+                Location::Reg(x86_reg)
             }
         }
     }
@@ -552,7 +571,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 .get(&vreg)
                 .copied()
                 .unwrap_or(Location::Reg(X86Reg::Rax)),
-            Reg::Physical(_) => Location::Reg(X86Reg::Rax), // Placeholder
+            Reg::Physical(preg) => self.get_reg_location(Reg::Physical(preg)),
         }
     }
 
