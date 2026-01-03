@@ -67,6 +67,7 @@ impl Encoder {
     /// Encode a complete program
     pub fn encode_program(&mut self, program: &X86Program) -> EncodedProgram {
         let mut symbols = HashMap::new();
+        let mut all_forward_refs: Vec<(String, usize, RelocKind)> = Vec::new();
 
         for func in &program.functions {
             // Record function symbol
@@ -85,12 +86,23 @@ impl Encoder {
 
             // Resolve forward references within function
             self.resolve_forward_refs();
+
+            // Accumulate unresolved references for cross-function resolution
+            all_forward_refs.extend(self.forward_refs.drain(..));
         }
 
-        // Build relocations for unresolved references
-        let relocations: Vec<Relocation> = self
-            .forward_refs
+        // Resolve cross-function references using the global symbols table
+        for (target, patch_offset, _kind) in &all_forward_refs {
+            if let Some(&target_pos) = symbols.get(target) {
+                let offset = (target_pos as i64) - (*patch_offset as i64 + 4);
+                self.patch_i32(*patch_offset, offset as i32);
+            }
+        }
+
+        // Build relocations for truly unresolved references (external symbols)
+        let relocations: Vec<Relocation> = all_forward_refs
             .iter()
+            .filter(|(target, _, _)| !symbols.contains_key(target))
             .map(|(target, offset, kind)| Relocation {
                 offset: *offset,
                 target: target.clone(),
