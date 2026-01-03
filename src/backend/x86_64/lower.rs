@@ -206,13 +206,21 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 self.instructions.push(X86Instr::Call {
                     target: target.clone(),
                 });
+                // x86-64 ABI: return value is in RAX, but DTAL expects it in R0 (mapped to RDI)
+                // Copy return value from RAX to RDI so subsequent reads from R0 work correctly
+                self.instructions.push(X86Instr::MovRR {
+                    dst: X86Reg::Rdi,
+                    src: X86Reg::Rax,
+                });
             }
 
             DtalInstr::Ret => {
-                // Move return value to RAX if it's in a different location
-                // (for simplicity, assume v0 holds return value)
-                // A proper implementation would track the return value register
-
+                // x86-64 ABI: return value must be in RAX, but DTAL puts it in R0 (mapped to RDI)
+                // Copy return value from RDI to RAX before returning
+                self.instructions.push(X86Instr::MovRR {
+                    dst: X86Reg::Rax,
+                    src: X86Reg::Rdi,
+                });
                 self.emit_epilogue();
             }
 
