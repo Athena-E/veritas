@@ -547,12 +547,12 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 use crate::backend::dtal::regs::PhysicalReg;
                 // Map DTAL physical registers to x86-64 ABI registers
                 let x86_reg = match preg {
-                    PhysicalReg::R0 => X86Reg::Rdi,  // 1st arg
-                    PhysicalReg::R1 => X86Reg::Rsi,  // 2nd arg
-                    PhysicalReg::R2 => X86Reg::Rdx,  // 3rd arg
-                    PhysicalReg::R3 => X86Reg::Rcx,  // 4th arg
-                    PhysicalReg::R4 => X86Reg::R8,   // 5th arg
-                    PhysicalReg::R5 => X86Reg::R9,   // 6th arg
+                    PhysicalReg::R0 => X86Reg::Rdi, // 1st arg
+                    PhysicalReg::R1 => X86Reg::Rsi, // 2nd arg
+                    PhysicalReg::R2 => X86Reg::Rdx, // 3rd arg
+                    PhysicalReg::R3 => X86Reg::Rcx, // 4th arg
+                    PhysicalReg::R4 => X86Reg::R8,  // 5th arg
+                    PhysicalReg::R5 => X86Reg::R9,  // 6th arg
                     PhysicalReg::R6 => X86Reg::R10,
                     PhysicalReg::R7 => X86Reg::R11,
                     PhysicalReg::R8 => X86Reg::Rbx,

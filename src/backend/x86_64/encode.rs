@@ -88,7 +88,7 @@ impl Encoder {
             self.resolve_forward_refs();
 
             // Accumulate unresolved references for cross-function resolution
-            all_forward_refs.extend(self.forward_refs.drain(..));
+            all_forward_refs.append(&mut self.forward_refs);
         }
 
         // Resolve cross-function references using the global symbols table
