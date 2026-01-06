@@ -1,0 +1,32 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  6 Jan 00:48:58 GMT 2026
+Iterations: 3
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              7          6          9
+02_arithmetic                           5          5          6
+03_function_calls                       6          6          7
+04_conditionals                         6          6          7
+05_fibonacci                            5          5          6
+06_loops                                6          5          7
+07_refinements                          6          6          8
+08_complex_refinements                  5          5          6
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              5          5          0      1.00x
+02_arithmetic                           7          7          0      1.00x
+03_function_calls                       7          6         -1       .85x
+04_conditionals                         5          6          1      1.20x
+05_fibonacci                            5          5          0      1.00x
+06_loops                                7          5         -2       .71x
+07_refinements                          5          5          0      1.00x
+08_complex_refinements                  6          5         -1       .83x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
