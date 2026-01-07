@@ -60,6 +60,11 @@ pub fn verify_instruction<'src>(
             verify_cmp_imm(*lhs, state, block_label)?;
         }
 
+        DtalInstr::SetCC { dst, cond: _ } => {
+            // SetCC defines dst as Bool (0 or 1)
+            state.register_types.insert(*dst, IType::Bool);
+        }
+
         DtalInstr::Not { dst, src, ty } => {
             verify_not(*dst, *src, ty, state, block_label)?;
         }
