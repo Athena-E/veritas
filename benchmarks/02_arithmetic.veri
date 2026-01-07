@@ -1,0 +1,11 @@
+// Basic arithmetic operations
+fn compute(a: int, b: int, c: int) -> int {
+    let x: int = a + b;
+    let y: int = x * c;
+    let z: int = y - a;
+    z + b * c
+}
+
+fn main() -> int {
+    compute(10, 20, 3)
+}

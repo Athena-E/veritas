@@ -1,0 +1,38 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  6 Jan 00:52:21 GMT 2026
+Iterations: 5
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              7          7          8
+02_arithmetic                           7          7          8
+03_function_calls                       6          6          7
+04_conditionals                         7          6          8
+05_fibonacci                            5          5          6
+06_loops                                5          5          6
+07_refinements                          5          5          6
+08_complex_refinements                  6          6          8
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              5          6          1      1.20x
+02_arithmetic                           5          7          2      1.40x
+03_function_calls                       8          8          0      1.00x
+04_conditionals                        11         10         -1       .90x
+05_fibonacci                            6          6          0      1.00x
+06_loops                                5          7          2      1.40x
+07_refinements                          7          8          1      1.14x
+08_complex_refinements                  6          6          0      1.00x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
+01_minimal                              2          2          3           42
+02_arithmetic                           2          2          3          120
+03_function_calls                       2          2          3           70
+04_conditionals                         2          2          3           85
+05_fibonacci                            2          2          3            0
+06_loops                              146        104        230          139

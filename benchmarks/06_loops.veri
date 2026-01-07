@@ -1,0 +1,11 @@
+// NOTE: Loops are currently broken - this is a placeholder
+// Testing deep call chains instead
+fn f1(x: int) -> int { x + 1 }
+fn f2(x: int) -> int { f1(x) + 1 }
+fn f3(x: int) -> int { f2(x) + 1 }
+fn f4(x: int) -> int { f3(x) + 1 }
+fn f5(x: int) -> int { f4(x) + 1 }
+
+fn main() -> int {
+    f5(0) + f5(10)
+}

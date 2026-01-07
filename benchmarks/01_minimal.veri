@@ -1,0 +1,4 @@
+// Minimal program - baseline
+fn main() -> int {
+    42
+}

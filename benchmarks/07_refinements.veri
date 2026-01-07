@@ -1,0 +1,27 @@
+// Refinement types - stresses verifier
+fn safe_div(x: int, y: int) -> int
+    requires y > 0
+{
+    x
+}
+
+fn positive_sum(a: int, b: int) -> int
+    requires a >= 0
+    requires b >= 0
+{
+    a + b
+}
+
+fn bounded_value(x: int) -> int
+    requires x >= 0
+    requires x < 100
+{
+    x + 1
+}
+
+fn main() -> int {
+    let a: int = safe_div(100, 5);
+    let b: int = positive_sum(10, 20);
+    let c: int = bounded_value(50);
+    a + b + c
+}

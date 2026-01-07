@@ -1,0 +1,37 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  6 Jan 00:58:25 GMT 2026
+Iterations: 5
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              7          5          8
+02_arithmetic                           9          8         13
+03_function_calls                       7          6         10
+04_conditionals                         6          6          7
+05_fibonacci                            7          6          8
+06_loops                                5          5          7
+07_refinements                          5          5          7
+08_complex_refinements                  6          5          7
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              6          6          0      1.00x
+02_arithmetic                           7          6         -1       .85x
+03_function_calls                       9          8         -1       .88x
+04_conditionals                         5          5          0      1.00x
+05_fibonacci                            6          6          0      1.00x
+06_loops                                6          5         -1       .83x
+07_refinements                          8          9          1      1.12x
+08_complex_refinements                 11         12          1      1.09x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
+01_minimal                              4          3          5           42
+02_arithmetic                           3          3          5          120
+03_function_calls                       4          3          5           70
+04_conditionals                         5          5          6          100
+05_fibonacci                            4          4          5           40

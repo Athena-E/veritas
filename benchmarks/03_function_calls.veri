@@ -1,0 +1,23 @@
+// Multiple function calls
+fn add(x: int, y: int) -> int {
+    x + y
+}
+
+fn mul(x: int, y: int) -> int {
+    x * y
+}
+
+fn sub(x: int, y: int) -> int {
+    x - y
+}
+
+fn compute(a: int, b: int, c: int) -> int {
+    let sum: int = add(a, b);
+    let prod: int = mul(sum, c);
+    let diff: int = sub(prod, a);
+    add(diff, mul(b, c))
+}
+
+fn main() -> int {
+    compute(5, 10, 3)
+}

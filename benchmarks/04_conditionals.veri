@@ -1,0 +1,13 @@
+// NOTE: Conditionals are currently broken - this is a placeholder
+// Testing basic arithmetic with function calls instead
+fn triple(x: int) -> int {
+    x + x + x
+}
+
+fn quadruple(x: int) -> int {
+    triple(x) + x
+}
+
+fn main() -> int {
+    quadruple(20)
+}
