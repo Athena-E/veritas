@@ -187,7 +187,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                     CmpOp::Ge => Condition::Ge,
                 };
 
-                let dst_loc = self.get_location(*dst);
+                let dst_loc = self.get_reg_location(*dst);
                 match dst_loc {
                     Location::Reg(r) => {
                         self.instructions
