@@ -149,6 +149,8 @@ pub enum DtalInstr<'src> {
     Cmp { lhs: Reg, rhs: Reg },
     /// cmp lhs, imm
     CmpImm { lhs: Reg, imm: i64 },
+    /// Set dst to 1 if condition is true (based on flags), else 0
+    SetCC { dst: Reg, cond: CmpOp },
 
     // Logical
     /// not rd, rs
