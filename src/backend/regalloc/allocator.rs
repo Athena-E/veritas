@@ -234,6 +234,7 @@ impl LinearScanAllocator {
             DtalInstr::Not { dst, .. } => Some(*dst),
             DtalInstr::Pop { dst, .. } => Some(*dst),
             DtalInstr::Alloca { dst, .. } => Some(*dst),
+            DtalInstr::SetCC { dst, .. } => Some(*dst),
             _ => None,
         };
 
@@ -425,6 +426,7 @@ impl GraphColoringAllocator {
             DtalInstr::Not { dst, .. } => Some(*dst),
             DtalInstr::Pop { dst, .. } => Some(*dst),
             DtalInstr::Alloca { dst, .. } => Some(*dst),
+            DtalInstr::SetCC { dst, .. } => Some(*dst),
             _ => None,
         };
 
