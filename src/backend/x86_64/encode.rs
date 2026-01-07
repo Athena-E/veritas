@@ -191,6 +191,11 @@ impl Encoder {
 
             X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
 
+            X86Instr::SetCC { dst, .. } => {
+                // xor r64, r64 (3 bytes) + setcc r8 (3-4 bytes)
+                3 + if dst.needs_rex_b() { 4 } else { 3 }
+            }
+
             X86Instr::Jmp { .. } | X86Instr::JmpRel { .. } => 5, // E9 + rel32
             X86Instr::Jcc { .. } | X86Instr::JccRel { .. } => 6, // 0F 8x + rel32
             X86Instr::Call { .. } | X86Instr::CallRel { .. } => 5, // E8 + rel32
@@ -376,6 +381,20 @@ impl Encoder {
                 self.emit_byte(0xF7);
                 self.emit_modrm(0b11, 0, lhs.reg3());
                 self.emit_i32(*imm);
+            }
+
+            X86Instr::SetCC { dst, cond } => {
+                // First, zero the full 64-bit register: xor dst, dst
+                self.encode_rr(0x31, *dst, *dst);
+
+                // setcc r8 - sets low byte based on condition
+                // Encoding: [REX.B if needed] 0x0F 0x9x ModR/M
+                if dst.needs_rex_b() {
+                    self.emit_byte(0x41);
+                }
+                self.emit_byte(0x0F);
+                self.emit_byte(cond.setcc_byte());
+                self.emit_modrm(0b11, 0, dst.reg3());
             }
 
             X86Instr::AndRR { dst, src } => {

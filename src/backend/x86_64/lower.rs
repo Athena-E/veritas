@@ -177,6 +177,36 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 self.lower_cmp_imm(*lhs, *imm);
             }
 
+            DtalInstr::SetCC { dst, cond } => {
+                let x86_cond = match cond {
+                    CmpOp::Eq => Condition::E,
+                    CmpOp::Ne => Condition::Ne,
+                    CmpOp::Lt => Condition::L,
+                    CmpOp::Le => Condition::Le,
+                    CmpOp::Gt => Condition::G,
+                    CmpOp::Ge => Condition::Ge,
+                };
+
+                let dst_loc = self.get_location(*dst);
+                match dst_loc {
+                    Location::Reg(r) => {
+                        self.instructions
+                            .push(X86Instr::SetCC { dst: r, cond: x86_cond });
+                    }
+                    Location::Stack(offset) => {
+                        // Set in scratch register, then store
+                        self.instructions.push(X86Instr::SetCC {
+                            dst: X86Reg::Rax,
+                            cond: x86_cond,
+                        });
+                        self.instructions.push(X86Instr::MovMR {
+                            dst: MemOperand::base_disp(X86Reg::Rbp, offset),
+                            src: X86Reg::Rax,
+                        });
+                    }
+                }
+            }
+
             DtalInstr::Not { dst, src, .. } => {
                 self.lower_not(*dst, *src);
             }
