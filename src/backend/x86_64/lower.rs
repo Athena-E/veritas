@@ -616,7 +616,17 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
     /// Load a value from a location into a register
     fn load_to_reg(&mut self, loc: Location, preferred: X86Reg) -> X86Reg {
         match loc {
-            Location::Reg(r) => r,
+            Location::Reg(r) => {
+                if r != preferred {
+                    // Copy to preferred register to preserve the source value.
+                    // This is critical when the same register is used multiple times
+                    // in an expression (e.g., x + x + x) - without this copy, the
+                    // source register would be corrupted by intermediate operations.
+                    self.instructions
+                        .push(X86Instr::MovRR { dst: preferred, src: r });
+                }
+                preferred
+            }
             Location::Stack(offset) => {
                 let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
                 self.instructions.push(X86Instr::MovRM {
