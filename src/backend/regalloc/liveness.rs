@@ -213,6 +213,7 @@ impl LivenessAnalysis {
             DtalInstr::Not { dst, .. } => Some(*dst),
             DtalInstr::Pop { dst, .. } => Some(*dst),
             DtalInstr::Alloca { dst, .. } => Some(*dst),
+            DtalInstr::SetCC { dst, .. } => Some(*dst),
             _ => None,
         };
 

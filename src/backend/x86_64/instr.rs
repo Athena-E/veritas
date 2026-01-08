@@ -48,6 +48,22 @@ impl Condition {
         }
     }
 
+    /// Get the condition code byte for SETcc instructions (0x0F 0x9x)
+    pub fn setcc_byte(self) -> u8 {
+        match self {
+            Condition::E => 0x94,   // sete
+            Condition::Ne => 0x95, // setne
+            Condition::L => 0x9C,  // setl
+            Condition::Le => 0x9E, // setle
+            Condition::G => 0x9F,  // setg
+            Condition::Ge => 0x9D, // setge
+            Condition::B => 0x92,  // setb
+            Condition::Be => 0x96, // setbe
+            Condition::A => 0x97,  // seta
+            Condition::Ae => 0x93, // setae
+        }
+    }
+
     /// Negate the condition
     pub fn negate(self) -> Condition {
         match self {
@@ -191,6 +207,9 @@ pub enum X86Instr {
     /// test reg, imm32
     TestRI { lhs: X86Reg, imm: i32 },
 
+    /// setcc r8 + zero-extend (set byte based on condition, zero-extend to 64-bit)
+    SetCC { dst: X86Reg, cond: Condition },
+
     // === Logical ===
     /// and reg, reg
     AndRR { dst: X86Reg, src: X86Reg },
@@ -279,6 +298,8 @@ impl fmt::Display for X86Instr {
 
             X86Instr::TestRR { lhs, rhs } => write!(f, "test {}, {}", lhs, rhs),
             X86Instr::TestRI { lhs, imm } => write!(f, "test {}, {}", lhs, imm),
+
+            X86Instr::SetCC { dst, cond } => write!(f, "set{} {}", cond, dst),
 
             X86Instr::AndRR { dst, src } => write!(f, "and {}, {}", dst, src),
             X86Instr::AndRI { dst, imm } => write!(f, "and {}, {}", dst, imm),

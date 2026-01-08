@@ -178,6 +178,10 @@ fn emit_instruction<'src>(output: &mut String, instr: &DtalInstr<'src>) {
             writeln!(output, "    cmp {}, {}", emit_reg(lhs), imm).unwrap();
         }
 
+        DtalInstr::SetCC { dst, cond } => {
+            writeln!(output, "    set{} {}", emit_cmpop(cond), emit_reg(dst)).unwrap();
+        }
+
         DtalInstr::Not { dst, src, ty } => {
             writeln!(
                 output,

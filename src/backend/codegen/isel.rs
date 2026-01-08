@@ -218,43 +218,48 @@ fn lower_binop<'src>(
 
 /// Lower a comparison operation
 ///
-/// In a simple model, we use: dst = (lhs cmp rhs) ? 1 : 0
-/// This is implemented as: cmp lhs, rhs; set dst based on flags
-/// For this virtual register model, we use a pseudo-instruction pattern.
+/// Compares lhs and rhs, then sets dst to 1 if condition is true, else 0.
+/// Uses: cmp lhs, rhs; setcc dst
 fn lower_comparison<'src>(
     instrs: &mut Vec<DtalInstr<'src>>,
     dst: crate::backend::dtal::VirtualReg,
     lhs: crate::backend::dtal::VirtualReg,
     rhs: crate::backend::dtal::VirtualReg,
-    ty: &IType<'src>,
+    _ty: &IType<'src>,
     cmp_kind: &str,
 ) {
-    // Emit comparison
+    use crate::backend::dtal::instr::CmpOp;
+
+    // Emit comparison to set CPU flags
     instrs.push(DtalInstr::Cmp {
         lhs: Reg::Virtual(lhs),
         rhs: Reg::Virtual(rhs),
     });
 
-    // For virtual register code, we emit a pseudo "set" operation
-    // represented as: mov dst, 0; then conditionally set to 1
-    // In practice, this would be lowered to actual set instructions
-    // during physical register allocation or a later pass.
+    // Map comparison kind to CmpOp
+    let cond = match cmp_kind {
+        "eq" => CmpOp::Eq,
+        "ne" => CmpOp::Ne,
+        "lt" => CmpOp::Lt,
+        "le" => CmpOp::Le,
+        "gt" => CmpOp::Gt,
+        "ge" => CmpOp::Ge,
+        _ => panic!("Unknown comparison kind: {}", cmp_kind),
+    };
 
-    // Initialize to 0
-    instrs.push(DtalInstr::MovImm {
+    // Emit SetCC to materialize comparison result (0 or 1)
+    instrs.push(DtalInstr::SetCC {
         dst: Reg::Virtual(dst),
-        imm: 0,
-        ty: ty.clone(),
+        cond,
     });
 
-    // Emit a type annotation noting this is a comparison result
+    // Type annotation for verification
     instrs.push(DtalInstr::TypeAnnotation {
         reg: Reg::Virtual(dst),
         ty: IType::Bool,
     });
 
-    // Note: A real implementation would emit a conditional set instruction
-    // For now, we add a comment-like constraint noting the comparison
+    // Preserve constraint for verifier
     use crate::backend::dtal::Constraint;
     use crate::backend::dtal::IndexExpr;
 
