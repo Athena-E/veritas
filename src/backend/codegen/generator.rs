@@ -183,7 +183,6 @@ fn lower_terminator<'src>(
     func: &TirFunction<'src>,
 ) {
     use crate::backend::dtal::instr::CmpOp;
-    use crate::common::types::IType;
 
     match terminator {
         Terminator::Jump { target } => {
