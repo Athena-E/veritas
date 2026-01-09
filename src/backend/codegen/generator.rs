@@ -134,8 +134,8 @@ fn codegen_block<'src>(
         isel::lower_instruction(&mut instructions, instr);
     }
 
-    // 3. Lower the terminator
-    lower_terminator(&mut instructions, &block.terminator, ctx, func);
+    // 3. Lower the terminator (including phi moves for successors)
+    lower_terminator(&mut instructions, &block.terminator, block.id, ctx, func);
 
     DtalBlock {
         label,
