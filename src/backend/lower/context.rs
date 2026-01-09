@@ -66,6 +66,12 @@ impl<'src> LoweringContext<'src> {
         self.var_map.clone()
     }
 
+    /// Restore the variable map from a previous snapshot
+    /// Used to reset state before lowering alternative control flow paths
+    pub fn restore_var_map(&mut self, snapshot: HashMap<String, VirtualReg>) {
+        self.var_map = snapshot;
+    }
+
     /// Get all variables that differ between two snapshots
     /// Returns: Vec<(var_name, reg_in_snapshot1, reg_in_snapshot2)>
     pub fn diff_var_maps(
