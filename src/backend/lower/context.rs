@@ -130,6 +130,24 @@ impl<'src> LoweringContext<'src> {
         self.builder.add_phi(phi);
     }
 
+    /// Update a phi node in a finished block by adding an incoming edge
+    ///
+    /// This is needed for loops where the phi node is created before
+    /// the body is lowered (and thus before we know the incoming value).
+    pub fn update_phi_incoming(
+        &mut self,
+        block_id: BlockId,
+        phi_index: usize,
+        pred_block: BlockId,
+        incoming_reg: VirtualReg,
+    ) {
+        if let Some(block) = self.builder.blocks.get_mut(&block_id) {
+            if let Some(phi) = block.phi_nodes.get_mut(phi_index) {
+                phi.add_incoming(pred_block, incoming_reg);
+            }
+        }
+    }
+
     /// Finish the current block with a terminator
     pub fn finish_block(&mut self, terminator: Terminator, predecessors: Vec<BlockId>) {
         self.builder.finish_block(terminator, predecessors);
