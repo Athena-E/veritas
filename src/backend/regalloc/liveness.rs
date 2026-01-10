@@ -136,6 +136,9 @@ impl LivenessAnalysis {
     }
 
     /// Get successors of a block based on its control flow instructions
+    ///
+    /// Only examines the last 2 instructions since control flow must be at block end.
+    /// Handles patterns like: `bne target; jmp other` (conditional with explicit else)
     fn get_block_successors(
         block: &DtalBlock,
         func: &DtalFunction,
@@ -145,9 +148,10 @@ impl LivenessAnalysis {
         let mut has_unconditional_jump = false;
         let mut has_ret = false;
 
-        // Scan ALL instructions for control flow, not just the last one.
-        // A block may have: bne target; jmp other (conditional with else)
-        for instr in &block.instructions {
+        // Only check last 2 instructions - control flow is always at block end
+        let n = block.instructions.len();
+        let start = n.saturating_sub(2);
+        for instr in &block.instructions[start..] {
             match instr {
                 DtalInstr::Jmp { target } => {
                     if !succs.contains(target) {
