@@ -297,18 +297,14 @@ fn lower_for_loop<'src>(
         vec![header_block], // Body is a successor of header
     );
 
-    // 8. Start the exit block
+    // 9. Start the exit block
     ctx.start_block(exit_block);
 
-    // Create phi nodes for variables modified in the loop
-    // These merge values from: header (before loop iteration) and body (after iteration)
-    create_loop_exit_phi_nodes(
-        ctx,
-        &vars_before_loop,
-        &vars_after_body,
-        header_block,
-        body_end_block,
-    );
+    // At the exit block, bind variables to their header phi registers
+    // This is correct because we exit from the header, so we use the header's phi values
+    for (name, phi_reg) in &loop_carried_vars {
+        ctx.bind_var(name, *phi_reg);
+    }
 }
 
 /// Create phi nodes for variables modified in a loop
