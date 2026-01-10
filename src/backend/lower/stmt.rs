@@ -3,7 +3,7 @@
 //! This module converts typed statements (`TStmt`) into TIR instructions
 //! and control flow structures.
 
-use crate::backend::dtal::Constraint;
+use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::tir::{
@@ -196,20 +196,33 @@ fn lower_for_loop<'src>(
     // 3. Start the header block
     ctx.start_block(header_block);
 
-    // Create phi node for loop variable
+    // Create phi node for loop variable (index 0)
     // Initially: i_phi comes from entry (start_reg) or body (i_next)
     let i_phi_reg = ctx.fresh_reg();
     let mut i_phi = PhiNode::new(i_phi_reg, var_ty.clone());
     i_phi.add_incoming(entry_block, start_reg);
-    // Body incoming edge will be added after we know i_next
     ctx.emit_phi(i_phi);
 
     // Bind the loop variable to the phi result
     ctx.bind_var(var, i_phi_reg);
 
-    // Create phi nodes for any loop-carried variables
-    // For now, we'll handle this after lowering the body
-    // (we need to know which variables are modified)
+    // Create phi nodes for ALL existing mutable variables (loop-carried state)
+    // These phi nodes will be at indices 1, 2, 3, ... in the header block
+    // We need these so that variables modified in the loop body carry their
+    // values across iterations.
+    let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
+    for (name, &before_reg) in &vars_before_loop {
+        if name != var {
+            // Create phi node for this variable
+            let phi_reg = ctx.fresh_reg();
+            let mut phi = PhiNode::new(phi_reg, IType::Int); // TODO: track actual types
+            phi.add_incoming(entry_block, before_reg);
+            ctx.emit_phi(phi);
+            // Update var binding to use phi result
+            ctx.bind_var(name, phi_reg);
+            loop_carried_vars.push((name.clone(), phi_reg));
+        }
+    }
 
     // 4. Compare i < end
     let cmp_reg = ctx.fresh_reg();
