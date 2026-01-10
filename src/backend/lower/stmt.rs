@@ -263,6 +263,10 @@ fn lower_for_loop<'src>(
 
     let body_end_block = ctx.current_block().expect("Should be in body block");
 
+    // 7. Update the loop variable phi node with the body's incoming edge
+    // The phi node is the first (index 0) phi in the header block
+    ctx.update_phi_incoming(header_block, 0, body_end_block, i_next_reg);
+
     // Jump back to header
     ctx.finish_block(
         Terminator::Jump {
@@ -270,11 +274,6 @@ fn lower_for_loop<'src>(
         },
         vec![header_block], // Body is a successor of header
     );
-
-    // 7. Update the phi node for the loop variable with the body's i_next
-    // Note: In a real implementation, we'd need to update the phi node
-    // after the fact. For now, we'll use a workaround by reconstructing.
-    // TODO: Add method to update phi nodes after construction
 
     // 8. Start the exit block
     ctx.start_block(exit_block);
