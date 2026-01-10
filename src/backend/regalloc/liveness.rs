@@ -135,46 +135,31 @@ impl LivenessAnalysis {
         (successors, predecessors)
     }
 
-    /// Get successors of a block based on its terminator instruction
+    /// Get successors of a block based on its control flow instructions
     fn get_block_successors(
         block: &DtalBlock,
-        func: &DtalFunction,
-        block_idx: usize,
+        _func: &DtalFunction,
+        _block_idx: usize,
     ) -> Vec<String> {
         let mut succs = Vec::new();
 
-        // Find terminator instruction
-        if let Some(last) = block.instructions.last() {
-            match last {
+        // Scan ALL instructions for control flow, not just the last one.
+        // A block may have: bne target; jmp other (conditional with else)
+        for instr in &block.instructions {
+            match instr {
                 DtalInstr::Jmp { target } => {
-                    succs.push(target.clone());
+                    if !succs.contains(target) {
+                        succs.push(target.clone());
+                    }
                 }
                 DtalInstr::Branch { target, .. } => {
-                    // Conditional branch: fall through + target
-                    succs.push(target.clone());
-                    // Fall through to next block
-                    if block_idx + 1 < func.blocks.len() {
-                        succs.push(func.blocks[block_idx + 1].label.clone());
+                    if !succs.contains(target) {
+                        succs.push(target.clone());
                     }
                 }
-                DtalInstr::Ret | DtalInstr::Call { .. } => {
-                    // Ret has no successors (within function)
-                    // Call may return to next instruction, but for now treat as end
-                    // For calls, fall through to next block
-                    if !matches!(last, DtalInstr::Ret) && block_idx + 1 < func.blocks.len() {
-                        succs.push(func.blocks[block_idx + 1].label.clone());
-                    }
-                }
-                _ => {
-                    // Non-terminator at end: fall through
-                    if block_idx + 1 < func.blocks.len() {
-                        succs.push(func.blocks[block_idx + 1].label.clone());
-                    }
-                }
+                // Ret and Call don't add successors for CFG purposes
+                _ => {}
             }
-        } else if block_idx + 1 < func.blocks.len() {
-            // Empty block: fall through
-            succs.push(func.blocks[block_idx + 1].label.clone());
         }
 
         succs
