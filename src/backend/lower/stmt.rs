@@ -82,17 +82,18 @@ fn lower_assignment<'src>(
     rhs: &Spanned<TExpr<'src>>,
 ) {
     match &lhs.0 {
-        TExpr::Variable { name, ty } => {
+        TExpr::Variable { name, ty: _ } => {
             // Simple variable assignment
             // In SSA, we create a new register and update the binding
             let rhs_reg = lower_expr(ctx, rhs);
 
             // Create a copy to a new register (SSA form)
+            // Use the RHS type, not the LHS declared type (which may be a stale singleton)
             let new_reg = ctx.fresh_reg();
             ctx.emit(TirInstr::Copy {
                 dst: new_reg,
                 src: rhs_reg,
-                ty: ty.clone(),
+                ty: rhs.0.get_type().clone(),
             });
 
             // Update the variable binding
