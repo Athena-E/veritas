@@ -135,46 +135,49 @@ impl LivenessAnalysis {
         (successors, predecessors)
     }
 
-    /// Get successors of a block based on its terminator instruction
+    /// Get successors of a block based on its control flow instructions
+    ///
+    /// Only examines the last 2 instructions since control flow must be at block end.
+    /// Handles patterns like: `bne target; jmp other` (conditional with explicit else)
     fn get_block_successors(
         block: &DtalBlock,
         func: &DtalFunction,
         block_idx: usize,
     ) -> Vec<String> {
         let mut succs = Vec::new();
+        let mut has_unconditional_jump = false;
+        let mut has_ret = false;
 
-        // Find terminator instruction
-        if let Some(last) = block.instructions.last() {
-            match last {
+        // Only check last 2 instructions - control flow is always at block end
+        let n = block.instructions.len();
+        let start = n.saturating_sub(2);
+        for instr in &block.instructions[start..] {
+            match instr {
                 DtalInstr::Jmp { target } => {
-                    succs.push(target.clone());
+                    if !succs.contains(target) {
+                        succs.push(target.clone());
+                    }
+                    has_unconditional_jump = true;
                 }
                 DtalInstr::Branch { target, .. } => {
-                    // Conditional branch: fall through + target
-                    succs.push(target.clone());
-                    // Fall through to next block
-                    if block_idx + 1 < func.blocks.len() {
-                        succs.push(func.blocks[block_idx + 1].label.clone());
+                    if !succs.contains(target) {
+                        succs.push(target.clone());
                     }
                 }
-                DtalInstr::Ret | DtalInstr::Call { .. } => {
-                    // Ret has no successors (within function)
-                    // Call may return to next instruction, but for now treat as end
-                    // For calls, fall through to next block
-                    if !matches!(last, DtalInstr::Ret) && block_idx + 1 < func.blocks.len() {
-                        succs.push(func.blocks[block_idx + 1].label.clone());
-                    }
+                DtalInstr::Ret => {
+                    has_ret = true;
                 }
-                _ => {
-                    // Non-terminator at end: fall through
-                    if block_idx + 1 < func.blocks.len() {
-                        succs.push(func.blocks[block_idx + 1].label.clone());
-                    }
-                }
+                _ => {}
             }
-        } else if block_idx + 1 < func.blocks.len() {
-            // Empty block: fall through
-            succs.push(func.blocks[block_idx + 1].label.clone());
+        }
+
+        // If there's a conditional branch but no unconditional jump or ret,
+        // then there's an implicit fall-through to the next block
+        if !has_unconditional_jump && !has_ret && block_idx + 1 < func.blocks.len() {
+            let next_label = func.blocks[block_idx + 1].label.clone();
+            if !succs.contains(&next_label) {
+                succs.push(next_label);
+            }
         }
 
         succs

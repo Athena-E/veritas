@@ -349,8 +349,9 @@ pub fn lower_if_expr<'src>(
     ctx.start_block(else_block);
 
     // Restore variable state to before the if (for else branch)
-    // Note: We don't literally restore - else sees vars as they were before if
-    // But since we're using SSA, we track both paths
+    // The else branch should see variables as they were BEFORE the then branch,
+    // not after. This ensures proper phi node creation at the merge point.
+    ctx.restore_var_map(vars_before_then.clone());
 
     let else_result = if let Some(else_stmts) = else_stmts {
         lower_block_with_result(ctx, else_stmts, ty)

@@ -31,7 +31,8 @@ pub enum X86Reg {
 }
 
 impl X86Reg {
-    /// Registers available for allocation (excludes RSP, RBP)
+    /// Registers available for allocation (excludes RSP, RBP, R11)
+    /// Note: R11 is reserved as a scratch register for x86 lowering
     pub const ALLOCATABLE: &'static [X86Reg] = &[
         X86Reg::Rax,
         X86Reg::Rcx,
@@ -41,7 +42,7 @@ impl X86Reg {
         X86Reg::R8,
         X86Reg::R9,
         X86Reg::R10,
-        X86Reg::R11,
+        // R11 reserved for scratch
         X86Reg::Rbx,
         X86Reg::R12,
         X86Reg::R13,

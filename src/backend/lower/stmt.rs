@@ -3,11 +3,11 @@
 //! This module converts typed statements (`TStmt`) into TIR instructions
 //! and control flow structures.
 
-use crate::backend::dtal::Constraint;
+use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::tir::{
-    BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
+    BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
 };
 use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
@@ -196,20 +196,33 @@ fn lower_for_loop<'src>(
     // 3. Start the header block
     ctx.start_block(header_block);
 
-    // Create phi node for loop variable
+    // Create phi node for loop variable (index 0)
     // Initially: i_phi comes from entry (start_reg) or body (i_next)
     let i_phi_reg = ctx.fresh_reg();
     let mut i_phi = PhiNode::new(i_phi_reg, var_ty.clone());
     i_phi.add_incoming(entry_block, start_reg);
-    // Body incoming edge will be added after we know i_next
     ctx.emit_phi(i_phi);
 
     // Bind the loop variable to the phi result
     ctx.bind_var(var, i_phi_reg);
 
-    // Create phi nodes for any loop-carried variables
-    // For now, we'll handle this after lowering the body
-    // (we need to know which variables are modified)
+    // Create phi nodes for ALL existing mutable variables (loop-carried state)
+    // These phi nodes will be at indices 1, 2, 3, ... in the header block
+    // We need these so that variables modified in the loop body carry their
+    // values across iterations.
+    let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
+    for (name, &before_reg) in &vars_before_loop {
+        if name != var {
+            // Create phi node for this variable
+            let phi_reg = ctx.fresh_reg();
+            let mut phi = PhiNode::new(phi_reg, IType::Int); // TODO: track actual types
+            phi.add_incoming(entry_block, before_reg);
+            ctx.emit_phi(phi);
+            // Update var binding to use phi result
+            ctx.bind_var(name, phi_reg);
+            loop_carried_vars.push((name.clone(), phi_reg));
+        }
+    }
 
     // 4. Compare i < end
     let cmp_reg = ctx.fresh_reg();
@@ -263,6 +276,19 @@ fn lower_for_loop<'src>(
 
     let body_end_block = ctx.current_block().expect("Should be in body block");
 
+    // 7. Update the loop variable phi node with the body's incoming edge
+    // The phi node is the first (index 0) phi in the header block
+    ctx.update_phi_incoming(header_block, 0, body_end_block, i_next_reg);
+
+    // 8. Update loop-carried variable phi nodes with body's incoming edges
+    // Phi nodes are at indices 1, 2, 3... (after the loop variable at index 0)
+    for (i, (name, _phi_reg)) in loop_carried_vars.iter().enumerate() {
+        if let Some(&after_reg) = vars_after_body.get(name) {
+            // phi_index = 1 + i (loop variable is at index 0)
+            ctx.update_phi_incoming(header_block, 1 + i, body_end_block, after_reg);
+        }
+    }
+
     // Jump back to header
     ctx.finish_block(
         Terminator::Jump {
@@ -271,44 +297,13 @@ fn lower_for_loop<'src>(
         vec![header_block], // Body is a successor of header
     );
 
-    // 7. Update the phi node for the loop variable with the body's i_next
-    // Note: In a real implementation, we'd need to update the phi node
-    // after the fact. For now, we'll use a workaround by reconstructing.
-    // TODO: Add method to update phi nodes after construction
-
-    // 8. Start the exit block
+    // 9. Start the exit block
     ctx.start_block(exit_block);
 
-    // Create phi nodes for variables modified in the loop
-    // These merge values from: header (before loop iteration) and body (after iteration)
-    create_loop_exit_phi_nodes(
-        ctx,
-        &vars_before_loop,
-        &vars_after_body,
-        header_block,
-        body_end_block,
-    );
-}
-
-/// Create phi nodes for variables modified in a loop
-fn create_loop_exit_phi_nodes<'src>(
-    ctx: &mut LoweringContext<'src>,
-    vars_before: &std::collections::HashMap<String, crate::backend::dtal::VirtualReg>,
-    vars_after_body: &std::collections::HashMap<String, crate::backend::dtal::VirtualReg>,
-    _header_block: BlockId,
-    _body_end_block: BlockId,
-) {
-    // For variables modified in the loop body, we need phi nodes
-    // at the exit point to select between "never entered loop" and "after loop iterations"
-    for (name, &before_reg) in vars_before {
-        if let Some(&after_reg) = vars_after_body.get(name)
-            && before_reg != after_reg
-        {
-            // Variable was modified in the loop
-            // At exit, we use the value from the header's phi (for loop-carried state)
-            // For simplicity, just update binding to the after value
-            // (A full implementation would need proper loop phi handling)
-            ctx.bind_var(name, after_reg);
-        }
+    // At the exit block, bind variables to their header phi registers
+    // This is correct because we exit from the header, so we use the header's phi values
+    for (name, phi_reg) in &loop_carried_vars {
+        ctx.bind_var(name, *phi_reg);
     }
 }
+

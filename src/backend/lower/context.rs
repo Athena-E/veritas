@@ -66,6 +66,12 @@ impl<'src> LoweringContext<'src> {
         self.var_map.clone()
     }
 
+    /// Restore the variable map from a previous snapshot
+    /// Used to reset state before lowering alternative control flow paths
+    pub fn restore_var_map(&mut self, snapshot: HashMap<String, VirtualReg>) {
+        self.var_map = snapshot;
+    }
+
     /// Get all variables that differ between two snapshots
     /// Returns: Vec<(var_name, reg_in_snapshot1, reg_in_snapshot2)>
     pub fn diff_var_maps(
@@ -122,6 +128,24 @@ impl<'src> LoweringContext<'src> {
     /// Add a phi node to the current block
     pub fn emit_phi(&mut self, phi: PhiNode<'src>) {
         self.builder.add_phi(phi);
+    }
+
+    /// Update a phi node in a finished block by adding an incoming edge
+    ///
+    /// This is needed for loops where the phi node is created before
+    /// the body is lowered (and thus before we know the incoming value).
+    pub fn update_phi_incoming(
+        &mut self,
+        block_id: BlockId,
+        phi_index: usize,
+        pred_block: BlockId,
+        incoming_reg: VirtualReg,
+    ) {
+        if let Some(block) = self.builder.blocks.get_mut(&block_id) {
+            if let Some(phi) = block.phi_nodes.get_mut(phi_index) {
+                phi.add_incoming(pred_block, incoming_reg);
+            }
+        }
     }
 
     /// Finish the current block with a terminator
