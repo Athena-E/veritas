@@ -280,6 +280,15 @@ fn lower_for_loop<'src>(
     // The phi node is the first (index 0) phi in the header block
     ctx.update_phi_incoming(header_block, 0, body_end_block, i_next_reg);
 
+    // 8. Update loop-carried variable phi nodes with body's incoming edges
+    // Phi nodes are at indices 1, 2, 3... (after the loop variable at index 0)
+    for (i, (name, _phi_reg)) in loop_carried_vars.iter().enumerate() {
+        if let Some(&after_reg) = vars_after_body.get(name) {
+            // phi_index = 1 + i (loop variable is at index 0)
+            ctx.update_phi_incoming(header_block, 1 + i, body_end_block, after_reg);
+        }
+    }
+
     // Jump back to header
     ctx.finish_block(
         Terminator::Jump {
