@@ -138,10 +138,12 @@ impl LivenessAnalysis {
     /// Get successors of a block based on its control flow instructions
     fn get_block_successors(
         block: &DtalBlock,
-        _func: &DtalFunction,
-        _block_idx: usize,
+        func: &DtalFunction,
+        block_idx: usize,
     ) -> Vec<String> {
         let mut succs = Vec::new();
+        let mut has_unconditional_jump = false;
+        let mut has_ret = false;
 
         // Scan ALL instructions for control flow, not just the last one.
         // A block may have: bne target; jmp other (conditional with else)
@@ -151,14 +153,26 @@ impl LivenessAnalysis {
                     if !succs.contains(target) {
                         succs.push(target.clone());
                     }
+                    has_unconditional_jump = true;
                 }
                 DtalInstr::Branch { target, .. } => {
                     if !succs.contains(target) {
                         succs.push(target.clone());
                     }
                 }
-                // Ret and Call don't add successors for CFG purposes
+                DtalInstr::Ret => {
+                    has_ret = true;
+                }
                 _ => {}
+            }
+        }
+
+        // If there's a conditional branch but no unconditional jump or ret,
+        // then there's an implicit fall-through to the next block
+        if !has_unconditional_jump && !has_ret && block_idx + 1 < func.blocks.len() {
+            let next_label = func.blocks[block_idx + 1].label.clone();
+            if !succs.contains(&next_label) {
+                succs.push(next_label);
             }
         }
 
