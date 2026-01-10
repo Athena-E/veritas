@@ -141,10 +141,10 @@ impl<'src> LoweringContext<'src> {
         pred_block: BlockId,
         incoming_reg: VirtualReg,
     ) {
-        if let Some(block) = self.builder.blocks.get_mut(&block_id) {
-            if let Some(phi) = block.phi_nodes.get_mut(phi_index) {
-                phi.add_incoming(pred_block, incoming_reg);
-            }
+        if let Some(block) = self.builder.blocks.get_mut(&block_id)
+            && let Some(phi) = block.phi_nodes.get_mut(phi_index)
+        {
+            phi.add_incoming(pred_block, incoming_reg);
         }
     }
 

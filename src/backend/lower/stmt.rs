@@ -306,4 +306,3 @@ fn lower_for_loop<'src>(
         ctx.bind_var(name, *phi_reg);
     }
 }
-

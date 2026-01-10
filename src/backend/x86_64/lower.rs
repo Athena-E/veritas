@@ -190,8 +190,10 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 let dst_loc = self.get_reg_location(*dst);
                 match dst_loc {
                     Location::Reg(r) => {
-                        self.instructions
-                            .push(X86Instr::SetCC { dst: r, cond: x86_cond });
+                        self.instructions.push(X86Instr::SetCC {
+                            dst: r,
+                            cond: x86_cond,
+                        });
                     }
                     Location::Stack(offset) => {
                         // Set in scratch register, then store
@@ -622,8 +624,10 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                     // This is critical when the same register is used multiple times
                     // in an expression (e.g., x + x + x) - without this copy, the
                     // source register would be corrupted by intermediate operations.
-                    self.instructions
-                        .push(X86Instr::MovRR { dst: preferred, src: r });
+                    self.instructions.push(X86Instr::MovRR {
+                        dst: preferred,
+                        src: r,
+                    });
                 }
                 preferred
             }

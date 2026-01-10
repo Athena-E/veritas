@@ -51,7 +51,7 @@ impl Condition {
     /// Get the condition code byte for SETcc instructions (0x0F 0x9x)
     pub fn setcc_byte(self) -> u8 {
         match self {
-            Condition::E => 0x94,   // sete
+            Condition::E => 0x94,  // sete
             Condition::Ne => 0x95, // setne
             Condition::L => 0x9C,  // setl
             Condition::Le => 0x9E, // setle

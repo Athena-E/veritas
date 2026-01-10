@@ -195,7 +195,11 @@ impl Encoder {
                 // setcc r8 (3-4 bytes) + movzx r32, r8 (3-4 bytes)
                 // Using movzx instead of xor to avoid clobbering flags
                 let setcc_size = if dst.needs_rex_b() { 4 } else { 3 };
-                let movzx_size = if dst.needs_rex_r() || dst.needs_rex_b() { 4 } else { 3 };
+                let movzx_size = if dst.needs_rex_r() || dst.needs_rex_b() {
+                    4
+                } else {
+                    3
+                };
                 setcc_size + movzx_size
             }
 
