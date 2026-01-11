@@ -5,6 +5,7 @@
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
+use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::backend::tir::{
     BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
 };
