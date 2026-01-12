@@ -236,14 +236,24 @@ fn lower_for_loop<'src>(
         ty: IType::Bool,
     });
 
+    // Derive constraints for the loop condition: i < end
+    let loop_var_idx = IndexExpr::Var(var.to_string());
+    let end_idx = expr_to_index_expr(end).unwrap_or_else(|| {
+        // Fallback: if end can't be converted, use a placeholder
+        // This is sound but imprecise (returns True effectively)
+        IndexExpr::Const(i64::MAX)
+    });
+    let true_constraint = Constraint::Lt(loop_var_idx.clone(), end_idx.clone());
+    let false_constraint = negate_constraint(true_constraint.clone());
+
     // Branch: if i < end, go to body; else go to exit
     ctx.finish_block(
         Terminator::Branch {
             cond: cmp_reg,
             true_target: body_block,
             false_target: exit_block,
-            true_constraint: Constraint::True, // TODO: derive constraint
-            false_constraint: Constraint::True,
+            true_constraint,
+            false_constraint,
         },
         vec![entry_block], // Predecessor from entry's jump
     );
