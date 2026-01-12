@@ -14,6 +14,115 @@ use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
 use crate::common::types::IType;
 
+/// Convert a typed expression to an IndexExpr for constraints.
+/// Returns None if the expression cannot be represented in the constraint domain.
+fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<IndexExpr> {
+    match &expr.0 {
+        TExpr::Literal {
+            value: Literal::Int(n),
+            ..
+        } => Some(IndexExpr::Const(*n)),
+
+        TExpr::Variable { name, ty }
+            if matches!(
+                ty,
+                IType::Int | IType::SingletonInt(_) | IType::RefinedInt { .. }
+            ) =>
+        {
+            Some(IndexExpr::Var((*name).to_string()))
+        }
+
+        TExpr::BinOp {
+            op: AstBinOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Add(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
+        TExpr::BinOp {
+            op: AstBinOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Sub(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
+        TExpr::BinOp {
+            op: AstBinOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Mul(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
+        _ => None,
+    }
+}
+
+/// Convert a boolean typed expression to a Constraint.
+/// Returns Constraint::True if the expression cannot be represented.
+fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
+    match &expr.0 {
+        // Boolean literals
+        TExpr::Literal {
+            value: Literal::Bool(true),
+            ..
+        } => Constraint::True,
+        TExpr::Literal {
+            value: Literal::Bool(false),
+            ..
+        } => Constraint::False,
+
+        // Comparison operations
+        TExpr::BinOp {
+            op,
+            lhs,
+            rhs,
+            ty: IType::Bool,
+        } => match op {
+            AstBinOp::Lt | AstBinOp::Lte | AstBinOp::Gt | AstBinOp::Gte | AstBinOp::Eq
+            | AstBinOp::NotEq => {
+                if let (Some(l), Some(r)) = (expr_to_index_expr(lhs), expr_to_index_expr(rhs)) {
+                    match op {
+                        AstBinOp::Lt => Constraint::Lt(l, r),
+                        AstBinOp::Lte => Constraint::Le(l, r),
+                        AstBinOp::Gt => Constraint::Gt(l, r),
+                        AstBinOp::Gte => Constraint::Ge(l, r),
+                        AstBinOp::Eq => Constraint::Eq(l, r),
+                        AstBinOp::NotEq => Constraint::Ne(l, r),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    Constraint::True
+                }
+            }
+            AstBinOp::And => {
+                and_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs))
+            }
+            AstBinOp::Or => {
+                or_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs))
+            }
+            _ => Constraint::True,
+        },
+
+        // Negation
+        TExpr::UnaryOp {
+            op: AstUnaryOp::Not,
+            operand,
+            ..
+        } => negate_constraint(expr_to_constraint(operand)),
+
+        _ => Constraint::True,
+    }
+}
+
 /// Lower a typed expression to TIR instructions
 ///
 /// Returns the virtual register holding the result value.
