@@ -421,20 +421,23 @@ pub fn lower_if_expr<'src>(
     let else_block = ctx.new_block();
     let merge_block = ctx.new_block();
 
-    // 3. Finish the condition block with a branch
-    // For constraints, we use the condition register itself
+    // 3. Derive constraints from the condition expression
+    let true_constraint = expr_to_constraint(cond);
+    let false_constraint = negate_constraint(true_constraint.clone());
+
+    // 4. Finish the condition block with a branch
     ctx.finish_block(
         Terminator::Branch {
             cond: cond_reg,
             true_target: then_block,
             false_target: else_block,
-            true_constraint: Constraint::True, // TODO: derive from cond
-            false_constraint: Constraint::True, // TODO: derive from cond
+            true_constraint,
+            false_constraint,
         },
         vec![], // predecessors filled by builder
     );
 
-    // 4. Lower the then branch
+    // 5. Lower the then branch
     ctx.start_block(then_block);
 
     // Snapshot variable state before then branch
