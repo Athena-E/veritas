@@ -16,7 +16,7 @@ use crate::common::types::IType;
 
 /// Convert a typed expression to an IndexExpr for constraints.
 /// Returns None if the expression cannot be represented in the constraint domain.
-fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<IndexExpr> {
+pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<IndexExpr> {
     match &expr.0 {
         TExpr::Literal {
             value: Literal::Int(n),

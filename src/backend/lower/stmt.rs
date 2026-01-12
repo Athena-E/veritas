@@ -3,9 +3,10 @@
 //! This module converts typed statements (`TStmt`) into TIR instructions
 //! and control flow structures.
 
-use crate::backend::dtal::{Constraint, VirtualReg};
+use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
-use crate::backend::lower::expr::lower_expr;
+use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
+use crate::backend::tir::builder::negate_constraint;
 use crate::backend::tir::{
     BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
 };
