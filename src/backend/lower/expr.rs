@@ -282,16 +282,33 @@ fn lower_call<'src>(
     // Lower all arguments
     let arg_regs: Vec<VirtualReg> = args.iter().map(|arg| lower_expr(ctx, arg)).collect();
 
-    let dst = ctx.fresh_reg();
+    // For unit-returning functions, don't try to capture the return value
+    if matches!(ty, IType::Unit) {
+        ctx.emit(TirInstr::Call {
+            dst: None,
+            func: func_name.to_string(),
+            args: arg_regs,
+            result_ty: ty.clone(),
+        });
 
-    ctx.emit(TirInstr::Call {
-        dst: Some(dst),
-        func: func_name.to_string(),
-        args: arg_regs,
-        result_ty: ty.clone(),
-    });
-
-    dst
+        // Return a dummy unit value
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst,
+            value: 0,
+            ty: IType::Unit,
+        });
+        dst
+    } else {
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::Call {
+            dst: Some(dst),
+            func: func_name.to_string(),
+            args: arg_regs,
+            result_ty: ty.clone(),
+        });
+        dst
+    }
 }
 
 /// Lower an array index expression (array access)
