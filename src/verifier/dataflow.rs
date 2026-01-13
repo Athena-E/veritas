@@ -55,16 +55,24 @@ pub fn analyze_function<'src>(
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 100;
 
+    // Get entry block label for special handling
+    let entry_block_label = func.blocks.first().map(|b| b.label.clone());
+
     while changed && iterations < MAX_ITERATIONS {
         changed = false;
         iterations += 1;
 
         for block in &func.blocks {
-            // Get or compute entry state
-            let entry_state = if let Some(state) = entry_states.get(&block.label) {
-                state.clone()
+            // Compute entry state - always recompute from predecessors
+            // (except for entry block which keeps function parameters)
+            let entry_state = if Some(&block.label) == entry_block_label.as_ref() {
+                // Entry block: use cached state with function parameters
+                entry_states
+                    .get(&block.label)
+                    .cloned()
+                    .unwrap_or_else(|| block.entry_state.clone())
             } else {
-                // Join states from predecessors
+                // Non-entry blocks: always recompute from predecessors
                 let preds = predecessors.get(&block.label).cloned().unwrap_or_default();
                 if preds.is_empty() {
                     // No predecessors - use block's declared entry state
