@@ -5,6 +5,7 @@
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
+use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::backend::tir::{
     BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
 };
@@ -12,6 +13,115 @@ use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TExpr, TStmt};
 use crate::common::types::IType;
+
+/// Convert a typed expression to an IndexExpr for constraints.
+/// Returns None if the expression cannot be represented in the constraint domain.
+pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<IndexExpr> {
+    match &expr.0 {
+        TExpr::Literal {
+            value: Literal::Int(n),
+            ..
+        } => Some(IndexExpr::Const(*n)),
+
+        TExpr::Variable { name, ty }
+            if matches!(
+                ty,
+                IType::Int | IType::SingletonInt(_) | IType::RefinedInt { .. }
+            ) =>
+        {
+            Some(IndexExpr::Var((*name).to_string()))
+        }
+
+        TExpr::BinOp {
+            op: AstBinOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Add(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
+        TExpr::BinOp {
+            op: AstBinOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Sub(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
+        TExpr::BinOp {
+            op: AstBinOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Mul(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
+        _ => None,
+    }
+}
+
+/// Convert a boolean typed expression to a Constraint.
+/// Returns Constraint::True if the expression cannot be represented.
+fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
+    match &expr.0 {
+        // Boolean literals
+        TExpr::Literal {
+            value: Literal::Bool(true),
+            ..
+        } => Constraint::True,
+        TExpr::Literal {
+            value: Literal::Bool(false),
+            ..
+        } => Constraint::False,
+
+        // Comparison operations
+        TExpr::BinOp {
+            op,
+            lhs,
+            rhs,
+            ty: IType::Bool,
+        } => match op {
+            AstBinOp::Lt | AstBinOp::Lte | AstBinOp::Gt | AstBinOp::Gte | AstBinOp::Eq
+            | AstBinOp::NotEq => {
+                if let (Some(l), Some(r)) = (expr_to_index_expr(lhs), expr_to_index_expr(rhs)) {
+                    match op {
+                        AstBinOp::Lt => Constraint::Lt(l, r),
+                        AstBinOp::Lte => Constraint::Le(l, r),
+                        AstBinOp::Gt => Constraint::Gt(l, r),
+                        AstBinOp::Gte => Constraint::Ge(l, r),
+                        AstBinOp::Eq => Constraint::Eq(l, r),
+                        AstBinOp::NotEq => Constraint::Ne(l, r),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    Constraint::True
+                }
+            }
+            AstBinOp::And => {
+                and_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs))
+            }
+            AstBinOp::Or => {
+                or_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs))
+            }
+            _ => Constraint::True,
+        },
+
+        // Negation
+        TExpr::UnaryOp {
+            op: AstUnaryOp::Not,
+            operand,
+            ..
+        } => negate_constraint(expr_to_constraint(operand)),
+
+        _ => Constraint::True,
+    }
+}
 
 /// Lower a typed expression to TIR instructions
 ///
@@ -172,16 +282,33 @@ fn lower_call<'src>(
     // Lower all arguments
     let arg_regs: Vec<VirtualReg> = args.iter().map(|arg| lower_expr(ctx, arg)).collect();
 
-    let dst = ctx.fresh_reg();
+    // For unit-returning functions, don't try to capture the return value
+    if matches!(ty, IType::Unit) {
+        ctx.emit(TirInstr::Call {
+            dst: None,
+            func: func_name.to_string(),
+            args: arg_regs,
+            result_ty: ty.clone(),
+        });
 
-    ctx.emit(TirInstr::Call {
-        dst: Some(dst),
-        func: func_name.to_string(),
-        args: arg_regs,
-        result_ty: ty.clone(),
-    });
-
-    dst
+        // Return a dummy unit value
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst,
+            value: 0,
+            ty: IType::Unit,
+        });
+        dst
+    } else {
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::Call {
+            dst: Some(dst),
+            func: func_name.to_string(),
+            args: arg_regs,
+            result_ty: ty.clone(),
+        });
+        dst
+    }
 }
 
 /// Lower an array index expression (array access)
@@ -311,20 +438,23 @@ pub fn lower_if_expr<'src>(
     let else_block = ctx.new_block();
     let merge_block = ctx.new_block();
 
-    // 3. Finish the condition block with a branch
-    // For constraints, we use the condition register itself
+    // 3. Derive constraints from the condition expression
+    let true_constraint = expr_to_constraint(cond);
+    let false_constraint = negate_constraint(true_constraint.clone());
+
+    // 4. Finish the condition block with a branch
     ctx.finish_block(
         Terminator::Branch {
             cond: cond_reg,
             true_target: then_block,
             false_target: else_block,
-            true_constraint: Constraint::True, // TODO: derive from cond
-            false_constraint: Constraint::True, // TODO: derive from cond
+            true_constraint,
+            false_constraint,
         },
         vec![], // predecessors filled by builder
     );
 
-    // 4. Lower the then branch
+    // 5. Lower the then branch
     ctx.start_block(then_block);
 
     // Snapshot variable state before then branch

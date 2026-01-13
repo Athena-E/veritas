@@ -168,36 +168,51 @@ fn verify_binop<'src>(
     let lhs_ty = get_register_type(lhs, state, block_label)?;
     let rhs_ty = get_register_type(rhs, state, block_label)?;
 
-    // Check both operands are numeric types
-    if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
-        return Err(VerifyError::BinOpTypeMismatch {
-            block: block_label.to_string(),
-            op: format!("{}", op),
-            lhs_type: lhs_ty,
-            rhs_type: rhs_ty,
-        });
-    }
+    // Check operand types based on operation
+    match op {
+        // Logical operations require boolean operands
+        BinaryOp::And | BinaryOp::Or => {
+            if !matches!(lhs_ty, IType::Bool) || !matches!(rhs_ty, IType::Bool) {
+                return Err(VerifyError::BinOpTypeMismatch {
+                    block: block_label.to_string(),
+                    op: format!("{}", op),
+                    lhs_type: lhs_ty,
+                    rhs_type: rhs_ty,
+                });
+            }
+        }
+        // Arithmetic operations require numeric operands
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => {
+            if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
+                return Err(VerifyError::BinOpTypeMismatch {
+                    block: block_label.to_string(),
+                    op: format!("{}", op),
+                    lhs_type: lhs_ty,
+                    rhs_type: rhs_ty,
+                });
+            }
 
-    // For singleton types, verify the result
-    if let (IType::SingletonInt(IValue::Int(l)), IType::SingletonInt(IValue::Int(r))) =
-        (&lhs_ty, &rhs_ty)
-    {
-        let expected_result = match op {
-            BinaryOp::Add => l + r,
-            BinaryOp::Sub => l - r,
-            BinaryOp::Mul => l * r,
-            BinaryOp::And => *l & *r,
-            BinaryOp::Or => *l | *r,
-        };
+            // For singleton types, verify the result
+            if let (IType::SingletonInt(IValue::Int(l)), IType::SingletonInt(IValue::Int(r))) =
+                (&lhs_ty, &rhs_ty)
+            {
+                let expected_result = match op {
+                    BinaryOp::Add => l + r,
+                    BinaryOp::Sub => l - r,
+                    BinaryOp::Mul => l * r,
+                    _ => unreachable!(),
+                };
 
-        if let IType::SingletonInt(IValue::Int(declared)) = ty
-            && *declared != expected_result
-        {
-            return Err(VerifyError::SingletonMismatch {
-                block: block_label.to_string(),
-                expected_value: expected_result,
-                actual_value: *declared,
-            });
+                if let IType::SingletonInt(IValue::Int(declared)) = ty
+                    && *declared != expected_result
+                {
+                    return Err(VerifyError::SingletonMismatch {
+                        block: block_label.to_string(),
+                        expected_value: expected_result,
+                        actual_value: *declared,
+                    });
+                }
+            }
         }
     }
 

@@ -7,7 +7,6 @@
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::common::types::IType;
-use crate::verifier::checker::verify_instruction;
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
@@ -55,16 +54,24 @@ pub fn analyze_function<'src>(
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 100;
 
+    // Get entry block label for special handling
+    let entry_block_label = func.blocks.first().map(|b| b.label.clone());
+
     while changed && iterations < MAX_ITERATIONS {
         changed = false;
         iterations += 1;
 
         for block in &func.blocks {
-            // Get or compute entry state
-            let entry_state = if let Some(state) = entry_states.get(&block.label) {
-                state.clone()
+            // Compute entry state - always recompute from predecessors
+            // (except for entry block which keeps function parameters)
+            let entry_state = if Some(&block.label) == entry_block_label.as_ref() {
+                // Entry block: use cached state with function parameters
+                entry_states
+                    .get(&block.label)
+                    .cloned()
+                    .unwrap_or_else(|| block.entry_state.clone())
             } else {
-                // Join states from predecessors
+                // Non-entry blocks: always recompute from predecessors
                 let preds = predecessors.get(&block.label).cloned().unwrap_or_default();
                 if preds.is_empty() {
                     // No predecessors - use block's declared entry state
@@ -267,7 +274,11 @@ fn types_structurally_equal<'src>(a: &IType<'src>, b: &IType<'src>) -> bool {
     }
 }
 
-/// Compute exit state by processing all instructions
+/// Compute exit state by processing all instructions (non-verifying)
+///
+/// This function only updates the type state based on instruction definitions.
+/// It does NOT verify that operands are defined - that's done separately after
+/// the dataflow analysis reaches a fixed point.
 fn compute_exit_state<'src>(
     block: &DtalBlock<'src>,
     entry_state: &TypeState<'src>,
@@ -275,10 +286,65 @@ fn compute_exit_state<'src>(
     let mut state = entry_state.clone();
 
     for instr in &block.instructions {
-        verify_instruction(instr, &mut state, &block.label)?;
+        update_state_for_instruction(instr, &mut state);
     }
 
     Ok(state)
+}
+
+/// Update type state based on instruction definitions (non-verifying)
+fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeState<'src>) {
+    match instr {
+        DtalInstr::MovImm { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::MovReg { dst, src, ty } => {
+            // Use explicit type if provided, otherwise inherit from source
+            let ty = if matches!(ty, IType::Int) {
+                state.register_types.get(src).cloned().unwrap_or(ty.clone())
+            } else {
+                ty.clone()
+            };
+            state.register_types.insert(*dst, ty);
+        }
+        DtalInstr::BinOp { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::AddImm { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::Load { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::SetCC { dst, .. } => {
+            state.register_types.insert(*dst, IType::Bool);
+        }
+        DtalInstr::Not { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::TypeAnnotation { reg, ty } => {
+            state.register_types.insert(*reg, ty.clone());
+        }
+        DtalInstr::ConstraintAssume { constraint } => {
+            state.constraints.push(constraint.clone());
+        }
+        DtalInstr::Pop { dst, ty } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::Alloca { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        // Instructions that don't define registers
+        DtalInstr::Store { .. }
+        | DtalInstr::Cmp { .. }
+        | DtalInstr::CmpImm { .. }
+        | DtalInstr::Push { .. }
+        | DtalInstr::ConstraintAssert { .. }
+        | DtalInstr::Jmp { .. }
+        | DtalInstr::Branch { .. }
+        | DtalInstr::Call { .. }
+        | DtalInstr::Ret => {}
+    }
 }
 
 /// Check if two type states are equal
