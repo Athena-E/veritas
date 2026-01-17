@@ -1,27 +1,13 @@
 // Complex refinement types - heavy verification
-fn in_range(x: int, lo: int, hi: int) -> int
-    requires lo <= hi
-    requires x >= lo
-    requires x <= hi
-{
+fn in_range(x: int, lo: int, hi: int) -> int requires lo <= hi && x >= lo && x <= hi {
     x
 }
 
-fn scale(x: int, factor: int) -> int
-    requires x >= 0
-    requires factor > 0
-{
+fn scale(x: int, factor: int) -> int requires x >= 0 && factor > 0 {
     x * factor
 }
 
-fn chain_compute(a: int, b: int, c: int) -> int
-    requires a > 0
-    requires b > 0
-    requires c > 0
-    requires a < 50
-    requires b < 50
-    requires c < 50
-{
+fn chain_compute(a: int, b: int, c: int) -> int requires a > 0 && b > 0 && c > 0 && a < 50 && b < 50 && c < 50 {
     let x: int = a + b;
     let y: int = x + c;
     y
