@@ -38,7 +38,18 @@ pub fn lexer<'src>()
     let ctrl = one_of("(){}[];,:").map(Token::Ctrl);
 
     // A parser for identifiers and keywords
-    let ident = text::ascii::ident().map(|ident: &str| match ident {
+    // Note: text::ascii::ident() in chumsky 1.0-alpha doesn't include digits,
+    // so we build a custom identifier parser
+    let ident = any()
+        .filter(|c: &char| c.is_ascii_alphabetic() || *c == '_')
+        .then(
+            any()
+                .filter(|c: &char| c.is_ascii_alphanumeric() || *c == '_')
+                .repeated()
+                .collect::<String>(),
+        )
+        .to_slice()
+        .map(|ident: &str| match ident {
         "fn" => Token::Fn,
         "let" => Token::Let,
         "mut" => Token::Mut,
