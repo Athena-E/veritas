@@ -50,22 +50,22 @@ pub fn lexer<'src>()
         )
         .to_slice()
         .map(|ident: &str| match ident {
-        "fn" => Token::Fn,
-        "let" => Token::Let,
-        "mut" => Token::Mut,
-        "if" => Token::If,
-        "else" => Token::Else,
-        "return" => Token::Return,
-        "for" => Token::For,
-        "in" => Token::In,
-        "requires" => Token::Requires,
-        "invariant" => Token::Invariant,
-        "int" => Token::Int,
-        "bool" => Token::Bool,
-        "true" => Token::True,
-        "false" => Token::False,
-        _ => Token::Ident(ident),
-    });
+            "fn" => Token::Fn,
+            "let" => Token::Let,
+            "mut" => Token::Mut,
+            "if" => Token::If,
+            "else" => Token::Else,
+            "return" => Token::Return,
+            "for" => Token::For,
+            "in" => Token::In,
+            "requires" => Token::Requires,
+            "invariant" => Token::Invariant,
+            "int" => Token::Int,
+            "bool" => Token::Bool,
+            "true" => Token::True,
+            "false" => Token::False,
+            _ => Token::Ident(ident),
+        });
 
     let token = num.or(op).or(ctrl).or(ident);
 

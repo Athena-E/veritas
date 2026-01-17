@@ -238,11 +238,9 @@ fn lower_for_loop<'src>(
 
     // Derive constraints for the loop condition: i < end
     let loop_var_idx = IndexExpr::Var(var.to_string());
-    let end_idx = expr_to_index_expr(end).unwrap_or_else(|| {
-        // Fallback: if end can't be converted, use a placeholder
-        // This is sound but imprecise (returns True effectively)
-        IndexExpr::Const(i64::MAX)
-    });
+    // Fallback: if end can't be converted, use a placeholder
+    // This is sound but imprecise (returns True effectively)
+    let end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX));
     let true_constraint = Constraint::Lt(loop_var_idx.clone(), end_idx.clone());
     let false_constraint = negate_constraint(true_constraint.clone());
 

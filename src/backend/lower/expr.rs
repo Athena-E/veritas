@@ -23,14 +23,10 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
             ..
         } => Some(IndexExpr::Const(*n)),
 
-        TExpr::Variable { name, ty }
-            if matches!(
-                ty,
-                IType::Int | IType::SingletonInt(_) | IType::RefinedInt { .. }
-            ) =>
-        {
-            Some(IndexExpr::Var((*name).to_string()))
-        }
+        TExpr::Variable {
+            name,
+            ty: IType::Int | IType::SingletonInt(_) | IType::RefinedInt { .. },
+        } => Some(IndexExpr::Var((*name).to_string())),
 
         TExpr::BinOp {
             op: AstBinOp::Add,
@@ -87,7 +83,11 @@ fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
             rhs,
             ty: IType::Bool,
         } => match op {
-            AstBinOp::Lt | AstBinOp::Lte | AstBinOp::Gt | AstBinOp::Gte | AstBinOp::Eq
+            AstBinOp::Lt
+            | AstBinOp::Lte
+            | AstBinOp::Gt
+            | AstBinOp::Gte
+            | AstBinOp::Eq
             | AstBinOp::NotEq => {
                 if let (Some(l), Some(r)) = (expr_to_index_expr(lhs), expr_to_index_expr(rhs)) {
                     match op {
@@ -103,12 +103,8 @@ fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
                     Constraint::True
                 }
             }
-            AstBinOp::And => {
-                and_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs))
-            }
-            AstBinOp::Or => {
-                or_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs))
-            }
+            AstBinOp::And => and_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs)),
+            AstBinOp::Or => or_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs)),
             _ => Constraint::True,
         },
 
