@@ -201,8 +201,8 @@ fn emit_instruction<'src>(output: &mut String, instr: &DtalInstr<'src>) {
             writeln!(output, "    b{} {}", emit_cmpop(cond), target).unwrap();
         }
 
-        DtalInstr::Call { target } => {
-            writeln!(output, "    call {}", target).unwrap();
+        DtalInstr::Call { target, return_ty } => {
+            writeln!(output, "    call {}    ; -> {}", target, emit_type(return_ty)).unwrap();
         }
 
         DtalInstr::Ret => {
