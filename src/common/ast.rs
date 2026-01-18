@@ -18,6 +18,7 @@ pub enum Token<'src> {
     For,
     In,
     Requires,
+    Ensures,
     Invariant,
     // Type keywords
     Int,
@@ -42,6 +43,7 @@ impl fmt::Display for Token<'_> {
             Token::For => write!(f, "for"),
             Token::In => write!(f, "in"),
             Token::Requires => write!(f, "requires"),
+            Token::Ensures => write!(f, "ensures"),
             Token::Invariant => write!(f, "invariant"),
             Token::Int => write!(f, "int"),
             Token::Bool => write!(f, "bool"),
@@ -180,6 +182,7 @@ pub struct Function<'src> {
     pub parameters: Vec<Spanned<Parameter<'src>>>,
     pub return_type: Spanned<Type<'src>>,
     pub precondition: Option<Spanned<Expr<'src>>>,
+    pub postcondition: Option<Spanned<Expr<'src>>>,
     pub body: FunctionBody<'src>,
 }
 
