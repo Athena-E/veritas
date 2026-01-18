@@ -56,6 +56,8 @@ impl<'src> TypingContext<'src> {
             delta: HashMap::new(),
             sigma_f: HashMap::new(),
             expected_return: None,
+            postcondition: None,
+            current_function: None,
         }
     }
 
@@ -67,6 +69,8 @@ impl<'src> TypingContext<'src> {
             delta: HashMap::new(),
             sigma_f: functions,
             expected_return: None,
+            postcondition: None,
+            current_function: None,
         }
     }
 
@@ -80,6 +84,30 @@ impl<'src> TypingContext<'src> {
     // Get expected return type
     pub fn get_expected_return(&self) -> Option<&IType<'src>> {
         self.expected_return.as_ref()
+    }
+
+    // Set postcondition for current function
+    pub fn with_postcondition(&self, postcond: IProposition<'src>) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.postcondition = Some(postcond);
+        new_ctx
+    }
+
+    // Get postcondition
+    pub fn get_postcondition(&self) -> Option<&IProposition<'src>> {
+        self.postcondition.as_ref()
+    }
+
+    // Set current function name
+    pub fn with_current_function(&self, name: String) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.current_function = Some(name);
+        new_ctx
+    }
+
+    // Get current function name
+    pub fn get_current_function(&self) -> Option<&String> {
+        self.current_function.as_ref()
     }
 
     // Propositions context

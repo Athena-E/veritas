@@ -576,11 +576,21 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
             }
         });
 
+        // Convert postcondition to IProposition
+        // For postconditions, the bound variable is "result"
+        let postcondition = func.postcondition.as_ref().map(|postcond_expr| {
+            crate::common::types::IProposition {
+                var: "result".to_string(),
+                predicate: Arc::new(postcond_expr.clone()),
+            }
+        });
+
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
             return_type,
             precondition,
+            postcondition,
             span: *func_span,
         };
 
