@@ -373,6 +373,7 @@ fn lower_call<'src>(
     // Emit call instruction
     instrs.push(DtalInstr::Call {
         target: func.to_string(),
+        return_ty: result_ty.clone(),
     });
 
     // Move result from r0 to destination
