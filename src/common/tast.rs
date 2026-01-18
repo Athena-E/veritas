@@ -1,6 +1,6 @@
 use crate::common::ast::{BinOp, Literal, UnaryOp};
 use crate::common::span::{Span, Spanned};
-use crate::common::types::IType;
+use crate::common::types::{IProposition, IType};
 
 /// Typed expression AST - output of type checking
 #[derive(Clone, Debug)]
@@ -125,6 +125,7 @@ pub struct TFunction<'src> {
     pub name: String,
     pub parameters: Vec<TParameter<'src>>,
     pub return_type: IType<'src>,
+    pub postcondition: Option<IProposition<'src>>,
     pub body: TFunctionBody<'src>,
     #[allow(dead_code)]
     pub span: Span,
