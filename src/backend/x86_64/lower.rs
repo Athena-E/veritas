@@ -234,7 +234,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 });
             }
 
-            DtalInstr::Call { target } => {
+            DtalInstr::Call { target, .. } => {
                 self.instructions.push(X86Instr::Call {
                     target: target.clone(),
                 });
