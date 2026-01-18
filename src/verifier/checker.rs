@@ -96,13 +96,13 @@ pub fn verify_instruction<'src>(
         // Call defines r0 with the return type
         DtalInstr::Call { return_ty, .. } => {
             use crate::backend::dtal::regs::PhysicalReg;
-            state.register_types.insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
+            state
+                .register_types
+                .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
         }
 
         // Control flow instructions are handled separately
-        DtalInstr::Jmp { .. }
-        | DtalInstr::Branch { .. }
-        | DtalInstr::Ret => {}
+        DtalInstr::Jmp { .. } | DtalInstr::Branch { .. } | DtalInstr::Ret => {}
     }
 
     Ok(())

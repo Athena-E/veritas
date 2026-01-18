@@ -162,7 +162,10 @@ pub enum DtalInstr<'src> {
     /// branch if condition
     Branch { cond: CmpOp, target: String },
     /// call function
-    Call { target: String, return_ty: IType<'src> },
+    Call {
+        target: String,
+        return_ty: IType<'src>,
+    },
     /// ret
     Ret,
 

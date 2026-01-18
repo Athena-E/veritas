@@ -337,7 +337,9 @@ fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeS
         // Call defines r0 with the return type
         DtalInstr::Call { return_ty, .. } => {
             use crate::backend::dtal::regs::PhysicalReg;
-            state.register_types.insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
+            state
+                .register_types
+                .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
         }
         // Instructions that don't define registers
         DtalInstr::Store { .. }
