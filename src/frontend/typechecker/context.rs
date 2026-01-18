@@ -40,6 +40,12 @@ pub struct TypingContext<'src> {
 
     // Expected return type for current function (for checking return statements)
     expected_return: Option<IType<'src>>,
+
+    // Postcondition for current function (for checking at return points)
+    postcondition: Option<IProposition<'src>>,
+
+    // Current function name (for error reporting)
+    current_function: Option<String>,
 }
 
 impl<'src> TypingContext<'src> {
