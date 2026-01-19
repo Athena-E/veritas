@@ -346,6 +346,7 @@ mod tests {
             params: vec![(Reg::Virtual(VirtualReg(0)), IType::Int)],
             return_type: IType::Int,
             precondition: None,
+            postcondition: None,
             blocks: vec![DtalBlock {
                 label: ".test_bb0".to_string(),
                 entry_state: TypeState::new(),

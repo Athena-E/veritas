@@ -482,6 +482,7 @@ mod tests {
             params: vec![],
             return_type: IType::Int,
             precondition: None,
+            postcondition: None,
             blocks: vec![DtalBlock {
                 label: "entry".to_string(),
                 entry_state: TypeState::new(),
@@ -592,6 +593,7 @@ mod tests {
             params: vec![],
             return_type: IType::Int,
             precondition: None,
+            postcondition: None,
             blocks: vec![DtalBlock {
                 label: "entry".to_string(),
                 entry_state: TypeState::new(),

@@ -108,6 +108,7 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction<'src> {
         params,
         return_type: func.return_type.clone(),
         precondition: func.precondition.clone(),
+        postcondition: func.postcondition.clone(),
         blocks: ctx.take_blocks(),
     }
 }
