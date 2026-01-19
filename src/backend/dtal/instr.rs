@@ -48,6 +48,8 @@ pub struct DtalFunction<'src> {
     pub return_type: IType<'src>,
     /// Precondition (if any)
     pub precondition: Option<Constraint>,
+    /// Postcondition (if any)
+    pub postcondition: Option<Constraint>,
     /// Basic blocks
     pub blocks: Vec<DtalBlock<'src>>,
 }
