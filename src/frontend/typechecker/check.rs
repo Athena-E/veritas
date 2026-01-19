@@ -615,12 +615,13 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
 
         // Convert postcondition to IProposition
         // For postconditions, the bound variable is "result"
-        let postcondition = func.postcondition.as_ref().map(|postcond_expr| {
-            crate::common::types::IProposition {
-                var: "result".to_string(),
-                predicate: Arc::new(postcond_expr.clone()),
-            }
-        });
+        let postcondition =
+            func.postcondition
+                .as_ref()
+                .map(|postcond_expr| crate::common::types::IProposition {
+                    var: "result".to_string(),
+                    predicate: Arc::new(postcond_expr.clone()),
+                });
 
         let sig = FunctionSignature {
             name: func.name.to_string(),
@@ -746,14 +747,8 @@ fn substitute_var_with_literal<'src>(
         Expr::Error => Expr::Error,
         Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
-            lhs: Box::new((
-                substitute_var_with_literal(&lhs.0, var_name, value),
-                lhs.1,
-            )),
-            rhs: Box::new((
-                substitute_var_with_literal(&rhs.0, var_name, value),
-                rhs.1,
-            )),
+            lhs: Box::new((substitute_var_with_literal(&lhs.0, var_name, value), lhs.1)),
+            rhs: Box::new((substitute_var_with_literal(&rhs.0, var_name, value), rhs.1)),
         },
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
@@ -783,10 +778,7 @@ fn substitute_var_with_literal<'src>(
             )),
         },
         Expr::ArrayInit { value: v, length } => Expr::ArrayInit {
-            value: Box::new((
-                substitute_var_with_literal(&v.0, var_name, value),
-                v.1,
-            )),
+            value: Box::new((substitute_var_with_literal(&v.0, var_name, value), v.1)),
             length: Box::new((
                 substitute_var_with_literal(&length.0, var_name, value),
                 length.1,
@@ -803,16 +795,12 @@ fn substitute_var_with_literal<'src>(
             )),
             then_block: then_block
                 .iter()
-                .map(|(stmt, span)| {
-                    (substitute_var_in_stmt(stmt, var_name, value), *span)
-                })
+                .map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span))
                 .collect(),
             else_block: else_block.as_ref().map(|stmts| {
                 stmts
                     .iter()
-                    .map(|(stmt, span)| {
-                        (substitute_var_in_stmt(stmt, var_name, value), *span)
-                    })
+                    .map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span))
                     .collect()
             }),
         },
@@ -828,7 +816,12 @@ fn substitute_var_in_stmt<'src>(
     use crate::common::ast::Stmt;
 
     match stmt {
-        Stmt::Let { is_mut, name, ty, value: v } => Stmt::Let {
+        Stmt::Let {
+            is_mut,
+            name,
+            ty,
+            value: v,
+        } => Stmt::Let {
             is_mut: *is_mut,
             name,
             ty: ty.clone(),
@@ -839,19 +832,32 @@ fn substitute_var_in_stmt<'src>(
             rhs: (substitute_var_with_literal(&rhs.0, var_name, value), rhs.1),
         },
         Stmt::Return { expr } => Stmt::Return {
-            expr: Box::new((substitute_var_with_literal(&expr.0, var_name, value), expr.1)),
+            expr: Box::new((
+                substitute_var_with_literal(&expr.0, var_name, value),
+                expr.1,
+            )),
         },
         Stmt::Expr(e) => Stmt::Expr((substitute_var_with_literal(&e.0, var_name, value), e.1)),
-        Stmt::For { var, start, end, invariant, body } => Stmt::For {
+        Stmt::For {
             var,
-            start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+            start,
+            end,
+            invariant,
+            body,
+        } => Stmt::For {
+            var,
+            start: Box::new((
+                substitute_var_with_literal(&start.0, var_name, value),
+                start.1,
+            )),
             end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
-            invariant: invariant.as_ref().map(|(inv, span)| {
-                (substitute_var_with_literal(inv, var_name, value), *span)
-            }),
-            body: body.iter().map(|(s, span)| {
-                (substitute_var_in_stmt(s, var_name, value), *span)
-            }).collect(),
+            invariant: invariant
+                .as_ref()
+                .map(|(inv, span)| (substitute_var_with_literal(inv, var_name, value), *span)),
+            body: body
+                .iter()
+                .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
+                .collect(),
         },
     }
 }

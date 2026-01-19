@@ -177,8 +177,14 @@ impl<'src> LoweringContext<'src> {
         postcondition: Option<Constraint>,
         entry_block: BlockId,
     ) -> TirFunction<'src> {
-        self.builder
-            .build(name, params, return_type, precondition, postcondition, entry_block)
+        self.builder.build(
+            name,
+            params,
+            return_type,
+            precondition,
+            postcondition,
+            entry_block,
+        )
     }
 }
 
