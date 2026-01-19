@@ -63,6 +63,7 @@ fn test_display_function_signature() {
         parameters: vec![("x".to_string(), IType::Int)],
         return_type: IType::Bool,
         precondition: None,
+        postcondition: None,
         span: SimpleSpan::new(0, 0),
     };
     assert_eq!(format!("{}", sig), "fn foo(x: int) -> bool");
@@ -76,6 +77,7 @@ fn test_display_function_signature() {
         ],
         return_type: IType::Int,
         precondition: None,
+        postcondition: None,
         span: SimpleSpan::new(0, 0),
     };
     assert_eq!(
@@ -88,6 +90,7 @@ fn test_display_function_signature() {
         parameters: vec![],
         return_type: IType::Bool,
         precondition: None,
+        postcondition: None,
         span: SimpleSpan::new(0, 0),
     };
     assert_eq!(format!("{}", sig_no_params), "fn empty() -> bool");

@@ -155,6 +155,7 @@ mod tests {
                 params: vec![(Reg::Virtual(VirtualReg(0)), IType::Int)],
                 return_type: IType::Int,
                 precondition: None,
+                postcondition: None,
                 blocks: vec![DtalBlock {
                     label: ".id_entry".to_string(),
                     entry_state: TypeState::new(),
@@ -183,6 +184,7 @@ mod tests {
                 params: vec![],
                 return_type: IType::SingletonInt(IValue::Int(5)),
                 precondition: None,
+                postcondition: None,
                 blocks: vec![DtalBlock {
                     label: ".entry".to_string(),
                     entry_state: TypeState::new(),
@@ -211,6 +213,7 @@ mod tests {
                 params: vec![],
                 return_type: IType::Int,
                 precondition: None,
+                postcondition: None,
                 blocks: vec![DtalBlock {
                     label: ".entry".to_string(),
                     entry_state: TypeState::new(),
@@ -240,6 +243,7 @@ mod tests {
                 params: vec![],
                 return_type: IType::Int,
                 precondition: None,
+                postcondition: None,
                 blocks: vec![DtalBlock {
                     label: ".entry".to_string(),
                     entry_state: TypeState::new(),
