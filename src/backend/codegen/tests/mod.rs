@@ -27,6 +27,7 @@ fn test_pipeline_identity_function() {
                 ty: IType::Int,
             }],
             return_type: IType::Int,
+            postcondition: None,
             body: TFunctionBody {
                 statements: vec![],
                 return_expr: Some(Box::new(spanned(TExpr::Variable {
@@ -74,6 +75,7 @@ fn test_pipeline_add_function() {
                 },
             ],
             return_type: IType::Int,
+            postcondition: None,
             body: TFunctionBody {
                 statements: vec![spanned(TStmt::Let {
                     is_mut: false,
@@ -126,6 +128,7 @@ fn test_pipeline_constant_function() {
             name: "const_five".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            postcondition: None,
             body: TFunctionBody {
                 statements: vec![],
                 return_expr: Some(Box::new(spanned(TExpr::Literal {
@@ -161,6 +164,7 @@ fn test_pipeline_conditional_function() {
                 ty: IType::Int,
             }],
             return_type: IType::Int,
+            postcondition: None,
             body: TFunctionBody {
                 statements: vec![],
                 return_expr: Some(Box::new(spanned(TExpr::If {
@@ -229,6 +233,7 @@ fn test_pipeline_multi_function_program() {
                     ty: IType::Int,
                 }],
                 return_type: IType::Int,
+                postcondition: None,
                 body: TFunctionBody {
                     statements: vec![],
                     return_expr: Some(Box::new(spanned(TExpr::BinOp {
@@ -250,6 +255,7 @@ fn test_pipeline_multi_function_program() {
                 name: "main".to_string(),
                 parameters: vec![],
                 return_type: IType::Int,
+                postcondition: None,
                 body: TFunctionBody {
                     statements: vec![spanned(TStmt::Let {
                         is_mut: false,

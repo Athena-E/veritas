@@ -22,6 +22,7 @@ fn test_lower_identity_function() {
             ty: IType::Int,
         }],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![],
             return_expr: Some(Box::new(spanned(TExpr::Variable {
@@ -65,6 +66,7 @@ fn test_lower_function_with_let() {
             },
         ],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![spanned(TStmt::Let {
                 is_mut: false,
@@ -114,6 +116,7 @@ fn test_lower_function_returning_literal() {
         name: "const_five".to_string(),
         parameters: vec![],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![],
             return_expr: Some(Box::new(spanned(TExpr::Literal {
@@ -151,6 +154,7 @@ fn test_lower_if_expression() {
             ty: IType::Int,
         }],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![],
             return_expr: Some(Box::new(spanned(TExpr::If {
