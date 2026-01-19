@@ -53,6 +53,11 @@ fn emit_function<'src>(output: &mut String, func: &DtalFunction<'src>) {
         writeln!(output, ".precondition {}", emit_constraint(pre)).unwrap();
     }
 
+    // Postcondition
+    if let Some(ref post) = func.postcondition {
+        writeln!(output, ".postcondition {}", emit_constraint(post)).unwrap();
+    }
+
     writeln!(output).unwrap();
 
     // Entry point label
