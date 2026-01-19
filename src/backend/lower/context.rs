@@ -174,10 +174,11 @@ impl<'src> LoweringContext<'src> {
         params: Vec<(VirtualReg, IType<'src>)>,
         return_type: IType<'src>,
         precondition: Option<Constraint>,
+        postcondition: Option<Constraint>,
         entry_block: BlockId,
     ) -> TirFunction<'src> {
         self.builder
-            .build(name, params, return_type, precondition, entry_block)
+            .build(name, params, return_type, precondition, postcondition, entry_block)
     }
 }
 

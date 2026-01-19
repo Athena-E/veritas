@@ -51,6 +51,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         params,
         func.return_type.clone(),
         None, // TODO: Convert precondition from IProposition to Constraint
+        None, // TODO: Convert postcondition from IProposition to Constraint
         entry_block,
     )
 }
