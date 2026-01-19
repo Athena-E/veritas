@@ -3,7 +3,7 @@
 use crate::common::ast::{Function, Program, Stmt, Type as AstType};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
-use crate::common::types::{FunctionSignature, IType, IValue};
+use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_expr};
 use im::HashMap;
 use std::sync::Arc;
@@ -221,6 +221,19 @@ pub fn check_stmt<'src>(
                     found: ret_ty,
                     span: expr.1,
                 });
+            }
+
+            // Check postcondition if present
+            if let Some(postcond) = ctx.get_postcondition() {
+                let substituted = substitute_result_in_postcond(postcond, &ret_ty);
+                if !check_postcondition_provable(ctx, &substituted) {
+                    return Err(TypeError::PostconditionViolation {
+                        function: ctx.get_current_function().cloned().unwrap_or_default(),
+                        postcondition: postcond.clone(),
+                        return_type: ret_ty.clone(),
+                        span: expr.1,
+                    });
+                }
             }
 
             let tstmt = TStmt::Return {
@@ -475,6 +488,16 @@ pub fn check_function<'src>(
         func_ctx = func_ctx.with_proposition(precond_prop);
     }
 
+    // Store postcondition and current function name in context for return checking
+    let postcondition = global_ctx
+        .lookup_function(func_inner.name)
+        .and_then(|sig| sig.postcondition.clone());
+
+    if let Some(ref pc) = postcondition {
+        func_ctx = func_ctx.with_postcondition(pc.clone());
+    }
+    func_ctx = func_ctx.with_current_function(func_inner.name.to_string());
+
     let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
 
     // Check if body contains any return statements
@@ -506,6 +529,19 @@ pub fn check_function<'src>(
             });
         }
 
+        // Verify postcondition at implicit return
+        if let Some(ref postcond) = postcondition {
+            let substituted = substitute_result_in_postcond(postcond, &ret_ty);
+            if !check_postcondition_provable(&final_ctx, &substituted) {
+                return Err(TypeError::PostconditionViolation {
+                    function: func_inner.name.to_string(),
+                    postcondition: postcond.clone(),
+                    return_type: ret_ty.clone(),
+                    span: ret_expr.1,
+                });
+            }
+        }
+
         Some(texpr)
     } else {
         if !matches!(return_type, IType::Unit) && !has_return_stmt(&tbody) {
@@ -532,6 +568,7 @@ pub fn check_function<'src>(
         name: func_inner.name.to_string(),
         parameters: tparams,
         return_type,
+        postcondition,
         body: TFunctionBody {
             statements: tbody,
             return_expr: treturn.map(Box::new),
@@ -672,4 +709,158 @@ fn eval_array_size<'src>(
         Expr::Variable(name) => Ok(IValue::Symbolic(name.to_string())),
         _ => Err(TypeError::NotAConstant { span: expr.1 }),
     }
+}
+
+/// Substitute "result" in postcondition with concrete value from return type
+fn substitute_result_in_postcond<'src>(
+    postcond: &IProposition<'src>,
+    return_ty: &IType<'src>,
+) -> IProposition<'src> {
+    // If the return type is a singleton, we can substitute the concrete value for "result"
+    // Otherwise, we keep the postcondition as-is and rely on SMT solving
+    match return_ty {
+        IType::SingletonInt(IValue::Int(n)) => {
+            // Substitute "result" with the literal value in the predicate
+            let subst_expr = substitute_var_with_literal(&postcond.predicate.0, "result", *n);
+            IProposition {
+                var: "_".to_string(),
+                predicate: Arc::new((subst_expr, chumsky::span::SimpleSpan::new(0, 0))),
+            }
+        }
+        _ => postcond.clone(),
+    }
+}
+
+/// Substitute a variable with a literal integer in an expression
+fn substitute_var_with_literal<'src>(
+    expr: &crate::common::ast::Expr<'src>,
+    var_name: &str,
+    value: i64,
+) -> crate::common::ast::Expr<'src> {
+    use crate::common::ast::{Expr, Literal};
+
+    match expr {
+        Expr::Variable(name) if *name == var_name => Expr::Literal(Literal::Int(value)),
+        Expr::Variable(_) => expr.clone(),
+        Expr::Literal(_) => expr.clone(),
+        Expr::Error => Expr::Error,
+        Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
+            op: *op,
+            lhs: Box::new((
+                substitute_var_with_literal(&lhs.0, var_name, value),
+                lhs.1,
+            )),
+            rhs: Box::new((
+                substitute_var_with_literal(&rhs.0, var_name, value),
+                rhs.1,
+            )),
+        },
+        Expr::UnaryOp { op, cond } => Expr::UnaryOp {
+            op: *op,
+            cond: Box::new((
+                substitute_var_with_literal(&cond.0, var_name, value),
+                cond.1,
+            )),
+        },
+        Expr::Call { func_name, args } => Expr::Call {
+            func_name,
+            args: (
+                args.0
+                    .iter()
+                    .map(|(arg, span)| (substitute_var_with_literal(arg, var_name, value), *span))
+                    .collect(),
+                args.1,
+            ),
+        },
+        Expr::Index { base, index } => Expr::Index {
+            base: Box::new((
+                substitute_var_with_literal(&base.0, var_name, value),
+                base.1,
+            )),
+            index: Box::new((
+                substitute_var_with_literal(&index.0, var_name, value),
+                index.1,
+            )),
+        },
+        Expr::ArrayInit { value: v, length } => Expr::ArrayInit {
+            value: Box::new((
+                substitute_var_with_literal(&v.0, var_name, value),
+                v.1,
+            )),
+            length: Box::new((
+                substitute_var_with_literal(&length.0, var_name, value),
+                length.1,
+            )),
+        },
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => Expr::If {
+            cond: Box::new((
+                substitute_var_with_literal(&cond.0, var_name, value),
+                cond.1,
+            )),
+            then_block: then_block
+                .iter()
+                .map(|(stmt, span)| {
+                    (substitute_var_in_stmt(stmt, var_name, value), *span)
+                })
+                .collect(),
+            else_block: else_block.as_ref().map(|stmts| {
+                stmts
+                    .iter()
+                    .map(|(stmt, span)| {
+                        (substitute_var_in_stmt(stmt, var_name, value), *span)
+                    })
+                    .collect()
+            }),
+        },
+    }
+}
+
+/// Substitute a variable with a literal integer in a statement
+fn substitute_var_in_stmt<'src>(
+    stmt: &crate::common::ast::Stmt<'src>,
+    var_name: &str,
+    value: i64,
+) -> crate::common::ast::Stmt<'src> {
+    use crate::common::ast::Stmt;
+
+    match stmt {
+        Stmt::Let { is_mut, name, ty, value: v } => Stmt::Let {
+            is_mut: *is_mut,
+            name,
+            ty: ty.clone(),
+            value: (substitute_var_with_literal(&v.0, var_name, value), v.1),
+        },
+        Stmt::Assignment { lhs, rhs } => Stmt::Assignment {
+            lhs: (substitute_var_with_literal(&lhs.0, var_name, value), lhs.1),
+            rhs: (substitute_var_with_literal(&rhs.0, var_name, value), rhs.1),
+        },
+        Stmt::Return { expr } => Stmt::Return {
+            expr: Box::new((substitute_var_with_literal(&expr.0, var_name, value), expr.1)),
+        },
+        Stmt::Expr(e) => Stmt::Expr((substitute_var_with_literal(&e.0, var_name, value), e.1)),
+        Stmt::For { var, start, end, invariant, body } => Stmt::For {
+            var,
+            start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+            end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
+            invariant: invariant.as_ref().map(|(inv, span)| {
+                (substitute_var_with_literal(inv, var_name, value), *span)
+            }),
+            body: body.iter().map(|(s, span)| {
+                (substitute_var_in_stmt(s, var_name, value), *span)
+            }).collect(),
+        },
+    }
+}
+
+/// Check if a postcondition can be proven given the current context
+fn check_postcondition_provable<'src>(
+    ctx: &TypingContext<'src>,
+    postcond: &IProposition<'src>,
+) -> bool {
+    // Use the existing SMT oracle to check if the postcondition is provable
+    crate::frontend::typechecker::smt::check_provable(ctx, postcond)
 }
