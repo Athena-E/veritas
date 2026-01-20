@@ -315,3 +315,76 @@ fn test_function_with_expression_statement() {
         assert!(func.body.return_expr.is_none());
     }
 }
+
+#[test]
+fn test_function_with_postcondition() {
+    let src = "fn five() -> int ensures result == 5 { 5 }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        assert_eq!(func.name, "five");
+        assert!(matches!(func.return_type.0, Type::Int));
+        assert!(func.postcondition.is_some());
+    }
+}
+
+#[test]
+fn test_function_with_postcondition_inequality() {
+    let src = "fn positive() -> int ensures result > 0 { 42 }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        assert_eq!(func.name, "positive");
+        assert!(func.postcondition.is_some());
+    }
+}
+
+#[test]
+fn test_function_with_postcondition_and_precondition() {
+    let src = "fn bounded(x: int) -> int requires x > 0 ensures result >= x { x + 1 }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        assert_eq!(func.name, "bounded");
+        assert!(func.precondition.is_some());
+        assert!(func.postcondition.is_some());
+    }
+}
+
+#[test]
+fn test_function_without_postcondition() {
+    let src = "fn simple() -> int { 42 }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        assert!(func.postcondition.is_none());
+    }
+}
