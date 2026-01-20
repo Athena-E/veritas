@@ -34,6 +34,9 @@ where
     // Parse optional precondition: requires expr
     let precondition = just(Token::Requires).ignore_then(expr.clone()).or_not();
 
+    // Parse optional postcondition: ensures expr
+    let postcondition = just(Token::Ensures).ignore_then(expr.clone()).or_not();
+
     // Parse function body: { stmts* expr? }
     // We need to parse statements, then check if there's a final expression without semicolon
     let body = just(Token::Ctrl('{'))
@@ -49,9 +52,10 @@ where
         .then(parameters)
         .then(return_type)
         .then(precondition)
+        .then(postcondition)
         .then(body)
         .map_with(
-            |((((name, parameters), return_type), precondition), body), e| {
+            |(((((name, parameters), return_type), precondition), postcondition), body), e| {
                 // Default to Unit type if no return type is specified
                 let return_type = return_type.unwrap_or_else(|| {
                     let span = e.span();
@@ -63,6 +67,7 @@ where
                         parameters,
                         return_type,
                         precondition,
+                        postcondition,
                         body,
                     },
                     e.span(),

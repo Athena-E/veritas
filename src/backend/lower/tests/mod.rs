@@ -22,6 +22,7 @@ fn test_lower_identity_function() {
             ty: IType::Int,
         }],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![],
             return_expr: Some(Box::new(spanned(TExpr::Variable {
@@ -65,6 +66,7 @@ fn test_lower_function_with_let() {
             },
         ],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![spanned(TStmt::Let {
                 is_mut: false,
@@ -114,6 +116,7 @@ fn test_lower_function_returning_literal() {
         name: "const_five".to_string(),
         parameters: vec![],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![],
             return_expr: Some(Box::new(spanned(TExpr::Literal {
@@ -151,6 +154,7 @@ fn test_lower_if_expression() {
             ty: IType::Int,
         }],
         return_type: IType::Int,
+        postcondition: None,
         body: TFunctionBody {
             statements: vec![],
             return_expr: Some(Box::new(spanned(TExpr::If {
@@ -210,4 +214,72 @@ fn test_lower_if_expression() {
         .values()
         .any(|block| !block.phi_nodes.is_empty());
     assert!(has_phi, "Expected phi nodes for if expression merge");
+}
+
+/// Test: fn five() -> int ensures result == 5 { 5 }
+/// Verifies postcondition is lowered to TIR
+#[test]
+fn test_lower_function_with_postcondition() {
+    use crate::common::ast::{BinOp, Expr};
+    use crate::common::types::IProposition;
+    use chumsky::prelude::SimpleSpan;
+    use std::sync::Arc;
+
+    // Create postcondition: result == 5
+    let postcond_expr = Expr::BinOp {
+        op: BinOp::Eq,
+        lhs: Box::new((Expr::Variable("result"), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(5)), SimpleSpan::new(0, 0))),
+    };
+    let postcondition = IProposition {
+        var: "result".to_string(),
+        predicate: Arc::new((postcond_expr, SimpleSpan::new(0, 0))),
+    };
+
+    let func = TFunction {
+        name: "five".to_string(),
+        parameters: vec![],
+        return_type: IType::Int,
+        postcondition: Some(postcondition),
+        body: TFunctionBody {
+            statements: vec![],
+            return_expr: Some(Box::new(spanned(TExpr::Literal {
+                value: Literal::Int(5),
+                ty: IType::Int,
+            }))),
+        },
+        span: Span::new(0, 0),
+    };
+
+    let tir_func = lower_function(&func);
+
+    // Verify function properties
+    assert_eq!(tir_func.name, "five");
+    assert!(tir_func.postcondition.is_some(), "Expected postcondition to be lowered to TIR");
+}
+
+/// Test: fn no_postcond() -> int { 42 }
+/// Verifies functions without postconditions work correctly
+#[test]
+fn test_lower_function_without_postcondition() {
+    let func = TFunction {
+        name: "no_postcond".to_string(),
+        parameters: vec![],
+        return_type: IType::Int,
+        postcondition: None,
+        body: TFunctionBody {
+            statements: vec![],
+            return_expr: Some(Box::new(spanned(TExpr::Literal {
+                value: Literal::Int(42),
+                ty: IType::Int,
+            }))),
+        },
+        span: Span::new(0, 0),
+    };
+
+    let tir_func = lower_function(&func);
+
+    // Verify function properties
+    assert_eq!(tir_func.name, "no_postcond");
+    assert!(tir_func.postcondition.is_none(), "Expected no postcondition");
 }

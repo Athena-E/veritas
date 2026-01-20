@@ -53,6 +53,11 @@ fn emit_function<'src>(output: &mut String, func: &DtalFunction<'src>) {
         writeln!(output, ".precondition {}", emit_constraint(pre)).unwrap();
     }
 
+    // Postcondition
+    if let Some(ref post) = func.postcondition {
+        writeln!(output, ".postcondition {}", emit_constraint(post)).unwrap();
+    }
+
     writeln!(output).unwrap();
 
     // Entry point label
@@ -346,6 +351,7 @@ mod tests {
             params: vec![(Reg::Virtual(VirtualReg(0)), IType::Int)],
             return_type: IType::Int,
             precondition: None,
+            postcondition: None,
             blocks: vec![DtalBlock {
                 label: ".test_bb0".to_string(),
                 entry_state: TypeState::new(),

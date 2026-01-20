@@ -103,6 +103,7 @@ impl<'src> TirBuilder<'src> {
         params: Vec<(VirtualReg, IType<'src>)>,
         return_type: IType<'src>,
         precondition: Option<Constraint>,
+        postcondition: Option<Constraint>,
         entry_block: BlockId,
     ) -> TirFunction<'src> {
         TirFunction {
@@ -110,6 +111,7 @@ impl<'src> TirBuilder<'src> {
             params,
             return_type,
             precondition,
+            postcondition,
             entry_block,
             blocks: self.blocks,
         }

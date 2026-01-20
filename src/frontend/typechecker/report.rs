@@ -35,6 +35,7 @@ fn get_span_start(error: &TypeError) -> usize {
         TypeError::MasterTypeMismatch { span, .. } => span.start,
         TypeError::Unprovable { span, .. } => span.start,
         TypeError::PreconditionViolation { span, .. } => span.start,
+        TypeError::PostconditionViolation { span, .. } => span.start,
         TypeError::InvalidArraySize { span, .. } => span.start,
         TypeError::InvalidOperation { span, .. } => span.start,
         TypeError::UnsupportedFeature { span, .. } => span.start,
@@ -304,6 +305,25 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                     .with_color(Color::Red),
             )
             .with_note(format!("Required: {}", precondition))
+            .finish(),
+
+        TypeError::PostconditionViolation {
+            function,
+            postcondition,
+            return_type,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E018")
+            .with_message(format!("Postcondition not satisfied for `{}`", function))
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message("postcondition may not hold")
+                    .with_color(Color::Red),
+            )
+            .with_note(format!(
+                "Return type: {}\nRequired: ensures {}",
+                return_type, postcondition
+            ))
             .finish(),
 
         TypeError::InvalidArraySize { size, span } => {

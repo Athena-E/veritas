@@ -43,6 +43,8 @@ pub struct TirFunction<'src> {
     pub return_type: IType<'src>,
     /// Precondition (optional)
     pub precondition: Option<Constraint>,
+    /// Postcondition (optional)
+    pub postcondition: Option<Constraint>,
     /// Entry block ID
     pub entry_block: BlockId,
     /// All basic blocks

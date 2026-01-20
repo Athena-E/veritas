@@ -57,6 +57,13 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
+    PostconditionViolation {
+        function: String,
+        postcondition: IProposition<'src>,
+        return_type: IType<'src>,
+        span: Span,
+    },
+
     ArityMismatch {
         function: String,
         expected: usize,
@@ -199,6 +206,19 @@ impl<'src> fmt::Display for TypeError<'src> {
                     f,
                     "Precondition not satisfied for function `{}` at {:?}\n  Required: {}",
                     function, span, precondition
+                )
+            }
+
+            TypeError::PostconditionViolation {
+                function,
+                postcondition,
+                return_type,
+                span,
+            } => {
+                write!(
+                    f,
+                    "Postcondition not satisfied for function `{}` at {:?}\n  Return type: {}\n  Required: ensures {}",
+                    function, span, return_type, postcondition
                 )
             }
 

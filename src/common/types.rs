@@ -58,6 +58,7 @@ pub struct FunctionSignature<'src> {
     pub parameters: Vec<(String, IType<'src>)>,
     pub return_type: IType<'src>,
     pub precondition: Option<IProposition<'src>>,
+    pub postcondition: Option<IProposition<'src>>,
     #[allow(dead_code)]
     pub span: Span,
 }
@@ -155,6 +156,10 @@ impl<'src> fmt::Display for FunctionSignature<'src> {
 
         if let Some(ref precond) = self.precondition {
             write!(f, " requires {}", precond)?;
+        }
+
+        if let Some(ref postcond) = self.postcondition {
+            write!(f, " ensures {}", postcond)?;
         }
 
         Ok(())

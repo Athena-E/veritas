@@ -111,6 +111,7 @@ fn test_context_with_function() {
         ],
         return_type: IType::Unit,
         precondition: None,
+        postcondition: None,
         span: SimpleSpan::new(0, 0),
     };
 
