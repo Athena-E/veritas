@@ -15,11 +15,11 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```no_run
 //! use veritas::verifier::verify_dtal;
-//! use veritas::backend::dtal::DtalProgram;
+//! use veritas::backend::dtal::instr::DtalProgram;
 //!
-//! let program: DtalProgram = /* ... */;
+//! let program = DtalProgram { functions: vec![] };
 //! match verify_dtal(&program) {
 //!     Ok(()) => println!("Verification passed!"),
 //!     Err(e) => eprintln!("Verification failed: {}", e),
