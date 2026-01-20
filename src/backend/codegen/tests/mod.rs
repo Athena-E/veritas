@@ -295,3 +295,107 @@ fn test_pipeline_multi_function_program() {
 
     println!("=== Multi-function Program DTAL ===\n{}", output);
 }
+
+/// Test the full pipeline for a function with a postcondition
+/// Source: fn five() -> int ensures result == 5 { 5 }
+#[test]
+fn test_pipeline_function_with_postcondition() {
+    use crate::common::ast::Expr;
+    use crate::common::types::IProposition;
+    use chumsky::prelude::SimpleSpan;
+    use std::sync::Arc;
+
+    // Create postcondition: result == 5
+    let postcond_expr = Expr::BinOp {
+        op: BinOp::Eq,
+        lhs: Box::new((Expr::Variable("result"), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(5)), SimpleSpan::new(0, 0))),
+    };
+    let postcondition = IProposition {
+        var: "result".to_string(),
+        predicate: Arc::new((postcond_expr, SimpleSpan::new(0, 0))),
+    };
+
+    let program = TProgram {
+        functions: vec![TFunction {
+            name: "five".to_string(),
+            parameters: vec![],
+            return_type: IType::Int,
+            postcondition: Some(postcondition),
+            body: TFunctionBody {
+                statements: vec![],
+                return_expr: Some(Box::new(spanned(TExpr::Literal {
+                    value: Literal::Int(5),
+                    ty: IType::Int,
+                }))),
+            },
+            span: Span::new(0, 0),
+        }],
+    };
+
+    // Lower to TIR
+    let tir = lower_program(&program);
+    assert_eq!(tir.functions.len(), 1);
+    assert!(tir.functions[0].postcondition.is_some(), "TIR should have postcondition");
+
+    // Generate DTAL
+    let dtal = codegen_program(&tir);
+    assert_eq!(dtal.functions.len(), 1);
+    assert!(dtal.functions[0].postcondition.is_some(), "DTAL should have postcondition");
+
+    // Emit text
+    let output = emit_program(&dtal);
+    assert!(output.contains(".function five"));
+    assert!(output.contains(".postcondition"), "DTAL output should contain .postcondition directive");
+    assert!(output.contains("ret"));
+
+    println!("=== Function with Postcondition DTAL ===\n{}", output);
+}
+
+/// Test the pipeline for a function with inequality postcondition
+/// Source: fn positive() -> int ensures result > 0 { 42 }
+#[test]
+fn test_pipeline_function_with_inequality_postcondition() {
+    use crate::common::ast::Expr;
+    use crate::common::types::IProposition;
+    use chumsky::prelude::SimpleSpan;
+    use std::sync::Arc;
+
+    // Create postcondition: result > 0
+    let postcond_expr = Expr::BinOp {
+        op: BinOp::Gt,
+        lhs: Box::new((Expr::Variable("result"), SimpleSpan::new(0, 0))),
+        rhs: Box::new((Expr::Literal(Literal::Int(0)), SimpleSpan::new(0, 0))),
+    };
+    let postcondition = IProposition {
+        var: "result".to_string(),
+        predicate: Arc::new((postcond_expr, SimpleSpan::new(0, 0))),
+    };
+
+    let program = TProgram {
+        functions: vec![TFunction {
+            name: "positive".to_string(),
+            parameters: vec![],
+            return_type: IType::Int,
+            postcondition: Some(postcondition),
+            body: TFunctionBody {
+                statements: vec![],
+                return_expr: Some(Box::new(spanned(TExpr::Literal {
+                    value: Literal::Int(42),
+                    ty: IType::Int,
+                }))),
+            },
+            span: Span::new(0, 0),
+        }],
+    };
+
+    let tir = lower_program(&program);
+    let dtal = codegen_program(&tir);
+    let output = emit_program(&dtal);
+
+    assert!(output.contains(".function positive"));
+    assert!(output.contains(".postcondition"), "DTAL output should contain .postcondition directive");
+    assert!(output.contains("result > 0"), "Postcondition should show result > 0");
+
+    println!("=== Function with Inequality Postcondition DTAL ===\n{}", output);
+}
