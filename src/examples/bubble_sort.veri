@@ -17,7 +17,20 @@ fn bubble_sort(arr: [int; 10]) -> [int; 10] {
     result
 }
 
-fn main() {
+fn main() -> int {
     let arr: [int; 10] = [0; 10];
+    arr[0] = 5;
+    arr[1] = 12;
+    arr[2] = 3;
+    arr[3] = 42;
+    arr[4] = 17;
+    arr[5] = 8;
+    arr[6] = 91;
+    arr[7] = 23;
+    arr[8] = 56;
+    arr[9] = 4;
+
     let sorted: [int; 10] = bubble_sort(arr);
+
+    sorted[0]
 }
