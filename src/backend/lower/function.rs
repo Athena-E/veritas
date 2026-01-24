@@ -3,8 +3,8 @@
 //! This module converts typed functions (`TFunction`) into TIR functions
 //! with CFG in SSA form.
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::VirtualReg;
+use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::lower::stmt::lower_stmts;

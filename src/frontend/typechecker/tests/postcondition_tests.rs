@@ -1,7 +1,7 @@
 // Tests for postcondition (ensures clause) verification
 
 use crate::common::ast::{Expr, Function, FunctionBody, Literal, Program, Type};
-use crate::frontend::typechecker::{check_program, TypeError};
+use crate::frontend::typechecker::{TypeError, check_program};
 use chumsky::prelude::SimpleSpan;
 
 type Spanned<T> = (T, SimpleSpan);
@@ -46,7 +46,11 @@ fn test_postcondition_singleton_satisfied() {
 
     let program = make_program(func);
     let result = check_program(&program);
-    assert!(result.is_ok(), "Expected postcondition to pass, got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Expected postcondition to pass, got: {:?}",
+        result.err()
+    );
 }
 
 /// Test: fn wrong() -> int ensures result == 5 { 10 }
@@ -74,7 +78,10 @@ fn test_postcondition_singleton_violated() {
     let program = make_program(func);
     let result = check_program(&program);
     assert!(result.is_err(), "Expected postcondition violation");
-    assert!(matches!(result.unwrap_err(), TypeError::PostconditionViolation { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        TypeError::PostconditionViolation { .. }
+    ));
 }
 
 /// Test: fn positive() -> int ensures result > 0 { 42 }
@@ -101,7 +108,11 @@ fn test_postcondition_inequality_satisfied() {
 
     let program = make_program(func);
     let result = check_program(&program);
-    assert!(result.is_ok(), "Expected postcondition to pass, got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Expected postcondition to pass, got: {:?}",
+        result.err()
+    );
 }
 
 /// Test: fn non_positive() -> int ensures result > 0 { 0 }
@@ -129,7 +140,10 @@ fn test_postcondition_inequality_violated() {
     let program = make_program(func);
     let result = check_program(&program);
     assert!(result.is_err(), "Expected postcondition violation");
-    assert!(matches!(result.unwrap_err(), TypeError::PostconditionViolation { .. }));
+    assert!(matches!(
+        result.unwrap_err(),
+        TypeError::PostconditionViolation { .. }
+    ));
 }
 
 /// Test: fn negative() -> int ensures result > 0 { -1 }
@@ -177,7 +191,10 @@ fn test_no_postcondition() {
 
     let program = make_program(func);
     let result = check_program(&program);
-    assert!(result.is_ok(), "Expected function without postcondition to pass");
+    assert!(
+        result.is_ok(),
+        "Expected function without postcondition to pass"
+    );
 }
 
 /// Test: fn gte_zero() -> int ensures result >= 0 { 0 }
@@ -204,5 +221,9 @@ fn test_postcondition_gte_satisfied() {
 
     let program = make_program(func);
     let result = check_program(&program);
-    assert!(result.is_ok(), "Expected postcondition to pass, got: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Expected postcondition to pass, got: {:?}",
+        result.err()
+    );
 }

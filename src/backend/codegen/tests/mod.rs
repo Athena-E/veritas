@@ -336,17 +336,26 @@ fn test_pipeline_function_with_postcondition() {
     // Lower to TIR
     let tir = lower_program(&program);
     assert_eq!(tir.functions.len(), 1);
-    assert!(tir.functions[0].postcondition.is_some(), "TIR should have postcondition");
+    assert!(
+        tir.functions[0].postcondition.is_some(),
+        "TIR should have postcondition"
+    );
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
     assert_eq!(dtal.functions.len(), 1);
-    assert!(dtal.functions[0].postcondition.is_some(), "DTAL should have postcondition");
+    assert!(
+        dtal.functions[0].postcondition.is_some(),
+        "DTAL should have postcondition"
+    );
 
     // Emit text
     let output = emit_program(&dtal);
     assert!(output.contains(".function five"));
-    assert!(output.contains(".postcondition"), "DTAL output should contain .postcondition directive");
+    assert!(
+        output.contains(".postcondition"),
+        "DTAL output should contain .postcondition directive"
+    );
     assert!(output.contains("ret"));
 
     println!("=== Function with Postcondition DTAL ===\n{}", output);
@@ -394,8 +403,17 @@ fn test_pipeline_function_with_inequality_postcondition() {
     let output = emit_program(&dtal);
 
     assert!(output.contains(".function positive"));
-    assert!(output.contains(".postcondition"), "DTAL output should contain .postcondition directive");
-    assert!(output.contains("result > 0"), "Postcondition should show result > 0");
+    assert!(
+        output.contains(".postcondition"),
+        "DTAL output should contain .postcondition directive"
+    );
+    assert!(
+        output.contains("result > 0"),
+        "Postcondition should show result > 0"
+    );
 
-    println!("=== Function with Inequality Postcondition DTAL ===\n{}", output);
+    println!(
+        "=== Function with Inequality Postcondition DTAL ===\n{}",
+        output
+    );
 }

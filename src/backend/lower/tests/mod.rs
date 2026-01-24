@@ -255,7 +255,10 @@ fn test_lower_function_with_postcondition() {
 
     // Verify function properties
     assert_eq!(tir_func.name, "five");
-    assert!(tir_func.postcondition.is_some(), "Expected postcondition to be lowered to TIR");
+    assert!(
+        tir_func.postcondition.is_some(),
+        "Expected postcondition to be lowered to TIR"
+    );
 }
 
 /// Test: fn no_postcond() -> int { 42 }
@@ -281,5 +284,8 @@ fn test_lower_function_without_postcondition() {
 
     // Verify function properties
     assert_eq!(tir_func.name, "no_postcond");
-    assert!(tir_func.postcondition.is_none(), "Expected no postcondition");
+    assert!(
+        tir_func.postcondition.is_none(),
+        "Expected no postcondition"
+    );
 }
