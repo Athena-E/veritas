@@ -27,6 +27,7 @@
 //! Output (String)
 //! ```
 
+use crate::backend::optimise::{OptConfig, optimize_program};
 use crate::backend::{codegen_program, emit_program, lower_program};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
@@ -141,6 +142,70 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
     Ok(CompileOutput { dtal })
 }
 
+/// Compile source code to DTAL assembly with optimization
+///
+/// This is like `compile` but allows specifying optimization options.
+///
+/// # Arguments
+///
+/// * `source` - The source code to compile
+/// * `opt_config` - Configuration for optimization passes
+///
+/// # Returns
+///
+/// * `Ok(CompileOutput)` - Successful compilation with DTAL output
+/// * `Err(CompileError)` - Compilation failed at some stage
+pub fn compile_optimized<'src>(
+    source: &'src str,
+    opt_config: &OptConfig,
+) -> Result<CompileOutput, CompileError<'src>> {
+    // Stage 1: Lexical analysis
+    let tokens = lexer().parse(source).into_result().map_err(|errors| {
+        CompileError::LexError(
+            errors
+                .iter()
+                .map(|e| format!("{:?}", e))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    })?;
+
+    // Stage 2: Parsing
+    let eoi = (source.len()..source.len()).into();
+    let token_stream = tokens.as_slice().map(eoi, |(t, s)| (t, s));
+    let ast = program_parser()
+        .parse(token_stream)
+        .into_result()
+        .map_err(|errors| {
+            CompileError::ParseError(
+                errors
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        })?;
+
+    // Stage 3: Type checking
+    let tast = check_program(&ast).map_err(CompileError::TypeError)?;
+
+    // Stage 4: Lower to TIR (SSA form)
+    let tir = lower_program(&tast);
+
+    // Stage 5: Generate DTAL
+    let mut dtal_program = codegen_program(&tir);
+
+    // Stage 5.5: Optimize (if enabled)
+    if opt_config.any_enabled() {
+        optimize_program(&mut dtal_program, opt_config);
+    }
+
+    // Stage 6: Emit text
+    let dtal = emit_program(&dtal_program);
+
+    Ok(CompileOutput { dtal })
+}
+
 /// Compile source code with verbose output, returning all intermediate stages
 ///
 /// This function is useful for debugging and understanding the compilation process.
@@ -187,6 +252,72 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
 
     // Stage 5: Generate DTAL
     let dtal_program = codegen_program(&tir);
+
+    // Stage 6: Emit text
+    let dtal = emit_program(&dtal_program);
+
+    Ok(VerboseOutput {
+        tokens: token_strings,
+        tast,
+        tir,
+        dtal_program,
+        dtal,
+    })
+}
+
+/// Compile source code with verbose output and optimization
+///
+/// Like `compile_verbose` but with optimization passes enabled.
+pub fn compile_verbose_optimized<'src>(
+    source: &'src str,
+    opt_config: &OptConfig,
+) -> Result<VerboseOutput<'src>, CompileError<'src>> {
+    // Stage 1: Lexical analysis
+    let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
+        CompileError::LexError(
+            errors
+                .iter()
+                .map(|e| format!("{:?}", e))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    })?;
+
+    // Capture tokens as strings for display
+    let token_strings: Vec<(String, String)> = raw_tokens
+        .iter()
+        .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
+        .collect();
+
+    // Stage 2: Parsing
+    let eoi = (source.len()..source.len()).into();
+    let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
+    let ast = program_parser()
+        .parse(token_stream)
+        .into_result()
+        .map_err(|errors| {
+            CompileError::ParseError(
+                errors
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        })?;
+
+    // Stage 3: Type checking
+    let tast = check_program(&ast).map_err(CompileError::TypeError)?;
+
+    // Stage 4: Lower to TIR (SSA form)
+    let tir = lower_program(&tast);
+
+    // Stage 5: Generate DTAL
+    let mut dtal_program = codegen_program(&tir);
+
+    // Stage 5.5: Optimize (if enabled)
+    if opt_config.any_enabled() {
+        optimize_program(&mut dtal_program, opt_config);
+    }
 
     // Stage 6: Emit text
     let dtal = emit_program(&dtal_program);
