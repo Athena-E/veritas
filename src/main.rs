@@ -11,11 +11,14 @@ fn main() {
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
+    let show_help = args.iter().any(|a| a == "--help" || a == "-h");
+
+    if args.len() < 2 || show_help {
         eprintln!("Usage: {} <source_file> [OPTIONS]", args[0]);
         eprintln!();
         eprintln!("Options:");
-        eprintln!("  --verbose, -v    Show compilation stages");
+        eprintln!("  -h, --help       Show this help message");
+        eprintln!("  -v, --verbose    Show compilation stages");
         eprintln!("  --tokens         Show lexer tokens");
         eprintln!("  --ast            Show typed AST");
         eprintln!("  --tir            Show TIR (SSA form)");
@@ -28,7 +31,7 @@ fn main() {
         eprintln!("  -O, --optimize   Enable all optimizations");
         eprintln!("  --copy-prop      Enable copy propagation only");
         eprintln!("  --dce            Enable dead code elimination only");
-        std::process::exit(1);
+        std::process::exit(if show_help { 0 } else { 1 });
     }
 
     let file_path = &args[1];
