@@ -60,19 +60,14 @@ fn copy_propagate_block(block: &mut DtalBlock) -> bool {
 fn resolve(reg: VirtualReg, copy_map: &CopyMap) -> Reg {
     let mut current = Reg::Virtual(reg);
     // Follow the copy chain (handles transitive copies: a=b; c=a → c=b)
-    loop {
-        match current {
-            Reg::Virtual(vreg) => {
-                if let Some(&src) = copy_map.get(&vreg) {
-                    if src == current {
-                        break; // Avoid infinite loops
-                    }
-                    current = src;
-                } else {
-                    break;
-                }
+    while let Reg::Virtual(vreg) = current {
+        if let Some(&src) = copy_map.get(&vreg) {
+            if src == current {
+                break; // Avoid infinite loops
             }
-            Reg::Physical(_) => break, // Physical registers are terminal
+            current = src;
+        } else {
+            break;
         }
     }
     current
@@ -177,15 +172,18 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
     }
 
     // If this is a MovReg where dst is virtual, record the copy
-    if let DtalInstr::MovReg { dst, src, .. } = instr {
-        if let Reg::Virtual(dst_vreg) = dst {
-            // Resolve the source through existing copies (if source is virtual)
-            let resolved_src = match src {
-                Reg::Virtual(src_vreg) => resolve(*src_vreg, copy_map),
-                Reg::Physical(_) => *src, // Physical registers are already resolved
-            };
-            copy_map.insert(*dst_vreg, resolved_src);
-        }
+    if let DtalInstr::MovReg {
+        dst: Reg::Virtual(dst_vreg),
+        src,
+        ..
+    } = instr
+    {
+        // Resolve the source through existing copies (if source is virtual)
+        let resolved_src = match src {
+            Reg::Virtual(src_vreg) => resolve(*src_vreg, copy_map),
+            Reg::Physical(_) => *src, // Physical registers are already resolved
+        };
+        copy_map.insert(*dst_vreg, resolved_src);
     }
 }
 

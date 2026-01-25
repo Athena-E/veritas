@@ -63,7 +63,6 @@ pub struct CompileOutput {
     pub dtal: String,
 }
 
-
 /// Verbose compilation output with all intermediate stages
 pub struct VerboseOutput<'src> {
     /// Tokens produced by lexer (token, span as string)
@@ -156,7 +155,10 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
 ///
 /// * `Ok(CompileOutput)` - Successful compilation with DTAL output
 /// * `Err(CompileError)` - Compilation failed at some stage
-pub fn compile_optimized<'src>(source: &'src str, opt_config: &OptConfig) -> Result<CompileOutput, CompileError<'src>> {
+pub fn compile_optimized<'src>(
+    source: &'src str,
+    opt_config: &OptConfig,
+) -> Result<CompileOutput, CompileError<'src>> {
     // Stage 1: Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
