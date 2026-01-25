@@ -31,6 +31,7 @@ pub mod dtal;
 pub mod elf;
 pub mod emit;
 pub mod lower;
+pub mod optimize;
 pub mod regalloc;
 pub mod tir;
 pub mod x86_64;

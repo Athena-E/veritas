@@ -2,8 +2,9 @@ use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use veritas::backend::elf::generate_elf;
+use veritas::backend::optimize::OptConfig;
 use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
-use veritas::pipeline::{CompileError, compile_verbose};
+use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_optimized};
 use veritas::verifier::verify_dtal;
 
 fn main() {
@@ -22,6 +23,11 @@ fn main() {
         eprintln!("  --verify-only    Verify DTAL and exit (no output)");
         eprintln!("  -o <file>        Output native executable (ELF)");
         eprintln!("  --native         Generate native x86-64 code (to stdout)");
+        eprintln!();
+        eprintln!("Optimization:");
+        eprintln!("  -O, --optimize   Enable all optimizations");
+        eprintln!("  --copy-prop      Enable copy propagation only");
+        eprintln!("  --dce            Enable dead code elimination only");
         std::process::exit(1);
     }
 
@@ -37,6 +43,22 @@ fn main() {
         .iter()
         .position(|a| a == "-o")
         .and_then(|i| args.get(i + 1));
+
+    // Optimization flags
+    let optimize_all = args.iter().any(|a| a == "-O" || a == "--optimize");
+    let copy_prop = args.iter().any(|a| a == "--copy-prop");
+    let dce = args.iter().any(|a| a == "--dce");
+
+    // Build optimization config
+    let opt_config = if optimize_all {
+        OptConfig::all()
+    } else {
+        OptConfig {
+            copy_propagation: copy_prop,
+            dead_code_elimination: dce,
+            max_iterations: Some(10),
+        }
+    };
 
     println!("\n{}", file_path);
     println!("{}", "=".repeat(60));
@@ -61,7 +83,14 @@ fn main() {
         println!("\n[1] Lexing...");
     }
 
-    match compile_verbose(&src) {
+    // Use optimized compilation if any optimizations are enabled
+    let compile_result = if opt_config.any_enabled() {
+        compile_verbose_optimized(&src, &opt_config)
+    } else {
+        compile_verbose(&src)
+    };
+
+    match compile_result {
         Ok(output) => {
             if verbose {
                 println!("Lexed {} tokens", output.tokens.len());
@@ -74,9 +103,23 @@ fn main() {
                     output.tir.functions.len()
                 );
                 println!("\n[5] Generating DTAL...");
+                if opt_config.any_enabled() {
+                    println!("\n[5.5] Optimizing...");
+                    if opt_config.copy_propagation {
+                        println!("  - Copy propagation enabled");
+                    }
+                    if opt_config.dead_code_elimination {
+                        println!("  - Dead code elimination enabled");
+                    }
+                }
                 println!("\n[6] Emitting output...");
             } else {
-                println!("\nCompilation successful!");
+                let opt_status = if opt_config.any_enabled() {
+                    " (optimized)"
+                } else {
+                    ""
+                };
+                println!("\nCompilation successful!{}", opt_status);
             }
 
             // Verify DTAL if requested
