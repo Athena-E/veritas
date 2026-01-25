@@ -207,3 +207,130 @@ fn value_to_expr_from_ivalue<'src>(val: &'src IValue) -> Expr<'src> {
         IValue::Bool(b) => Expr::Literal(Literal::Bool(*b)),
     }
 }
+
+/// Rename the bound variable in a proposition
+pub fn rename_prop_var<'src>(
+    prop: &IProposition<'src>,
+    old_var: &str,
+    new_var: &str,
+) -> IProposition<'src> {
+    let renamed_predicate = rename_expr_var(&prop.predicate.0, old_var, new_var);
+    IProposition {
+        var: new_var.to_string(),
+        predicate: Arc::new((renamed_predicate, prop.predicate.1)),
+    }
+}
+
+/// Rename a variable in an expression
+pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'src> {
+    match expr {
+        Expr::Error => Expr::Error,
+        Expr::Literal(lit) => Expr::Literal(lit.clone()),
+        Expr::Variable(name) => {
+            if *name == old {
+                // Convert to owned string for Variable
+                // Note: This requires Variable to accept owned strings
+                // For now, we leak the string (acceptable for type checking)
+                let leaked: &'src str = Box::leak(new.to_string().into_boxed_str());
+                Expr::Variable(leaked)
+            } else {
+                Expr::Variable(name)
+            }
+        }
+        Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
+            op: *op,
+            lhs: Box::new((rename_expr_var(&lhs.0, old, new), lhs.1)),
+            rhs: Box::new((rename_expr_var(&rhs.0, old, new), rhs.1)),
+        },
+        Expr::UnaryOp { op, cond } => Expr::UnaryOp {
+            op: *op,
+            cond: Box::new((rename_expr_var(&cond.0, old, new), cond.1)),
+        },
+        Expr::Call { func_name, args } => Expr::Call {
+            func_name,
+            args: (
+                args.0
+                    .iter()
+                    .map(|arg| (rename_expr_var(&arg.0, old, new), arg.1))
+                    .collect(),
+                args.1,
+            ),
+        },
+        Expr::Index { base, index } => Expr::Index {
+            base: Box::new((rename_expr_var(&base.0, old, new), base.1)),
+            index: Box::new((rename_expr_var(&index.0, old, new), index.1)),
+        },
+        Expr::ArrayInit { value, length } => Expr::ArrayInit {
+            value: Box::new((rename_expr_var(&value.0, old, new), value.1)),
+            length: Box::new((rename_expr_var(&length.0, old, new), length.1)),
+        },
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => Expr::If {
+            cond: Box::new((rename_expr_var(&cond.0, old, new), cond.1)),
+            then_block: then_block
+                .iter()
+                .map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1))
+                .collect(),
+            else_block: else_block.as_ref().map(|stmts| {
+                stmts
+                    .iter()
+                    .map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1))
+                    .collect()
+            }),
+        },
+    }
+}
+
+/// Rename a variable in a statement (helper for rename_expr_var)
+fn rename_stmt_var<'src>(
+    stmt: &crate::common::ast::Stmt<'src>,
+    old: &str,
+    new: &str,
+) -> crate::common::ast::Stmt<'src> {
+    use crate::common::ast::Stmt;
+
+    match stmt {
+        Stmt::Let {
+            is_mut,
+            name,
+            ty,
+            value,
+        } => Stmt::Let {
+            is_mut: *is_mut,
+            name,
+            ty: ty.clone(),
+            value: (rename_expr_var(&value.0, old, new), value.1),
+        },
+        Stmt::Assignment { lhs, rhs } => Stmt::Assignment {
+            lhs: (rename_expr_var(&lhs.0, old, new), lhs.1),
+            rhs: (rename_expr_var(&rhs.0, old, new), rhs.1),
+        },
+        Stmt::Return { expr } => Stmt::Return {
+            expr: Box::new((rename_expr_var(&expr.0, old, new), expr.1)),
+        },
+        Stmt::Expr(spanned_expr) => {
+            Stmt::Expr((rename_expr_var(&spanned_expr.0, old, new), spanned_expr.1))
+        }
+        Stmt::For {
+            var,
+            start,
+            end,
+            invariant,
+            body,
+        } => Stmt::For {
+            var,
+            start: Box::new((rename_expr_var(&start.0, old, new), start.1)),
+            end: Box::new((rename_expr_var(&end.0, old, new), end.1)),
+            invariant: invariant
+                .as_ref()
+                .map(|inv| (rename_expr_var(&inv.0, old, new), inv.1)),
+            body: body
+                .iter()
+                .map(|s| (rename_stmt_var(&s.0, old, new), s.1))
+                .collect(),
+        },
+    }
+}
