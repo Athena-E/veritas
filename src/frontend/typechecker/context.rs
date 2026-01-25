@@ -1,5 +1,9 @@
-use crate::common::types::{FunctionSignature, IProposition, IType};
+use crate::common::ast::{BinOp, Expr, Literal};
+use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
+use crate::frontend::typechecker::helpers::rename_prop_var;
+use chumsky::prelude::SimpleSpan;
 use im::{HashMap, Vector};
+use std::sync::Arc;
 
 // phi: Refinement propositions known to be true
 // gamma: Immutable variable bindings
@@ -209,12 +213,12 @@ impl<'src> TypingContext<'src> {
     /// - If types are equal, keep that type
     /// - Otherwise, widen to the base type (least upper bound)
     ///
-    /// Propositions are cleared since we can't assume either branch's props
+    /// Propositions: Keep intersection (propositions that appear in both branches)
     pub fn join_mutable_contexts(ctx1: &Self, ctx2: &Self) -> Self {
         let mut joined = ctx1.clone();
 
-        // Clear propositions - after branch merge, we can't assume either's props
-        joined.phi = Vector::new();
+        // Keep intersection of propositions (those provable in both branches)
+        joined.phi = intersect_propositions(&ctx1.phi, &ctx2.phi);
 
         // Join mutable variable types
         for (name, binding1) in ctx1.delta.iter() {
@@ -260,9 +264,30 @@ fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
         // Singleton and int - widen to int
         (IType::SingletonInt(_), IType::Int) | (IType::Int, IType::SingletonInt(_)) => IType::Int,
 
-        // Refined types - conservatively widen to int
-        // (A proper implementation would compute the disjunction of predicates)
-        (IType::RefinedInt { .. }, _) | (_, IType::RefinedInt { .. }) => IType::Int,
+        // Refined types - compute disjunction of predicates
+        (IType::RefinedInt { base: b1, prop: p1 }, IType::RefinedInt { prop: p2, .. }) => {
+            let disjoined = disjoin_propositions(p1, p2);
+            IType::RefinedInt {
+                base: b1.clone(),
+                prop: disjoined,
+            }
+        }
+
+        // Refined + Singleton: promote singleton to refined, then join
+        (IType::RefinedInt { base, prop }, IType::SingletonInt(v))
+        | (IType::SingletonInt(v), IType::RefinedInt { base, prop }) => {
+            let singleton_prop = singleton_to_proposition(v);
+            let disjoined = disjoin_propositions(prop, &singleton_prop);
+            IType::RefinedInt {
+                base: base.clone(),
+                prop: disjoined,
+            }
+        }
+
+        // Refined + Int: widen to int (can't disjoin with unconstrained)
+        (IType::RefinedInt { .. }, IType::Int) | (IType::Int, IType::RefinedInt { .. }) => {
+            IType::Int
+        }
 
         // Arrays with same structure
         (
@@ -292,6 +317,90 @@ fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
         // Fallback - return first type (should not happen in well-typed code)
         _ => t1.clone(),
     }
+}
+
+/// Compute the disjunction of two propositions with the same bound variable
+fn disjoin_propositions<'src>(
+    p1: &IProposition<'src>,
+    p2: &IProposition<'src>,
+) -> IProposition<'src> {
+    // Rename p2's variable to match p1 if different
+    let p2_renamed = if p1.var != p2.var {
+        rename_prop_var(p2, &p2.var, &p1.var)
+    } else {
+        p2.clone()
+    };
+
+    let dummy_span = SimpleSpan::new(0, 0);
+
+    // Create disjunctive expression: p1.predicate OR p2_renamed.predicate
+    let disjoined_expr = Expr::BinOp {
+        op: BinOp::Or,
+        lhs: Box::new((p1.predicate.0.clone(), dummy_span)),
+        rhs: Box::new((p2_renamed.predicate.0.clone(), dummy_span)),
+    };
+
+    IProposition {
+        var: p1.var.clone(),
+        predicate: Arc::new((disjoined_expr, dummy_span)),
+    }
+}
+
+/// Convert a singleton type int(n) to a proposition {v: int | v == n}
+fn singleton_to_proposition<'src>(value: &IValue) -> IProposition<'src> {
+    let var = "v".to_string();
+    let dummy_span = SimpleSpan::new(0, 0);
+
+    let value_literal = match value {
+        IValue::Int(n) => Expr::Literal(Literal::Int(*n)),
+        IValue::Symbolic(s) => {
+            let leaked: &'src str = Box::leak(s.clone().into_boxed_str());
+            Expr::Variable(leaked)
+        }
+        IValue::Bool(b) => Expr::Literal(Literal::Bool(*b)),
+    };
+
+    let eq_expr = Expr::BinOp {
+        op: BinOp::Eq,
+        lhs: Box::new((
+            {
+                let leaked: &'src str = Box::leak(var.clone().into_boxed_str());
+                Expr::Variable(leaked)
+            },
+            dummy_span,
+        )),
+        rhs: Box::new((value_literal, dummy_span)),
+    };
+
+    IProposition {
+        var,
+        predicate: Arc::new((eq_expr, dummy_span)),
+    }
+}
+
+/// Keep propositions that appear in both contexts
+/// Uses simple structural equality; could use SMT for semantic equality
+fn intersect_propositions<'src>(
+    phi1: &Vector<IProposition<'src>>,
+    phi2: &Vector<IProposition<'src>>,
+) -> Vector<IProposition<'src>> {
+    let mut result = Vector::new();
+    for p1 in phi1.iter() {
+        for p2 in phi2.iter() {
+            if propositions_equivalent(p1, p2) {
+                result.push_back(p1.clone());
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Check if two propositions are structurally equivalent
+fn propositions_equivalent<'src>(p1: &IProposition<'src>, p2: &IProposition<'src>) -> bool {
+    // Simple structural equality for now
+    // Could be enhanced with SMT equivalence checking
+    p1.var == p2.var && format!("{:?}", p1.predicate.0) == format!("{:?}", p2.predicate.0)
 }
 
 impl<'src> Default for TypingContext<'src> {
