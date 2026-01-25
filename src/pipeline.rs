@@ -27,7 +27,7 @@
 //! Output (String)
 //! ```
 
-use crate::backend::optimize::{OptConfig, optimize_program};
+use crate::backend::optimise::{OptConfig, optimize_program};
 use crate::backend::{codegen_program, emit_program, lower_program};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;

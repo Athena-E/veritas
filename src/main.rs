@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use veritas::backend::elf::generate_elf;
-use veritas::backend::optimize::OptConfig;
+use veritas::backend::optimise::OptConfig;
 use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
 use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_optimized};
 use veritas::verifier::verify_dtal;
