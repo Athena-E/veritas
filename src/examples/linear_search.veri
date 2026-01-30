@@ -21,7 +21,7 @@ fn linear_search(arr: [int; 10], target: int) -> int {
 }
 
 fn main() {
-    let mut arr: [int; 10] = [0; 10];
+    let mut arr: [{ v:int | v >= 0 }; 10] = [0; 10];
     arr[0] = 5;
     arr[1] = 12;
     arr[2] = 3;
