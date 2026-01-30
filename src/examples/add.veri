@@ -1,14 +1,18 @@
-fn add(x: int, y: int) -> int {
-    x + y
-}
+//fn add(x: int, y: int) -> int {
+//    x + y
+//}
 
-fn double(n: int) -> int {
-    let result: int = n + n;
+// This function tests SMT synthesis:
+// n has type {v: int | v > 0}
+// n + n should synthesize to {v: int | v = n + n}
+// The SMT solver should prove: (n > 0) ∧ (v = n + n) ⟹ v > 0
+fn double(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
+    let result: { v:int | v > 0 } = n + n;
     result
 }
 
 fn main() -> int {
-    let a: int = add(10, 20);
-    let b: int = double(a);
+ //   let a: int = add(10, 20);
+    let b: { v:int | v > 0 } = double(0-1);
     b
 }

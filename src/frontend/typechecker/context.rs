@@ -206,6 +206,24 @@ impl<'src> TypingContext<'src> {
         self.sigma_f.get(name)
     }
 
+    /// Get all variables (both immutable and mutable) with their types
+    /// Used by SMT solver to include refinements from variable types in the context
+    pub fn get_all_variable_types(&self) -> Vec<(&str, &IType<'src>)> {
+        let mut result = Vec::new();
+
+        // Add immutable variables
+        for (name, ty) in self.gamma.iter() {
+            result.push((name.as_str(), ty));
+        }
+
+        // Add mutable variables (using their current type)
+        for (name, binding) in self.delta.iter() {
+            result.push((name.as_str(), &binding.current_type));
+        }
+
+        result
+    }
+
     /// Join mutable contexts from two branches (after if-else)
     /// Computes the least upper bound of types for mutable variables
     ///

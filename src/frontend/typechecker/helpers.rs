@@ -1,11 +1,54 @@
 // Helper functions for type checking
-// constant folding, proposition extraction, context joining
+// constant folding, proposition extraction, context joining, SMT synthesis
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Span;
 use crate::common::types::{IProposition, IType, IValue};
 use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for generating fresh variable names
+static FRESH_VAR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Generate a fresh variable name that won't conflict with user variables
+/// Uses the prefix `_synth_` which is unlikely to be used by programmers
+pub fn fresh_var_name() -> String {
+    let id = FRESH_VAR_COUNTER.fetch_add(1, Ordering::SeqCst);
+    format!("_synth_{}", id)
+}
+
+/// Reset the fresh variable counter (useful for testing)
+#[allow(dead_code)]
+pub fn reset_fresh_var_counter() {
+    FRESH_VAR_COUNTER.store(0, Ordering::SeqCst);
+}
+
+/// Build a refined type that captures the expression's value symbolically
+/// For expr `n + n`, produces `{v: int | v = n + n}`
+/// This enables SMT-based synthesis: the solver can derive properties
+/// from the equality constraint combined with known refinements
+pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'src> {
+    let bound_var = fresh_var_name();
+    let bound_var_leaked: &'src str = Box::leak(bound_var.clone().into_boxed_str());
+
+    let v_expr = Expr::Variable(bound_var_leaked);
+
+    // Build predicate: v = expr
+    let eq_predicate = Expr::BinOp {
+        op: BinOp::Eq,
+        lhs: Box::new((v_expr, span)),
+        rhs: Box::new((expr.clone(), span)),
+    };
+
+    IType::RefinedInt {
+        base: Arc::new(IType::Int),
+        prop: IProposition {
+            var: bound_var,
+            predicate: Arc::new((eq_predicate, span)),
+        },
+    }
+}
 
 /// Constant folding (join-op from formal semantics)
 /// Attempts to compute the result type of binary operations on singleton types
