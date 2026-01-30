@@ -1,6 +1,9 @@
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
-use crate::common::types::IProposition;
+use crate::common::types::{IProposition, IType, IValue};
 use crate::frontend::typechecker::context::TypingContext;
+use crate::frontend::typechecker::helpers::rename_expr_var;
+use chumsky::prelude::SimpleSpan;
+use std::sync::Arc;
 use z3::ast::{Bool, Int};
 use z3::{SatResult, Solver};
 
@@ -126,6 +129,15 @@ impl SmtOracle {
             solver.assert(&constraint);
         }
 
+        // Add refinements from variable types
+        // For a variable `n: {v: int | v > 0}`, we add the constraint `n > 0`
+        for (var_name, ty) in typing_ctx.get_all_variable_types() {
+            if let Some(prop) = Self::extract_refinement_as_proposition(var_name, ty) {
+                let constraint = Self::translate_proposition(&prop);
+                solver.assert(&constraint);
+            }
+        }
+
         // Negate the goal - if unsatisfiable, the goal is provable
         let goal_formula = Self::translate_proposition(goal);
         let negated_goal = goal_formula.not();
@@ -135,6 +147,47 @@ impl SmtOracle {
             SatResult::Unsat => true,    // Goal is provable
             SatResult::Sat => false,     // Counterexample exists
             SatResult::Unknown => false, // Solver couldn't determine
+        }
+    }
+
+    /// Extract a proposition from a refined type by substituting the variable name
+    /// For `n: {v: int | v > 0}`, produces the proposition `n > 0`
+    fn extract_refinement_as_proposition<'src>(
+        var_name: &str,
+        ty: &IType<'src>,
+    ) -> Option<IProposition<'src>> {
+        match ty {
+            IType::RefinedInt { prop, .. } => {
+                // Substitute the actual variable name for the bound variable
+                let renamed_predicate = rename_expr_var(&prop.predicate.0, &prop.var, var_name);
+                Some(IProposition {
+                    var: var_name.to_string(),
+                    predicate: Arc::new((renamed_predicate, prop.predicate.1)),
+                })
+            }
+            IType::SingletonInt(value) => {
+                // For singleton types, add equality constraint: var_name = value
+                let dummy_span = SimpleSpan::new(0, 0);
+                let var_leaked: &'src str = Box::leak(var_name.to_string().into_boxed_str());
+                let value_expr = match value {
+                    IValue::Int(n) => Expr::Literal(Literal::Int(*n)),
+                    IValue::Symbolic(s) => {
+                        let s_leaked: &'src str = Box::leak(s.clone().into_boxed_str());
+                        Expr::Variable(s_leaked)
+                    }
+                    IValue::Bool(b) => Expr::Literal(Literal::Bool(*b)),
+                };
+                let eq_expr = Expr::BinOp {
+                    op: BinOp::Eq,
+                    lhs: Box::new((Expr::Variable(var_leaked), dummy_span)),
+                    rhs: Box::new((value_expr, dummy_span)),
+                };
+                Some(IProposition {
+                    var: var_name.to_string(),
+                    predicate: Arc::new((eq_expr, dummy_span)),
+                })
+            }
+            _ => None,
         }
     }
 }
