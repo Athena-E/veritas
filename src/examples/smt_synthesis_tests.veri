@@ -1,0 +1,44 @@
+// Test cases for SMT-based refinement synthesis
+
+// Test 1: Basic doubling (original failing case)
+fn double(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
+    n + n
+}
+
+// Test 2: Nested arithmetic - quadruple
+fn quadruple(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
+    let x: { v:int | v > 0 } = n + n;
+    x + x
+}
+
+fn test(n: { v:int | v > 0 }) -> int {
+    let x: { v:int | v > 0 } = n + n;
+    x + x
+}
+
+// Test 3: Mixed operations
+fn triple_plus_one(n: { v:int | v >= 0 }) -> { v:int | v >= 1 } {
+    let x: { v:int | v >= 0 } = n + n;
+    let y: { v:int | v >= 0 } = x + n;
+    
+    y + 1
+}
+
+// Test 4: Subtraction (trickier - need to be careful)
+fn decrement_positive(n: { v:int | v > 1 }) -> { v:int | v > 0 } {
+    n - 1
+}
+
+// Test 5: Array initialization with refined element
+fn init_positive_array(n: { v:int | v > 0 }) -> [{ v:int | v > 0 }; 5] {
+    [n + n; 5]
+}
+
+fn main() -> int {
+    let a: { v:int | v > 0 } = double(5);
+    let b: { v:int | v > 0 } = quadruple(3);
+    let c: { v:int | v >= 1 } = triple_plus_one(2);
+    let d: { v:int | v > 0 } = decrement_positive(10);
+    // let e: { v:int | v > 0 } = test(1);
+    a
+}
