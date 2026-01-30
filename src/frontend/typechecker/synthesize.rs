@@ -5,20 +5,10 @@ use crate::common::span::Spanned;
 use crate::common::tast::TExpr;
 use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{
-    TypeError, TypingContext, VarBinding, check_array_bounds_expr, check_stmts,
-    extract_proposition, is_subtype, join_op, negate_proposition,
+    TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
+    check_stmts, extract_proposition, is_subtype, join_op, negate_proposition,
 };
 use std::sync::Arc;
-
-/// Widen singleton types to their base types
-/// Temp fix: array element types give [int; n] not [int(0); n]
-fn widen_type(ty: IType) -> IType {
-    match ty {
-        IType::SingletonInt(_) => IType::Int,
-        // Could add SingletonBool -> Bool if needed
-        other => other,
-    }
-}
 
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
@@ -75,7 +65,7 @@ pub fn synth_expr<'src>(
             }
         }
 
-        // BINOP-ARITH: Arithmetic operations
+        // BINOP-ARITH: Arithmetic operations with SMT synthesis
         Expr::BinOp {
             op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul),
             lhs,
@@ -100,8 +90,22 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Use constant folding to produce precise singleton types when possible
-            let ty = join_op(*op, &ty1, &ty2);
+            // Try constant folding first for precise singleton types
+            let ty = match join_op(*op, &ty1, &ty2) {
+                IType::Int => {
+                    // Constant folding failed (non-singleton operands)
+                    // Use SMT synthesis: produce {v | v = lhs op rhs}
+                    // This allows the SMT solver to derive properties from the equality
+                    let result_expr = Expr::BinOp {
+                        op: *op,
+                        lhs: Box::new((**lhs).clone()),
+                        rhs: Box::new((**rhs).clone()),
+                    };
+                    build_equality_refinement(&result_expr, span)
+                }
+                singleton_ty => singleton_ty, // Keep singleton if folding worked
+            };
+
             let texpr = TExpr::BinOp {
                 op: *op,
                 lhs: Box::new(tlhs),
@@ -312,12 +316,10 @@ pub fn synth_expr<'src>(
             // Synthesize the length expression for the typed AST
             let (tlength, _) = synth_expr(ctx, length)?;
 
-            // Widen singleton types for array elements
-            // Temp fix: [0; 10] has type [int; 10], not [int(0); 10]
-            let widened_elem_ty = widen_type(elem_ty);
-
+            // Keep the synthesized element type (including singletons and refined types)
+            // SMT synthesis allows SingletonInt(0) <: {v | v >= 0} via SMT proof
             let array_ty = IType::Array {
-                element_type: Arc::new(widened_elem_ty),
+                element_type: Arc::new(elem_ty),
                 size,
             };
 
