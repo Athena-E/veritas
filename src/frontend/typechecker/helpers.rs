@@ -5,8 +5,8 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Span;
 use crate::common::types::{IProposition, IType, IValue};
 use chumsky::prelude::SimpleSpan;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Global counter for generating fresh variable names
 static FRESH_VAR_COUNTER: AtomicU64 = AtomicU64::new(0);
