@@ -76,15 +76,21 @@ pub fn check_stmt<'src>(
             }
 
             // Add to mutable context with current type and master type
+            // For arrays, use the annotated type so we can assign values matching the element type
+            // (not just the singleton from initialization)
             let master_ty = IType::Master(Arc::new(ann_ty.clone()));
-            let new_ctx = ctx.with_mutable(name.to_string(), value_ty.clone(), master_ty);
+            let current_ty = match &ann_ty {
+                IType::Array { .. } => ann_ty.clone(),
+                _ => value_ty.clone(),
+            };
+            let new_ctx = ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
 
             let tstmt = TStmt::Let {
                 is_mut: true,
                 name: name.to_string(),
                 declared_ty: ann_ty,
                 value: tvalue,
-                checked_ty: value_ty,
+                checked_ty: current_ty,
             };
 
             Ok(((tstmt, span), new_ctx))
