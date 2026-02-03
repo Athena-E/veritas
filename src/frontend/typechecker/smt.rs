@@ -38,7 +38,7 @@ impl SmtOracle {
                     -operand
                 }
                 UnaryOp::Not => panic!("Boolean negation in integer expression context"),
-            }
+            },
 
             Expr::Error => panic!("Error node in SMT translation"),
             Expr::Literal(Literal::Bool(_)) => panic!("Boolean literal in integer context"),
@@ -107,7 +107,7 @@ impl SmtOracle {
                     operand.not()
                 }
                 UnaryOp::Neg => panic!("Integer negation in boolean expression context"),
-            }
+            },
 
             Expr::Error => panic!("Error node in SMT translation"),
             Expr::Literal(Literal::Int(_)) => panic!("Integer literal in boolean context"),
