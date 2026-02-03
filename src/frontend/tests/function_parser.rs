@@ -388,3 +388,49 @@ fn test_function_without_postcondition() {
         assert!(func.postcondition.is_none());
     }
 }
+
+#[test]
+fn test_function_with_unary_minus() {
+    let src = "fn neg(x: int) -> int { -x }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((func, _)) = result {
+        assert_eq!(func.name, "neg");
+        assert!(func.body.return_expr.is_some());
+    }
+}
+
+#[test]
+fn test_function_with_negative_literal() {
+    let src = "fn negative_five() -> int { -5 }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_function_with_double_negation() {
+    let src = "fn double_neg(x: int) -> int { --x }";
+    let tokens = parse_tokens(src);
+    let result = function_parser()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+}

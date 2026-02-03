@@ -32,8 +32,12 @@ impl SmtOracle {
                 }
             }
 
-            Expr::UnaryOp { .. } => {
-                panic!("Unary operation in integer expression context")
+            Expr::UnaryOp { op, cond } => match op {
+                UnaryOp::Neg => {
+                    let operand = Self::translate_expr(&cond.0);
+                    -operand
+                }
+                UnaryOp::Not => panic!("Boolean negation in integer expression context"),
             }
 
             Expr::Error => panic!("Error node in SMT translation"),
@@ -97,12 +101,12 @@ impl SmtOracle {
                 }
             },
 
-            Expr::UnaryOp {
-                op: UnaryOp::Not,
-                cond,
-            } => {
-                let operand = Self::translate_bool_expr(&cond.0);
-                operand.not()
+            Expr::UnaryOp { op, cond } => match op {
+                UnaryOp::Not => {
+                    let operand = Self::translate_bool_expr(&cond.0);
+                    operand.not()
+                }
+                UnaryOp::Neg => panic!("Integer negation in boolean expression context"),
             }
 
             Expr::Error => panic!("Error node in SMT translation"),
