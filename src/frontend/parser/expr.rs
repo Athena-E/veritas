@@ -87,8 +87,11 @@ where
         );
 
         // Unary operators
-        let op_not = just(Token::Op("!")).to(UnaryOp::Not);
-        let unary = op_not.repeated().foldr_with(indexed, |op, operand, e| {
+        let op_unary = choice((
+            just(Token::Op("!")).to(UnaryOp::Not),
+            just(Token::Op("-")).to(UnaryOp::Neg),
+        ));
+        let unary = op_unary.repeated().foldr_with(indexed, |op, operand, e| {
             (
                 Expr::UnaryOp {
                     op,
@@ -264,8 +267,11 @@ where
             );
 
             // Unary operators
-            let op_not = just(Token::Op("!")).to(UnaryOp::Not);
-            let unary = op_not.repeated().foldr_with(indexed, |op, operand, e| {
+            let op_unary = choice((
+                just(Token::Op("!")).to(UnaryOp::Not),
+                just(Token::Op("-")).to(UnaryOp::Neg),
+            ));
+            let unary = op_unary.repeated().foldr_with(indexed, |op, operand, e| {
                 (
                     Expr::UnaryOp {
                         op,

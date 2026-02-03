@@ -245,6 +245,7 @@ fn lower_binop<'src>(
 fn convert_unaryop(op: AstUnaryOp) -> UnaryOp {
     match op {
         AstUnaryOp::Not => UnaryOp::Not,
+        AstUnaryOp::Neg => UnaryOp::Neg,
     }
 }
 

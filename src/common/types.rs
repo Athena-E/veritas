@@ -91,6 +91,7 @@ fn fmt_expr(expr: &Expr) -> String {
         Expr::UnaryOp { op, cond } => {
             let op_str = match op {
                 UnaryOp::Not => "!",
+                UnaryOp::Neg => "-",
             };
             format!("{}{}", op_str, fmt_expr(&cond.0))
         }

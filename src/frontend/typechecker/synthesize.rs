@@ -209,6 +209,30 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), result_ty))
         }
 
+        // UNARY-NEG: Arithmetic negation
+        Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            cond,
+        } => {
+            let (tcond, ty) = synth_expr(ctx, cond)?;
+
+            if !is_subtype(ctx, &ty, &IType::Int) {
+                return Err(TypeError::TypeMismatch {
+                    expected: IType::Int,
+                    found: ty,
+                    span: cond.1,
+                });
+            }
+
+            let result_ty = IType::Int;
+            let texpr = TExpr::UnaryOp {
+                op: UnaryOp::Neg,
+                operand: Box::new(tcond),
+                ty: result_ty.clone(),
+            };
+            Ok(((texpr, span), result_ty))
+        }
+
         // ARRAY-INDEX: Array indexing
         Expr::Index { base, index } => {
             let (tbase, base_ty) = synth_expr(ctx, base)?;

@@ -13,6 +13,6 @@ fn double(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
 
 fn main() -> int {
  //   let a: int = add(10, 20);
-    let b: { v:int | v > 0 } = double(0-1);
+    let b: { v:int | v > 0 } = double(2);
     b
 }
