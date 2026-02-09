@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// Unique identifier for a basic block
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);
 
 impl fmt::Display for BlockId {
