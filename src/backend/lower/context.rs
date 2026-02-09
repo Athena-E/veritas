@@ -6,7 +6,7 @@
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
 use crate::common::types::IType;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Context for lowering TAST to TIR
 ///
@@ -20,11 +20,11 @@ pub struct LoweringContext<'src> {
     /// Map from variable names to their current SSA register
     /// In SSA, each assignment creates a new register, so this
     /// always points to the "current" version of each variable.
-    var_map: HashMap<String, VirtualReg>,
+    var_map: BTreeMap<String, VirtualReg>,
 
     /// Stack of variable maps for nested scopes
     /// Used to restore variable bindings when exiting a scope
-    scope_stack: Vec<HashMap<String, VirtualReg>>,
+    scope_stack: Vec<BTreeMap<String, VirtualReg>>,
 }
 
 impl<'src> LoweringContext<'src> {
@@ -32,7 +32,7 @@ impl<'src> LoweringContext<'src> {
     pub fn new() -> Self {
         Self {
             builder: TirBuilder::new(),
-            var_map: HashMap::new(),
+            var_map: BTreeMap::new(),
             scope_stack: Vec::new(),
         }
     }
@@ -62,13 +62,13 @@ impl<'src> LoweringContext<'src> {
 
     /// Get a snapshot of the current variable map
     /// Used for tracking which variables are modified in branches
-    pub fn snapshot_var_map(&self) -> HashMap<String, VirtualReg> {
+    pub fn snapshot_var_map(&self) -> BTreeMap<String, VirtualReg> {
         self.var_map.clone()
     }
 
     /// Restore the variable map from a previous snapshot
     /// Used to reset state before lowering alternative control flow paths
-    pub fn restore_var_map(&mut self, snapshot: HashMap<String, VirtualReg>) {
+    pub fn restore_var_map(&mut self, snapshot: BTreeMap<String, VirtualReg>) {
         self.var_map = snapshot;
     }
 
@@ -76,8 +76,8 @@ impl<'src> LoweringContext<'src> {
     /// Returns: Vec<(var_name, reg_in_snapshot1, reg_in_snapshot2)>
     pub fn diff_var_maps(
         &self,
-        before: &HashMap<String, VirtualReg>,
-        after: &HashMap<String, VirtualReg>,
+        before: &BTreeMap<String, VirtualReg>,
+        after: &BTreeMap<String, VirtualReg>,
     ) -> Vec<(String, VirtualReg, VirtualReg)> {
         let mut diffs = Vec::new();
         for (name, &after_reg) in after {
