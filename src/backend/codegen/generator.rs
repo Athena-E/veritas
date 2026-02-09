@@ -81,13 +81,16 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction<'src> {
     }
 
     // Generate code for each block in a deterministic order
-    // Start with entry block, then process others
+    // Start with entry block, then remaining blocks sorted by ID
     let mut block_order: Vec<BlockId> = vec![func.entry_block];
-    for block_id in func.blocks.keys() {
-        if *block_id != func.entry_block {
-            block_order.push(*block_id);
-        }
-    }
+    let mut other_blocks: Vec<BlockId> = func
+        .blocks
+        .keys()
+        .copied()
+        .filter(|id| *id != func.entry_block)
+        .collect();
+    other_blocks.sort();
+    block_order.extend(other_blocks);
 
     for block_id in block_order {
         if let Some(block) = func.blocks.get(&block_id) {

@@ -158,12 +158,13 @@ impl Encoder {
 
             X86Instr::AddRR { .. }
             | X86Instr::SubRR { .. }
-            | X86Instr::ImulRR { .. }
             | X86Instr::CmpRR { .. }
             | X86Instr::TestRR { .. }
             | X86Instr::AndRR { .. }
             | X86Instr::OrRR { .. }
             | X86Instr::XorRR { .. } => 3, // REX.W + opcode + ModR/M
+
+            X86Instr::ImulRR { .. } => 4, // REX.W + 0x0F + 0xAF + ModR/M
 
             X86Instr::AddRI { dst, imm }
             | X86Instr::SubRI { dst, imm }
@@ -184,10 +185,9 @@ impl Encoder {
 
             X86Instr::ImulRRI { .. } => 7, // REX.W + 0x69 + ModR/M + imm32
 
-            X86Instr::AddRM { .. } | X86Instr::SubRM { .. } | X86Instr::CmpRM { .. } => {
-                // Estimate: REX + opcode + ModR/M + SIB? + disp
-                7
-            }
+            X86Instr::AddRM { dst, src } => self.mem_instr_size(*dst, src),
+            X86Instr::SubRM { dst, src } => self.mem_instr_size(*dst, src),
+            X86Instr::CmpRM { lhs, rhs } => self.mem_instr_size(*lhs, rhs),
 
             X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
 
