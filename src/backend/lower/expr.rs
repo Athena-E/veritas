@@ -581,9 +581,9 @@ fn lower_block_with_result<'src>(
 /// Create phi nodes for variables that were modified differently in two branches
 fn create_phi_nodes_for_modified_vars<'src>(
     ctx: &mut LoweringContext<'src>,
-    vars_before: &std::collections::HashMap<String, VirtualReg>,
-    vars_after_then: &std::collections::HashMap<String, VirtualReg>,
-    vars_after_else: &std::collections::HashMap<String, VirtualReg>,
+    vars_before: &std::collections::BTreeMap<String, VirtualReg>,
+    vars_after_then: &std::collections::BTreeMap<String, VirtualReg>,
+    vars_after_else: &std::collections::BTreeMap<String, VirtualReg>,
     then_block: BlockId,
     else_block: BlockId,
 ) {
