@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 OUTPUT_DIR="$SCRIPT_DIR/results"
-ITERATIONS=${1:-5}
+ITERATIONS=${1:-10}
 
 # Colors for output
 RED='\033[0;31m'
@@ -103,7 +103,7 @@ echo ""
 
 for bench in "$SCRIPT_DIR"/*.veri; do
     name=$(basename "$bench" .veri)
-    result=$(run_benchmark "$name" "$COMPILER" "$bench" -o /tmp/bench_out)
+    result=$(run_benchmark "$name" "$COMPILER" "$bench" -o /tmp/bench_out -O)
     read avg min max <<< "$result"
 
     printf "%-30s %10d %10d %10d\n" "$name" "$avg" "$min" "$max"
@@ -135,11 +135,11 @@ for bench in "$SCRIPT_DIR"/*.veri; do
     name=$(basename "$bench" .veri)
 
     # Without verification
-    result_no=$(run_benchmark "$name" "$COMPILER" "$bench" -o /tmp/bench_out)
+    result_no=$(run_benchmark "$name" "$COMPILER" "$bench" -o /tmp/bench_out -O)
     read avg_no _ _ <<< "$result_no"
 
     # With verification
-    result_yes=$(run_benchmark "$name" "$COMPILER" "$bench" --verify -o /tmp/bench_out)
+    result_yes=$(run_benchmark "$name" "$COMPILER" "$bench" --verify -o /tmp/bench_out -O)
     read avg_yes _ _ <<< "$result_yes"
 
     overhead=$((avg_yes - avg_no))
@@ -179,7 +179,7 @@ for bench in "$SCRIPT_DIR"/*.veri; do
     exe="/tmp/bench_${name}"
 
     # Compile (suppress all output)
-    "$COMPILER" "$bench" -o "$exe" > /dev/null 2>&1
+    "$COMPILER" "$bench" -o "$exe" -O > /dev/null 2>&1
 
     # Run multiple times and collect stats
     times=()
@@ -208,7 +208,7 @@ done
 
 echo ""
 
-# NOTE: Fibonacci scaling section removed - conditionals/loops are broken
+# NOTE: Fibonacci scaling section removed for brevity
 
 # ============================================================================
 # SECTION 5: Binary Size Analysis
@@ -233,7 +233,7 @@ for bench in "$SCRIPT_DIR"/*.veri; do
     name=$(basename "$bench" .veri)
     exe="/tmp/bench_${name}"
 
-    "$COMPILER" "$bench" -o "$exe" > /dev/null 2>&1
+    "$COMPILER" "$bench" -o "$exe" -O > /dev/null 2>&1
     size=$(stat -c%s "$exe" 2>/dev/null || stat -f%z "$exe" 2>/dev/null)
 
     printf "%-30s %15d\n" "$name" "$size"

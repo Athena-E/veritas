@@ -1,0 +1,14 @@
+fn nested_sum() -> int {
+    let mut total: int = 0;
+    for i in 0..10 {
+        for j in 0..10 {
+            total = total + i * j;
+        }
+    }
+    total
+}
+
+fn main() -> int {
+    let c: int = nested_sum();
+    c
+}

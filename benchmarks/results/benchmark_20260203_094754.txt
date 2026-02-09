@@ -1,0 +1,37 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  3 Feb 09:47:54 GMT 2026
+Iterations: 5
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              6          5          9
+02_arithmetic                           7          6          9
+03_function_calls                       7          7          8
+04_conditionals                         8          8          9
+05_fibonacci                            7          6          8
+06_loops                                7          7          8
+07_refinements                         18         15         23
+08_complex_refinements                 17         16         19
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              7          8          1      1.14x
+02_arithmetic                           9          8         -1       .88x
+03_function_calls                       7          6         -1       .85x
+04_conditionals                         8          7         -1       .87x
+05_fibonacci                            8         10          2      1.25x
+06_loops                                9         22         13      2.44x
+07_refinements                         27         20         -7       .74x
+08_complex_refinements                 21         20         -1       .95x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
+01_minimal                              2          2          3           42
+02_arithmetic                           2          2          4          140
+03_function_calls                       2          2          3           70
+04_conditionals                         2          2          4          110
+05_fibonacci                            2          2          3            0

@@ -1,0 +1,61 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  3 Feb 12:17:09 GMT 2026
+Iterations: 5
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              5          3          8
+02_arithmetic                           7          4          9
+03_function_calls                       6          4          9
+04_conditionals                         6          5          7
+05_fibonacci                            7          6          8
+06_sum                                  7          5          8
+07_refinements                         21         13         49
+08_complex_refinements                 15         13         18
+09_factorial                            6          5          8
+10_nested_sum                           4          4          5
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              5          6          1      1.20x
+02_arithmetic                           7          6         -1       .85x
+03_function_calls                       7          6         -1       .85x
+04_conditionals                         7          7          0      1.00x
+05_fibonacci                            8          7         -1       .87x
+06_sum                                  7          9          2      1.28x
+07_refinements                         14         17          3      1.21x
+08_complex_refinements                 18         16         -2       .88x
+09_factorial                            6          9          3      1.50x
+10_nested_sum                           7         11          4      1.57x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
+01_minimal                              2          2          2           42
+02_arithmetic                           2          2          5          140
+03_function_calls                       1          1          2           70
+04_conditionals                         1          1          1          110
+05_fibonacci                            1          1          2           21
+06_sum                                  1          1          2          186
+07_refinements                          1          1          2          181
+08_complex_refinements                  2          2          3          100
+09_factorial                            2          2          2            0
+10_nested_sum                           2          2          2          233
+
+=== BINARY SIZE ANALYSIS ===
+
+Benchmark                         Size (bytes)
+─────────    ────────────
+01_minimal                                 166
+02_arithmetic                              318
+03_function_calls                          475
+04_conditionals                            972
+05_fibonacci                               605
+06_sum                                     343
+07_refinements                             409
+08_complex_refinements                     463
+09_factorial                               353
+10_nested_sum                              433

@@ -1,17 +1,26 @@
-// NOTE: Loops are currently broken - this is a placeholder
-// Testing nested function calls instead
-fn double(x: int) -> int {
-    x + x
-}
+// Iterative Fibonacci calculation
+fn fibonacci(n: int) -> int {
+    let mut a: int = 0;
+    let mut b: int = 1;
+    let mut result: int = 0;
 
-fn quad(x: int) -> int {
-    double(double(x))
-}
-
-fn octo(x: int) -> int {
-    double(quad(x))
+    if n == 0 {
+        result = 0;
+    } else {
+        if n == 1 {
+            result = 1;
+        } else {
+            for i in 2..n {
+                let temp: int = a + b;
+                a = b;
+                b = temp;
+            }
+            result = a + b;
+        }
+    }
+    result
 }
 
 fn main() -> int {
-    octo(5)
+    fibonacci(8)
 }

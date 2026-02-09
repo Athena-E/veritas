@@ -1,13 +1,52 @@
-// NOTE: Conditionals are currently broken - this is a placeholder
-// Testing basic arithmetic with function calls instead
-fn triple(x: int) -> int {
-    x + x + x
+// Conditional expressions benchmark
+fn max(a: int, b: int) -> int {
+    let mut result: int = 0;
+    if a > b {
+        result = a;
+    } else {
+        result = b;
+    }
+    result
 }
 
-fn quadruple(x: int) -> int {
-    triple(x) + x
+fn min(a: int, b: int) -> int {
+    let mut result: int = 0;
+    if a < b {
+        result = a;
+    } else {
+        result = b;
+    }
+    result
+}
+
+fn abs(x: int) -> int {
+    let mut result: int = 0;
+    if x >= 0 {
+        result = x;
+    } else {
+        result = -x;
+    }
+    result
+}
+
+fn clamp(val: int, lo: int, hi: int) -> int {
+    let mut result: int = val;
+    if val < lo {
+        result = lo;
+    } else {
+        if val > hi {
+            result = hi;
+        } else {
+            let dummy: int = 0;
+        }
+    }
+    result
 }
 
 fn main() -> int {
-    quadruple(20)
+    let a: int = max(10, 25);
+    let b: int = min(a, 20);
+    let c: int = abs(-15);
+    let d: int = clamp(50, 0, 100);
+    a + b + c + d
 }

@@ -1,0 +1,37 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  3 Feb 01:09:45 GMT 2026
+Iterations: 5
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              5          3          7
+02_arithmetic                           6          6          7
+03_function_calls                       6          6          8
+04_conditionals                         7          6          9
+05_fibonacci                            6          6          8
+06_loops                                7          6          9
+07_refinements                         15         13         16
+08_complex_refinements                 13         12         16
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              5          5          0      1.00x
+02_arithmetic                           8          5         -3       .62x
+03_function_calls                       5          7          2      1.40x
+04_conditionals                         7          6         -1       .85x
+05_fibonacci                            6          6          0      1.00x
+06_loops                                6         15          9      2.50x
+07_refinements                         12         14          2      1.16x
+08_complex_refinements                 15         17          2      1.13x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
+01_minimal                              2          2          3           42
+02_arithmetic                           2          2          3          140
+03_function_calls                       2          2          2           70
+04_conditionals                         2          2          2          110
+05_fibonacci                            2          2          3           19

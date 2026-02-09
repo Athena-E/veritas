@@ -1,0 +1,53 @@
+=== COMPILATION SPEED (no verification) ===
+Timestamp: Tue  3 Feb 11:24:47 GMT 2026
+Iterations: 5
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)
+─────────    ────── ────── ──────
+01_minimal                              5          5          6
+02_arithmetic                           5          5          6
+03_function_calls                       5          5          6
+04_conditionals                         6          6          6
+05_fibonacci                            6          6          6
+06_loops                                7          6          8
+07_refinements                         23         17         39
+08_complex_refinements                 18         17         20
+
+=== VERIFICATION OVERHEAD ===
+
+Benchmark                        NoVerify     Verify   Overhead      Ratio
+─────────    ──────── ────── ──────── ─────
+01_minimal                              5          5          0      1.00x
+02_arithmetic                           5          5          0      1.00x
+03_function_calls                       7          7          0      1.00x
+04_conditionals                         7          8          1      1.14x
+05_fibonacci                            6          7          1      1.16x
+06_loops                                6         17         11      2.83x
+07_refinements                         19         18         -1       .94x
+08_complex_refinements                 17         18          1      1.05x
+
+=== GENERATED CODE PERFORMANCE ===
+
+Benchmark                         Avg(ms)    Min(ms)    Max(ms)    Exit Code
+─────────    ────── ────── ────── ─────────
+01_minimal                              2          2          2           42
+02_arithmetic                           2          2          2          140
+03_function_calls                       2          2          2           70
+04_conditionals                         1          1          2          110
+05_fibonacci                            2          2          2           55
+06_loops                                2          2          2           63
+07_refinements                          2          2          2          181
+08_complex_refinements                  2          2          3          100
+
+=== BINARY SIZE ANALYSIS ===
+
+Benchmark                         Size (bytes)
+─────────    ────────────
+01_minimal                                 166
+02_arithmetic                              318
+03_function_calls                          475
+04_conditionals                            972
+05_fibonacci                               605
+06_loops                                   849
+07_refinements                             409
+08_complex_refinements                     463

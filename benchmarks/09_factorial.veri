@@ -1,0 +1,12 @@
+fn factorial(n: int) -> int {
+    let mut result: int = 1;
+    for i in 1..n {
+        result = result * (i + 1);
+    }
+    result
+}
+
+fn main() -> int {
+    let b: int = factorial(10);
+    b
+}

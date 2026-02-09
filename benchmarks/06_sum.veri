@@ -1,0 +1,13 @@
+// Loop operations benchmark
+fn sum_range(start: int, end: int) -> int {
+    let mut sum: int = 0;
+    for i in start..end {
+        sum = sum + i;
+    }
+    sum
+}
+
+fn main() -> int {
+    let a: int = sum_range(1, 101);
+    a
+}
