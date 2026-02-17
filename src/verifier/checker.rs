@@ -100,17 +100,16 @@ pub fn verify_instruction<'src>(
             target, return_ty, ..
         } => {
             // Check callee's precondition if available
-            if let Some(callee) = program.functions.iter().find(|f| &f.name == target) {
-                if let Some(precond) = &callee.precondition {
-                    if !is_constraint_provable(precond, &state.constraints) {
-                        return Err(VerifyError::PreconditionFailed {
-                            block: block_label.to_string(),
-                            callee: target.clone(),
-                            constraint: precond.clone(),
-                            context: state.constraints.clone(),
-                        });
-                    }
-                }
+            if let Some(callee) = program.functions.iter().find(|f| &f.name == target)
+                && let Some(precond) = &callee.precondition
+                && !is_constraint_provable(precond, &state.constraints)
+            {
+                return Err(VerifyError::PreconditionFailed {
+                    block: block_label.to_string(),
+                    callee: target.clone(),
+                    constraint: precond.clone(),
+                    context: state.constraints.clone(),
+                });
             }
             use crate::backend::dtal::regs::PhysicalReg;
             state
@@ -314,10 +313,7 @@ fn verify_load<'src>(
         // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
         let bounds_constraint = Constraint::And(
-            Box::new(Constraint::Ge(
-                offset_expr.clone(),
-                IndexExpr::Const(0),
-            )),
+            Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
             Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
         );
 
@@ -367,10 +363,7 @@ fn verify_store<'src>(
         // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
         let bounds_constraint = Constraint::And(
-            Box::new(Constraint::Ge(
-                offset_expr.clone(),
-                IndexExpr::Const(0),
-            )),
+            Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
             Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
         );
 
@@ -549,16 +542,13 @@ pub fn types_compatible<'src>(actual: &IType<'src>, expected: &IType<'src>) -> b
             },
         ) => types_compatible(e1.as_ref(), e2.as_ref()) && s1 == s2,
         (IType::Ref(a), IType::Ref(b)) => {
-            types_compatible(a.as_ref(), b.as_ref())
-                && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
         }
         (IType::RefMut(a), IType::RefMut(b)) => {
-            types_compatible(a.as_ref(), b.as_ref())
-                && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
         }
         (IType::Master(a), IType::Master(b)) => {
-            types_compatible(a.as_ref(), b.as_ref())
-                && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
         }
         _ => false,
     }
@@ -634,9 +624,7 @@ pub fn negate_cmp_op(op: CmpOp) -> CmpOp {
 pub fn constraint_from_cmp_op(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Option<Constraint> {
     let (lhs_expr, rhs_expr) = match last_cmp {
         Some(CmpOperands::RegReg(lhs, rhs)) => (reg_to_index_expr(lhs), reg_to_index_expr(rhs)),
-        Some(CmpOperands::RegImm(lhs, imm)) => {
-            (reg_to_index_expr(lhs), IndexExpr::Const(*imm))
-        }
+        Some(CmpOperands::RegImm(lhs, imm)) => (reg_to_index_expr(lhs), IndexExpr::Const(*imm)),
         None => return None,
     };
 
@@ -651,9 +639,6 @@ pub fn constraint_from_cmp_op(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Opti
 }
 
 /// Construct the negated constraint from a CmpOp and comparison operands
-pub fn negate_cmp_op_constraint(
-    op: CmpOp,
-    last_cmp: &Option<CmpOperands>,
-) -> Option<Constraint> {
+pub fn negate_cmp_op_constraint(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Option<Constraint> {
     constraint_from_cmp_op(negate_cmp_op(op), last_cmp)
 }

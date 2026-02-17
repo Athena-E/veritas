@@ -120,14 +120,14 @@ fn verify_terminator<'src>(
             }
 
             // Check postcondition if present
-            if let Some(postcond) = &func.postcondition {
-                if !checker::is_constraint_provable(postcond, &state.constraints) {
-                    return Err(VerifyError::PostconditionFailed {
-                        function: func.name.clone(),
-                        constraint: postcond.clone(),
-                        context: state.constraints.clone(),
-                    });
-                }
+            if let Some(postcond) = &func.postcondition
+                && !checker::is_constraint_provable(postcond, &state.constraints)
+            {
+                return Err(VerifyError::PostconditionFailed {
+                    function: func.name.clone(),
+                    constraint: postcond.clone(),
+                    context: state.constraints.clone(),
+                });
             }
         }
     }
@@ -436,10 +436,7 @@ mod tests {
             )],
         )]);
         let result = verify_dtal(&program);
-        assert!(
-            result.is_err(),
-            "Int is not a subtype of SingletonInt"
-        );
+        assert!(result.is_err(), "Int is not a subtype of SingletonInt");
         assert!(matches!(
             result.unwrap_err(),
             VerifyError::TypeMismatch { .. }
@@ -488,17 +485,14 @@ mod tests {
                     },
                     DtalInstr::MovReg {
                         dst: v(3),
-                        src: v(2), // v2 is Bool
+                        src: v(2),      // v2 is Bool
                         ty: IType::Int, // annotated as Int
                     },
                 ],
             )],
         )]);
         let result = verify_dtal(&program);
-        assert!(
-            result.is_err(),
-            "Bool is not a subtype of Int"
-        );
+        assert!(result.is_err(), "Bool is not a subtype of Int");
     }
 
     #[test]
@@ -770,11 +764,7 @@ mod tests {
         };
         let program = make_program(vec![make_func(
             "bad",
-            vec![
-                (v(0), arr_ty),
-                (v(1), IType::Int),
-                (v(2), IType::Int),
-            ],
+            vec![(v(0), arr_ty), (v(1), IType::Int), (v(2), IType::Int)],
             IType::Int,
             vec![make_block(
                 ".entry",
@@ -941,10 +931,7 @@ mod tests {
                 make_block(
                     ".entry",
                     vec![
-                        DtalInstr::CmpImm {
-                            lhs: v(0),
-                            imm: 10,
-                        },
+                        DtalInstr::CmpImm { lhs: v(0), imm: 10 },
                         DtalInstr::Branch {
                             cond: CmpOp::Lt,
                             target: ".taken".to_string(),
@@ -1008,10 +995,7 @@ mod tests {
                             imm: 42,
                             ty: IType::Int,
                         },
-                        DtalInstr::CmpImm {
-                            lhs: v(0),
-                            imm: 0,
-                        },
+                        DtalInstr::CmpImm { lhs: v(0), imm: 0 },
                         DtalInstr::Branch {
                             cond: CmpOp::Eq,
                             target: ".bb2".to_string(),

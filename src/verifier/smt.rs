@@ -16,15 +16,9 @@ impl ConstraintOracle {
         match expr {
             IndexExpr::Const(n) => Int::from_i64(*n),
             IndexExpr::Var(s) => Int::new_const(s.to_string()),
-            IndexExpr::Add(l, r) => {
-                Self::translate_index_expr(l) + Self::translate_index_expr(r)
-            }
-            IndexExpr::Sub(l, r) => {
-                Self::translate_index_expr(l) - Self::translate_index_expr(r)
-            }
-            IndexExpr::Mul(l, r) => {
-                Self::translate_index_expr(l) * Self::translate_index_expr(r)
-            }
+            IndexExpr::Add(l, r) => Self::translate_index_expr(l) + Self::translate_index_expr(r),
+            IndexExpr::Sub(l, r) => Self::translate_index_expr(l) - Self::translate_index_expr(r),
+            IndexExpr::Mul(l, r) => Self::translate_index_expr(l) * Self::translate_index_expr(r),
         }
     }
 

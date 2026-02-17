@@ -172,10 +172,12 @@ fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> 
 
     // If block has a conditional branch but no unconditional jump or return,
     // the next block in layout order is a fall-through successor
-    if has_branch && !has_jmp && !has_ret {
-        if let Some(next_block) = func.blocks.get(block_index + 1) {
-            successors.push(next_block.label.clone());
-        }
+    if has_branch
+        && !has_jmp
+        && !has_ret
+        && let Some(next_block) = func.blocks.get(block_index + 1)
+    {
+        successors.push(next_block.label.clone());
     }
 
     successors
@@ -199,28 +201,27 @@ fn compute_edge_states<'src>(
         match instr {
             DtalInstr::Branch { cond, target } => {
                 // Taken edge: add positive constraint
-                if let Some(pos_constraint) =
-                    constraint_from_cmp_op(*cond, &exit_state.last_cmp)
-                {
+                if let Some(pos_constraint) = constraint_from_cmp_op(*cond, &exit_state.last_cmp) {
                     let mut taken_state = exit_state.clone();
                     taken_state.constraints.push(pos_constraint);
                     edge_states.insert((block.label.clone(), target.clone()), taken_state);
                 }
 
                 // Fall-through edge: add negated constraint
-                if !has_jmp && !has_ret {
-                    if let Some(next_block) = func.blocks.get(block_index + 1) {
-                        let neg_cond = negate_cmp_op(*cond);
-                        if let Some(neg_constraint) =
-                            constraint_from_cmp_op(neg_cond, &exit_state.last_cmp)
-                        {
-                            let mut fallthrough_state = exit_state.clone();
-                            fallthrough_state.constraints.push(neg_constraint);
-                            edge_states.insert(
-                                (block.label.clone(), next_block.label.clone()),
-                                fallthrough_state,
-                            );
-                        }
+                if !has_jmp
+                    && !has_ret
+                    && let Some(next_block) = func.blocks.get(block_index + 1)
+                {
+                    let neg_cond = negate_cmp_op(*cond);
+                    if let Some(neg_constraint) =
+                        constraint_from_cmp_op(neg_cond, &exit_state.last_cmp)
+                    {
+                        let mut fallthrough_state = exit_state.clone();
+                        fallthrough_state.constraints.push(neg_constraint);
+                        edge_states.insert(
+                            (block.label.clone(), next_block.label.clone()),
+                            fallthrough_state,
+                        );
                     }
                 }
             }
