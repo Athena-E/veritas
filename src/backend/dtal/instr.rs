@@ -8,6 +8,15 @@ use crate::common::types::IType;
 use std::collections::HashMap;
 use std::fmt;
 
+/// Operands of the most recent comparison instruction
+#[derive(Clone, Debug)]
+pub enum CmpOperands {
+    /// cmp reg, reg
+    RegReg(Reg, Reg),
+    /// cmp reg, imm
+    RegImm(Reg, i64),
+}
+
 /// Type state at a program point
 #[derive(Clone, Debug)]
 pub struct TypeState<'src> {
@@ -15,6 +24,8 @@ pub struct TypeState<'src> {
     pub register_types: HashMap<Reg, IType<'src>>,
     /// Active constraints
     pub constraints: Vec<Constraint>,
+    /// Operands of the most recent comparison (for deriving branch constraints)
+    pub last_cmp: Option<CmpOperands>,
 }
 
 impl<'src> TypeState<'src> {
@@ -22,6 +33,7 @@ impl<'src> TypeState<'src> {
         Self {
             register_types: HashMap::new(),
             constraints: Vec::new(),
+            last_cmp: None,
         }
     }
 }

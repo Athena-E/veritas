@@ -16,5 +16,5 @@ pub mod regs;
 
 // Re-export commonly used types
 pub use constraints::{Constraint, IndexExpr};
-pub use instr::{BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
+pub use instr::{BinaryOp, CmpOp, CmpOperands, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 pub use regs::{PhysicalReg, Reg, VirtualReg, VirtualRegAllocator};
