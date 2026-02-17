@@ -4,9 +4,10 @@
 
 #![allow(clippy::result_large_err)]
 
-use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
+use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::common::types::IType;
+use crate::verifier::checker::{constraint_from_cmp_op, negate_cmp_op};
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
@@ -17,6 +18,9 @@ pub struct DataflowResult<'src> {
     pub entry_states: HashMap<String, TypeState<'src>>,
     /// Type state at exit of each block
     pub exit_states: HashMap<String, TypeState<'src>>,
+    /// Per-edge exit states (source_label, target_label) -> state
+    /// Used for branch-refined constraints on specific edges
+    pub edge_states: HashMap<(String, String), TypeState<'src>>,
     /// Predecessor blocks for each block
     pub predecessors: HashMap<String, Vec<String>>,
 }
@@ -31,6 +35,7 @@ pub fn analyze_function<'src>(
     // Initialize entry states
     let mut entry_states: HashMap<String, TypeState<'src>> = HashMap::new();
     let mut exit_states: HashMap<String, TypeState<'src>> = HashMap::new();
+    let mut edge_states: HashMap<(String, String), TypeState<'src>> = HashMap::new();
 
     // Set entry state for first block (function parameters)
     if let Some(entry_block) = func.blocks.first() {
@@ -61,7 +66,7 @@ pub fn analyze_function<'src>(
         changed = false;
         iterations += 1;
 
-        for block in &func.blocks {
+        for (block_idx, block) in func.blocks.iter().enumerate() {
             // Compute entry state - always recompute from predecessors
             // (except for entry block which keeps function parameters)
             let entry_state = if Some(&block.label) == entry_block_label.as_ref() {
@@ -77,13 +82,16 @@ pub fn analyze_function<'src>(
                     // No predecessors - use block's declared entry state
                     block.entry_state.clone()
                 } else {
-                    // Join from predecessors
-                    join_states(&preds, &exit_states)?
+                    // Join from predecessors using per-edge states when available
+                    join_states(&preds, &block.label, &exit_states, &edge_states)?
                 }
             };
 
             // Compute exit state by processing instructions
             let exit_state = compute_exit_state(block, &entry_state)?;
+
+            // Compute per-edge exit states for branches
+            compute_edge_states(func, block_idx, &exit_state, &mut edge_states);
 
             // Check if exit state changed
             let old_exit = exit_states.get(&block.label);
@@ -107,6 +115,7 @@ pub fn analyze_function<'src>(
     Ok(DataflowResult {
         entry_states,
         exit_states,
+        edge_states,
         predecessors,
     })
 }
@@ -121,8 +130,8 @@ fn compute_predecessors<'src>(func: &DtalFunction<'src>) -> HashMap<String, Vec<
     }
 
     // Find successors and build predecessor lists
-    for block in &func.blocks {
-        let successors = get_block_successors(block);
+    for (i, block) in func.blocks.iter().enumerate() {
+        let successors = get_block_successors(func, i);
         for succ in successors {
             if let Some(preds) = predecessors.get_mut(&succ) {
                 preds.push(block.label.clone());
@@ -134,35 +143,123 @@ fn compute_predecessors<'src>(func: &DtalFunction<'src>) -> HashMap<String, Vec<
 }
 
 /// Get successor block labels from a block
-fn get_block_successors(block: &DtalBlock) -> Vec<String> {
+///
+/// Detects implicit fall-through: if a block has a `Branch` but no `Jmp` or `Ret`,
+/// the next block in layout order is a fall-through successor.
+fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> {
+    let block = &func.blocks[block_index];
     let mut successors = Vec::new();
+    let mut has_jmp = false;
+    let mut has_ret = false;
+    let mut has_branch = false;
 
     for instr in &block.instructions {
         match instr {
             DtalInstr::Jmp { target } => {
                 successors.push(target.clone());
+                has_jmp = true;
             }
             DtalInstr::Branch { target, .. } => {
                 successors.push(target.clone());
+                has_branch = true;
+            }
+            DtalInstr::Ret => {
+                has_ret = true;
             }
             _ => {}
+        }
+    }
+
+    // If block has a conditional branch but no unconditional jump or return,
+    // the next block in layout order is a fall-through successor
+    if has_branch && !has_jmp && !has_ret {
+        if let Some(next_block) = func.blocks.get(block_index + 1) {
+            successors.push(next_block.label.clone());
         }
     }
 
     successors
 }
 
+/// Compute per-edge exit states for branches.
+///
+/// When a block ends with a conditional Branch, the taken edge gets the positive
+/// constraint and the fall-through edge gets the negated constraint.
+fn compute_edge_states<'src>(
+    func: &DtalFunction<'src>,
+    block_index: usize,
+    exit_state: &TypeState<'src>,
+    edge_states: &mut HashMap<(String, String), TypeState<'src>>,
+) {
+    let block = &func.blocks[block_index];
+    let mut has_jmp = false;
+    let mut has_ret = false;
+
+    for instr in &block.instructions {
+        match instr {
+            DtalInstr::Branch { cond, target } => {
+                // Taken edge: add positive constraint
+                if let Some(pos_constraint) =
+                    constraint_from_cmp_op(*cond, &exit_state.last_cmp)
+                {
+                    let mut taken_state = exit_state.clone();
+                    taken_state.constraints.push(pos_constraint);
+                    edge_states.insert((block.label.clone(), target.clone()), taken_state);
+                }
+
+                // Fall-through edge: add negated constraint
+                if !has_jmp && !has_ret {
+                    if let Some(next_block) = func.blocks.get(block_index + 1) {
+                        let neg_cond = negate_cmp_op(*cond);
+                        if let Some(neg_constraint) =
+                            constraint_from_cmp_op(neg_cond, &exit_state.last_cmp)
+                        {
+                            let mut fallthrough_state = exit_state.clone();
+                            fallthrough_state.constraints.push(neg_constraint);
+                            edge_states.insert(
+                                (block.label.clone(), next_block.label.clone()),
+                                fallthrough_state,
+                            );
+                        }
+                    }
+                }
+            }
+            DtalInstr::Jmp { .. } => {
+                has_jmp = true;
+            }
+            DtalInstr::Ret => {
+                has_ret = true;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Join type states from multiple predecessors
+///
+/// Uses per-edge states when available (for branch-refined constraints),
+/// otherwise falls back to the block's exit state.
 fn join_states<'src>(
     pred_labels: &[String],
+    target_label: &str,
     exit_states: &HashMap<String, TypeState<'src>>,
+    edge_states: &HashMap<(String, String), TypeState<'src>>,
 ) -> Result<TypeState<'src>, VerifyError<'src>> {
     let mut result = TypeState::new();
+
+    // Helper: get the state for a predecessor edge
+    let get_pred_state = |pred_label: &String| -> Option<&TypeState<'src>> {
+        // Prefer per-edge state if available
+        let edge_key = (pred_label.clone(), target_label.to_string());
+        edge_states
+            .get(&edge_key)
+            .or_else(|| exit_states.get(pred_label))
+    };
 
     // Collect all registers that appear in any predecessor
     let mut all_regs: HashSet<Reg> = HashSet::new();
     for label in pred_labels {
-        if let Some(state) = exit_states.get(label) {
+        if let Some(state) = get_pred_state(label) {
             for reg in state.register_types.keys() {
                 all_regs.insert(*reg);
             }
@@ -174,7 +271,7 @@ fn join_states<'src>(
         let mut types: Vec<IType<'src>> = Vec::new();
 
         for label in pred_labels {
-            if let Some(state) = exit_states.get(label)
+            if let Some(state) = get_pred_state(label)
                 && let Some(ty) = state.register_types.get(&reg)
             {
                 types.push(ty.clone());
@@ -191,13 +288,13 @@ fn join_states<'src>(
     // Join constraints - take intersection (constraints true on all paths)
     // For simplicity, start with first predecessor's constraints
     if let Some(first_label) = pred_labels.first()
-        && let Some(first_state) = exit_states.get(first_label)
+        && let Some(first_state) = get_pred_state(first_label)
     {
+        let first_constraints = first_state.constraints.clone();
         // Only keep constraints that appear in all predecessors
-        for constraint in &first_state.constraints {
+        for constraint in &first_constraints {
             let in_all = pred_labels.iter().skip(1).all(|label| {
-                exit_states
-                    .get(label)
+                get_pred_state(label)
                     .map(|s| s.constraints.contains(constraint))
                     .unwrap_or(false)
             });
@@ -323,10 +420,14 @@ fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeS
             state.register_types.insert(*dst, ty.clone());
         }
         DtalInstr::TypeAnnotation { reg, ty } => {
+            // In dataflow (non-verifying), check compatibility but still apply.
+            // If existing type is compatible, apply annotation. If not, still
+            // apply to maintain forward progress (the verifier pass will reject it).
             state.register_types.insert(*reg, ty.clone());
         }
-        DtalInstr::ConstraintAssume { constraint } => {
-            state.constraints.push(constraint.clone());
+        DtalInstr::ConstraintAssume { .. } => {
+            // Ignore compiler-emitted constraint assumptions.
+            // The verifier derives constraints from Cmp+Branch sequences instead.
         }
         DtalInstr::Pop { dst, ty } => {
             state.register_types.insert(*dst, ty.clone());
@@ -341,10 +442,14 @@ fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeS
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
         }
+        DtalInstr::Cmp { lhs, rhs } => {
+            state.last_cmp = Some(CmpOperands::RegReg(*lhs, *rhs));
+        }
+        DtalInstr::CmpImm { lhs, imm } => {
+            state.last_cmp = Some(CmpOperands::RegImm(*lhs, *imm));
+        }
         // Instructions that don't define registers
         DtalInstr::Store { .. }
-        | DtalInstr::Cmp { .. }
-        | DtalInstr::CmpImm { .. }
         | DtalInstr::Push { .. }
         | DtalInstr::ConstraintAssert { .. }
         | DtalInstr::Jmp { .. }

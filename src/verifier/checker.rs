@@ -5,7 +5,7 @@
 #![allow(clippy::result_large_err)]
 
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-use crate::backend::dtal::instr::{BinaryOp, DtalInstr, TypeState};
+use crate::backend::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::common::types::{IType, IValue};
 use crate::verifier::error::VerifyError;
@@ -15,6 +15,7 @@ pub fn verify_instruction<'src>(
     instr: &DtalInstr<'src>,
     state: &mut TypeState<'src>,
     block_label: &str,
+    program: &crate::backend::dtal::instr::DtalProgram<'src>,
 ) -> Result<(), VerifyError<'src>> {
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
@@ -56,8 +57,8 @@ pub fn verify_instruction<'src>(
             verify_cmp(*lhs, *rhs, state, block_label)?;
         }
 
-        DtalInstr::CmpImm { lhs, imm: _ } => {
-            verify_cmp_imm(*lhs, state, block_label)?;
+        DtalInstr::CmpImm { lhs, imm } => {
+            verify_cmp_imm(*lhs, *imm, state, block_label)?;
         }
 
         DtalInstr::SetCC { dst, cond: _ } => {
@@ -70,11 +71,12 @@ pub fn verify_instruction<'src>(
         }
 
         DtalInstr::TypeAnnotation { reg, ty } => {
-            state.register_types.insert(*reg, ty.clone());
+            verify_type_annotation(*reg, ty, state, block_label)?;
         }
 
-        DtalInstr::ConstraintAssume { constraint } => {
-            state.constraints.push(constraint.clone());
+        DtalInstr::ConstraintAssume { .. } => {
+            // Ignore compiler-emitted constraint assumptions.
+            // The verifier derives constraints from Cmp+Branch sequences instead.
         }
 
         DtalInstr::ConstraintAssert { constraint, msg: _ } => {
@@ -94,15 +96,43 @@ pub fn verify_instruction<'src>(
         }
 
         // Call defines r0 with the return type
-        DtalInstr::Call { return_ty, .. } => {
+        DtalInstr::Call {
+            target, return_ty, ..
+        } => {
+            // Check callee's precondition if available
+            if let Some(callee) = program.functions.iter().find(|f| &f.name == target) {
+                if let Some(precond) = &callee.precondition {
+                    if !is_constraint_provable(precond, &state.constraints) {
+                        return Err(VerifyError::PreconditionFailed {
+                            block: block_label.to_string(),
+                            callee: target.clone(),
+                            constraint: precond.clone(),
+                            context: state.constraints.clone(),
+                        });
+                    }
+                }
+            }
             use crate::backend::dtal::regs::PhysicalReg;
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
         }
 
+        DtalInstr::Branch { cond, .. } => {
+            // On the fall-through path, add the negated branch constraint.
+            // The taken path gets the positive constraint (handled by dataflow).
+            if let Some(constraint) = constraint_from_cmp_op(*cond, &state.last_cmp) {
+                let negated = negate_cmp_op_constraint(*cond, &state.last_cmp);
+                if let Some(neg) = negated {
+                    state.constraints.push(neg);
+                }
+                // Don't push the positive constraint here -- it goes to the taken path
+                let _ = constraint;
+            }
+        }
+
         // Control flow instructions are handled separately
-        DtalInstr::Jmp { .. } | DtalInstr::Branch { .. } | DtalInstr::Ret => {}
+        DtalInstr::Jmp { .. } | DtalInstr::Ret => {}
     }
 
     Ok(())
@@ -127,8 +157,8 @@ fn verify_mov_imm<'src>(
         });
     }
 
-    // For refined types, we would check the predicate here
-    // For now, trust the annotation (frontend already verified)
+    // TODO: For refined types like {x: int | P(x)}, check P(imm) is provable.
+    // Requires translating IProposition (AST Expr) into the Constraint domain.
 
     state.register_types.insert(dst, ty.clone());
     Ok(())
@@ -146,7 +176,6 @@ fn verify_mov_reg<'src>(
     let src_ty = get_register_type(src, state, block_label)?;
 
     // Check source type is compatible with declared type
-    // For now, we trust the annotation matches (subtyping check would go here)
     if !types_compatible(&src_ty, ty) {
         return Err(VerifyError::TypeMismatch {
             block: block_label.to_string(),
@@ -273,14 +302,45 @@ fn verify_load<'src>(
     state: &mut TypeState<'src>,
     block_label: &str,
 ) -> Result<(), VerifyError<'src>> {
-    // Check base and offset are defined
-    let _base_ty = get_register_type(base, state, block_label)?;
+    let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
-    // In a full implementation, we would:
-    // 1. Check base has array/pointer type
-    // 2. Check offset type proves bounds (0 <= offset < size)
-    // For now, trust the annotation
+    // If base has an array type, perform bounds checking
+    if let IType::Array {
+        element_type,
+        size: IValue::Int(array_size),
+    } = &base_ty
+    {
+        // Construct bounds constraint: 0 <= offset < size
+        let offset_expr = reg_to_index_expr(&offset);
+        let bounds_constraint = Constraint::And(
+            Box::new(Constraint::Ge(
+                offset_expr.clone(),
+                IndexExpr::Const(0),
+            )),
+            Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
+        );
+
+        if !is_constraint_provable(&bounds_constraint, &state.constraints) {
+            return Err(VerifyError::BoundsCheckFailed {
+                block: block_label.to_string(),
+                instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
+                constraint: bounds_constraint,
+                context: state.constraints.clone(),
+            });
+        }
+
+        // Derive element type from base, don't trust the annotation
+        let derived_ty = element_type.as_ref().clone();
+        if !types_compatible(&derived_ty, ty) {
+            return Err(VerifyError::TypeMismatch {
+                block: block_label.to_string(),
+                instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
+                expected: ty.clone(),
+                actual: derived_ty,
+            });
+        }
+    }
 
     state.register_types.insert(dst, ty.clone());
     Ok(())
@@ -294,12 +354,46 @@ fn verify_store<'src>(
     state: &mut TypeState<'src>,
     block_label: &str,
 ) -> Result<(), VerifyError<'src>> {
-    // Check all registers are defined
-    check_register_defined(base, state, block_label)?;
-    check_register_defined(offset, state, block_label)?;
-    check_register_defined(src, state, block_label)?;
+    let base_ty = get_register_type(base, state, block_label)?;
+    let _offset_ty = get_register_type(offset, state, block_label)?;
+    let src_ty = get_register_type(src, state, block_label)?;
 
-    // In a full implementation, check bounds proof
+    // If base has an array type, perform bounds checking
+    if let IType::Array {
+        element_type,
+        size: IValue::Int(array_size),
+    } = &base_ty
+    {
+        // Construct bounds constraint: 0 <= offset < size
+        let offset_expr = reg_to_index_expr(&offset);
+        let bounds_constraint = Constraint::And(
+            Box::new(Constraint::Ge(
+                offset_expr.clone(),
+                IndexExpr::Const(0),
+            )),
+            Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
+        );
+
+        if !is_constraint_provable(&bounds_constraint, &state.constraints) {
+            return Err(VerifyError::BoundsCheckFailed {
+                block: block_label.to_string(),
+                instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
+                constraint: bounds_constraint,
+                context: state.constraints.clone(),
+            });
+        }
+
+        // Check stored value type is compatible with array element type
+        if !types_compatible(&src_ty, element_type.as_ref()) {
+            return Err(VerifyError::TypeMismatch {
+                block: block_label.to_string(),
+                instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
+                expected: element_type.as_ref().clone(),
+                actual: src_ty,
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -312,16 +406,19 @@ fn verify_cmp<'src>(
 ) -> Result<(), VerifyError<'src>> {
     check_register_defined(lhs, state, block_label)?;
     check_register_defined(rhs, state, block_label)?;
+    state.last_cmp = Some(CmpOperands::RegReg(lhs, rhs));
     Ok(())
 }
 
 /// Verify cmp immediate instruction
 fn verify_cmp_imm<'src>(
     lhs: Reg,
+    imm: i64,
     state: &mut TypeState<'src>,
     block_label: &str,
 ) -> Result<(), VerifyError<'src>> {
     check_register_defined(lhs, state, block_label)?;
+    state.last_cmp = Some(CmpOperands::RegImm(lhs, imm));
     Ok(())
 }
 
@@ -338,14 +435,42 @@ fn verify_not<'src>(
     Ok(())
 }
 
+/// Verify a type annotation
+///
+/// If the register already has a type, check that the existing type is compatible
+/// with the annotation (the annotation must be a supertype of the existing type,
+/// or equal to it). If the register has no existing type (e.g., phi node at block
+/// entry), accept the annotation as a join-point invariant.
+fn verify_type_annotation<'src>(
+    reg: Reg,
+    ty: &IType<'src>,
+    state: &mut TypeState<'src>,
+    block_label: &str,
+) -> Result<(), VerifyError<'src>> {
+    if let Some(existing_ty) = state.register_types.get(&reg) {
+        // Register already has a type -- verify compatibility
+        // The existing type must be a subtype of the annotation
+        if !types_compatible(existing_ty, ty) {
+            return Err(VerifyError::TypeMismatch {
+                block: block_label.to_string(),
+                instr_desc: format!("type_annotation {:?} : {}", reg, ty),
+                expected: ty.clone(),
+                actual: existing_ty.clone(),
+            });
+        }
+    }
+    // Set the type (either first definition via phi or verified annotation)
+    state.register_types.insert(reg, ty.clone());
+    Ok(())
+}
+
 /// Verify a constraint assertion
 fn verify_constraint_assert<'src>(
     constraint: &Constraint,
     state: &TypeState<'src>,
     block_label: &str,
 ) -> Result<(), VerifyError<'src>> {
-    // Check if constraint is provable from current context
-    // For now, use simple syntactic check; full impl would use Z3
+    // Check if constraint is provable from current context (syntactic fast-path + Z3)
     if !is_constraint_provable(constraint, &state.constraints) {
         return Err(VerifyError::UnprovableConstraint {
             constraint: constraint.clone(),
@@ -395,27 +520,59 @@ fn is_numeric_type(ty: &IType) -> bool {
     )
 }
 
-/// Check if two types are compatible (simplified subtyping check)
-fn types_compatible<'src>(actual: &IType<'src>, expected: &IType<'src>) -> bool {
-    // Simple structural equality for now
-    // A full implementation would check subtyping
+/// Check if actual type is a subtype of (or equal to) expected type.
+///
+/// Subtyping rules:
+/// - SingletonInt(n) <: Int
+/// - RefinedInt { .. } <: Int
+/// - Array { e1, s1 } <: Array { e2, s2 } iff e1 <: e2 && s1 == s2
+/// - Ref(a) <: Ref(b) iff a == b (invariant)
+/// - RefMut(a) <: RefMut(b) iff a == b (invariant)
+pub fn types_compatible<'src>(actual: &IType<'src>, expected: &IType<'src>) -> bool {
     match (actual, expected) {
         (IType::Int, IType::Int) => true,
         (IType::Bool, IType::Bool) => true,
         (IType::Unit, IType::Unit) => true,
         (IType::SingletonInt(a), IType::SingletonInt(b)) => a == b,
-        (IType::SingletonInt(_), IType::Int) => true, // Singleton is subtype of int
-        (IType::RefinedInt { .. }, IType::Int) => true, // Refined is subtype of int
-        // For arrays, refs, etc. - simplified check
-        _ => true, // Trust for now
+        (IType::SingletonInt(_), IType::Int) => true,
+        (IType::RefinedInt { .. }, IType::Int) => true,
+        (IType::Int, IType::SingletonInt(_)) => false,
+        (IType::Int, IType::RefinedInt { .. }) => false,
+        (
+            IType::Array {
+                element_type: e1,
+                size: s1,
+            },
+            IType::Array {
+                element_type: e2,
+                size: s2,
+            },
+        ) => types_compatible(e1.as_ref(), e2.as_ref()) && s1 == s2,
+        (IType::Ref(a), IType::Ref(b)) => {
+            types_compatible(a.as_ref(), b.as_ref())
+                && types_compatible(b.as_ref(), a.as_ref())
+        }
+        (IType::RefMut(a), IType::RefMut(b)) => {
+            types_compatible(a.as_ref(), b.as_ref())
+                && types_compatible(b.as_ref(), a.as_ref())
+        }
+        (IType::Master(a), IType::Master(b)) => {
+            types_compatible(a.as_ref(), b.as_ref())
+                && types_compatible(b.as_ref(), a.as_ref())
+        }
+        _ => false,
     }
 }
 
-/// Check if a constraint is provable from context (simplified)
-fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool {
+/// Check if a constraint is provable from context
+pub fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool {
     // Trivial cases
     if matches!(goal, Constraint::True) {
         return true;
+    }
+
+    if matches!(goal, Constraint::False) {
+        return false;
     }
 
     // Check if goal is directly in context
@@ -423,16 +580,15 @@ fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool {
         return true;
     }
 
-    // Check for simple entailments
+    // Check for simple entailments (fast path before Z3)
     for ctx in context {
         if constraint_entails(ctx, goal) {
             return true;
         }
     }
 
-    // For a full implementation, use Z3 here
-    // For now, be permissive (trust frontend verification)
-    true
+    // Use Z3 for all non-trivial cases
+    crate::verifier::smt::ConstraintOracle::is_provable(goal, context)
 }
 
 /// Check if one constraint entails another (simple cases)
@@ -455,4 +611,49 @@ fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
         }
         _ => false,
     }
+}
+
+/// Convert a register to an IndexExpr variable
+pub fn reg_to_index_expr(reg: &Reg) -> IndexExpr {
+    IndexExpr::Var(format!("{}", reg))
+}
+
+/// Negate a CmpOp (Lt <-> Ge, Le <-> Gt, Eq <-> Ne)
+pub fn negate_cmp_op(op: CmpOp) -> CmpOp {
+    match op {
+        CmpOp::Eq => CmpOp::Ne,
+        CmpOp::Ne => CmpOp::Eq,
+        CmpOp::Lt => CmpOp::Ge,
+        CmpOp::Ge => CmpOp::Lt,
+        CmpOp::Le => CmpOp::Gt,
+        CmpOp::Gt => CmpOp::Le,
+    }
+}
+
+/// Construct a constraint from a CmpOp and comparison operands
+pub fn constraint_from_cmp_op(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Option<Constraint> {
+    let (lhs_expr, rhs_expr) = match last_cmp {
+        Some(CmpOperands::RegReg(lhs, rhs)) => (reg_to_index_expr(lhs), reg_to_index_expr(rhs)),
+        Some(CmpOperands::RegImm(lhs, imm)) => {
+            (reg_to_index_expr(lhs), IndexExpr::Const(*imm))
+        }
+        None => return None,
+    };
+
+    Some(match op {
+        CmpOp::Eq => Constraint::Eq(lhs_expr, rhs_expr),
+        CmpOp::Ne => Constraint::Ne(lhs_expr, rhs_expr),
+        CmpOp::Lt => Constraint::Lt(lhs_expr, rhs_expr),
+        CmpOp::Le => Constraint::Le(lhs_expr, rhs_expr),
+        CmpOp::Gt => Constraint::Gt(lhs_expr, rhs_expr),
+        CmpOp::Ge => Constraint::Ge(lhs_expr, rhs_expr),
+    })
+}
+
+/// Construct the negated constraint from a CmpOp and comparison operands
+pub fn negate_cmp_op_constraint(
+    op: CmpOp,
+    last_cmp: &Option<CmpOperands>,
+) -> Option<Constraint> {
+    constraint_from_cmp_op(negate_cmp_op(op), last_cmp)
 }

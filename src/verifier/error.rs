@@ -66,6 +66,29 @@ pub enum VerifyError<'src> {
     /// Block not found
     UnknownBlock { label: String },
 
+    /// Bounds check failed for memory access
+    BoundsCheckFailed {
+        block: String,
+        instr_desc: String,
+        constraint: Constraint,
+        context: Vec<Constraint>,
+    },
+
+    /// Postcondition not provable at return
+    PostconditionFailed {
+        function: String,
+        constraint: Constraint,
+        context: Vec<Constraint>,
+    },
+
+    /// Precondition not provable at call site
+    PreconditionFailed {
+        block: String,
+        callee: String,
+        constraint: Constraint,
+        context: Vec<Constraint>,
+    },
+
     /// Internal error (should not happen)
     InternalError { msg: String },
 }
@@ -155,6 +178,41 @@ impl<'src> fmt::Display for VerifyError<'src> {
             }
             VerifyError::UnknownBlock { label } => {
                 write!(f, "Unknown block '{}'", label)
+            }
+            VerifyError::BoundsCheckFailed {
+                block,
+                instr_desc,
+                constraint,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Bounds check failed in block '{}' at '{}': cannot prove '{}'\nContext: {:?}",
+                    block, instr_desc, constraint, context
+                )
+            }
+            VerifyError::PostconditionFailed {
+                function,
+                constraint,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Postcondition not provable in function '{}': cannot prove '{}'\nContext: {:?}",
+                    function, constraint, context
+                )
+            }
+            VerifyError::PreconditionFailed {
+                block,
+                callee,
+                constraint,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Precondition not provable at call to '{}' in block '{}': cannot prove '{}'\nContext: {:?}",
+                    callee, block, constraint, context
+                )
             }
             VerifyError::InternalError { msg } => {
                 write!(f, "Internal verifier error: {}", msg)
