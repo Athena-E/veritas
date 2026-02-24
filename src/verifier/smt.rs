@@ -5,7 +5,7 @@
 
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use z3::ast::{Bool, Int};
-use z3::{SatResult, Solver};
+use z3::{FuncDecl, SatResult, Solver, Sort};
 
 /// Z3-based constraint oracle for the verifier
 pub struct ConstraintOracle;
@@ -19,6 +19,13 @@ impl ConstraintOracle {
             IndexExpr::Add(l, r) => Self::translate_index_expr(l) + Self::translate_index_expr(r),
             IndexExpr::Sub(l, r) => Self::translate_index_expr(l) - Self::translate_index_expr(r),
             IndexExpr::Mul(l, r) => Self::translate_index_expr(l) * Self::translate_index_expr(r),
+            IndexExpr::Select(name, idx) => {
+                let func_name = format!("f_{}", name);
+                let int_sort = Sort::int();
+                let func = FuncDecl::new(func_name.as_str(), &[&int_sort], &int_sort);
+                let index = Self::translate_index_expr(idx);
+                func.apply(&[&index]).as_int().unwrap()
+            }
         }
     }
 
@@ -68,6 +75,41 @@ impl ConstraintOracle {
                 Bool::or(&[&left, &right])
             }
             Constraint::Not(c) => Self::translate_constraint(c).not(),
+            Constraint::Implies(l, r) => {
+                let left = Self::translate_constraint(l);
+                let right = Self::translate_constraint(r);
+                left.implies(&right)
+            }
+            Constraint::Forall {
+                var,
+                lower,
+                upper,
+                body,
+            } => {
+                let bound = Int::new_const(var.to_string());
+                let lo = Self::translate_index_expr(lower);
+                let hi = Self::translate_index_expr(upper);
+                let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
+                let body_formula = Self::translate_constraint(body);
+                z3::ast::forall_const(&[&bound], &[], &range_guard.implies(&body_formula))
+            }
+            Constraint::Exists {
+                var,
+                lower,
+                upper,
+                body,
+            } => {
+                let bound = Int::new_const(var.to_string());
+                let lo = Self::translate_index_expr(lower);
+                let hi = Self::translate_index_expr(upper);
+                let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
+                let body_formula = Self::translate_constraint(body);
+                z3::ast::exists_const(
+                    &[&bound],
+                    &[],
+                    &Bool::and(&[&range_guard, &body_formula]),
+                )
+            }
         }
     }
 
