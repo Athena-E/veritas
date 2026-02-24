@@ -303,7 +303,7 @@ fn emit_type<'src>(ty: &IType<'src>) -> String {
         IType::RefMut(inner) => format!("&mut {}", emit_type(inner)),
         IType::SingletonInt(val) => format!("int({})", val),
         IType::RefinedInt { base: _, prop } => {
-            format!("{{a: int | {} }}", prop.var)
+            format!("{{{}: int | {} }}", prop.var, prop)
         }
         IType::Master(inner) => format!("master({})", emit_type(inner)),
     }
