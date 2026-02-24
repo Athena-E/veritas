@@ -1,11 +1,11 @@
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::types::{IProposition, IType, IValue};
 use crate::frontend::typechecker::context::TypingContext;
-use crate::frontend::typechecker::helpers::rename_expr_var;
+use crate::frontend::typechecker::helpers::{rename_expr_var, substitute_expr_for_var};
 use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
 use z3::ast::{Bool, Int};
-use z3::{SatResult, Solver};
+use z3::{FuncDecl, SatResult, Solver, Sort};
 
 pub struct SmtOracle;
 
@@ -40,12 +40,27 @@ impl SmtOracle {
                 UnaryOp::Not => panic!("Boolean negation in integer expression context"),
             },
 
+            Expr::Index { base, index } => {
+                // Encode array indexing as uninterpreted function: arr[i] → f_arr(i)
+                if let Expr::Variable(name) = &base.0 {
+                    let func_name = format!("f_{}", name);
+                    let int_sort = Sort::int();
+                    let func = FuncDecl::new(func_name.as_str(), &[&int_sort], &int_sort);
+                    let idx = Self::translate_expr(&index.0);
+                    func.apply(&[&idx]).as_int().unwrap()
+                } else {
+                    panic!("Complex array base not supported in SMT")
+                }
+            }
+
             Expr::Error => panic!("Error node in SMT translation"),
             Expr::Literal(Literal::Bool(_)) => panic!("Boolean literal in integer context"),
             Expr::Call { .. } => panic!("Function calls not yet supported in SMT"),
-            Expr::Index { .. } => panic!("Array indexing not yet supported in SMT"),
             Expr::ArrayInit { .. } => panic!("Array initialization not yet supported in SMT"),
             Expr::If { .. } => panic!("If expressions not yet supported in SMT"),
+            Expr::Forall { .. } | Expr::Exists { .. } => {
+                panic!("Quantifiers in integer expression context")
+            }
         }
     }
 
@@ -95,6 +110,11 @@ impl SmtOracle {
                     let right = Self::translate_bool_expr(&rhs.0);
                     Bool::or(&[&left, &right])
                 }
+                BinOp::Implies => {
+                    let left = Self::translate_bool_expr(&lhs.0);
+                    let right = Self::translate_bool_expr(&rhs.0);
+                    left.implies(&right)
+                }
 
                 BinOp::Add | BinOp::Sub | BinOp::Mul => {
                     panic!("Arithmetic operation in boolean expression context")
@@ -108,6 +128,28 @@ impl SmtOracle {
                 }
                 UnaryOp::Neg => panic!("Integer negation in boolean expression context"),
             },
+
+            Expr::Forall {
+                var, start, end, body,
+            } => {
+                let bound = Int::new_const(var.to_string());
+                let lo = Self::translate_expr(&start.0);
+                let hi = Self::translate_expr(&end.0);
+                let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
+                let body_formula = Self::translate_bool_expr(&body.0);
+                z3::ast::forall_const(&[&bound], &[], &range_guard.implies(&body_formula))
+            }
+
+            Expr::Exists {
+                var, start, end, body,
+            } => {
+                let bound = Int::new_const(var.to_string());
+                let lo = Self::translate_expr(&start.0);
+                let hi = Self::translate_expr(&end.0);
+                let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
+                let body_formula = Self::translate_bool_expr(&body.0);
+                z3::ast::exists_const(&[&bound], &[], &Bool::and(&[&range_guard, &body_formula]))
+            }
 
             Expr::Error => panic!("Error node in SMT translation"),
             Expr::Literal(Literal::Int(_)) => panic!("Integer literal in boolean context"),
@@ -189,6 +231,57 @@ impl SmtOracle {
                 Some(IProposition {
                     var: var_name.to_string(),
                     predicate: Arc::new((eq_expr, dummy_span)),
+                })
+            }
+            IType::Array {
+                element_type,
+                size,
+            } => {
+                let size_int = match size {
+                    IValue::Int(n) => Some(*n),
+                    _ => None,
+                };
+                let size_int = match size_int {
+                    Some(n) => n,
+                    None => return None,
+                };
+
+                let dummy_span = SimpleSpan::new(0, 0);
+                let var_leaked: &'src str =
+                    Box::leak(var_name.to_string().into_boxed_str());
+                let idx_var: &'src str = Box::leak("__idx".to_string().into_boxed_str());
+
+                // Build arr[__idx]
+                let arr_index = Expr::Index {
+                    base: Box::new((Expr::Variable(var_leaked), dummy_span)),
+                    index: Box::new((Expr::Variable(idx_var), dummy_span)),
+                };
+
+                // Build the quantifier body depending on element type
+                let body = match element_type.as_ref() {
+                    // arr: [{v:int|v >= 0}; N] => forall __idx in 0..N { arr[__idx] >= 0 }
+                    IType::RefinedInt { prop, .. } => {
+                        substitute_expr_for_var(&prop.predicate.0, &prop.var, &arr_index)
+                    }
+                    // arr: [int(K); N] => forall __idx in 0..N { arr[__idx] == K }
+                    IType::SingletonInt(IValue::Int(n)) => Expr::BinOp {
+                        op: BinOp::Eq,
+                        lhs: Box::new((arr_index, dummy_span)),
+                        rhs: Box::new((Expr::Literal(Literal::Int(*n)), dummy_span)),
+                    },
+                    _ => return None,
+                };
+
+                let forall_expr = Expr::Forall {
+                    var: idx_var,
+                    start: Box::new((Expr::Literal(Literal::Int(0)), dummy_span)),
+                    end: Box::new((Expr::Literal(Literal::Int(size_int)), dummy_span)),
+                    body: Box::new((body, dummy_span)),
+                };
+
+                Some(IProposition {
+                    var: var_name.to_string(),
+                    predicate: Arc::new((forall_expr, dummy_span)),
                 })
             }
             _ => None,

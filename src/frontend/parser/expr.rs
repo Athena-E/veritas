@@ -53,9 +53,46 @@ where
             )
             .map(|(func_name, args)| Expr::Call { func_name, args });
 
+        // Quantifier expressions: forall i in start..end { body }
+        let forall_expr = just(Token::Forall)
+            .ignore_then(select! { Token::Ident(name) => name })
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .then_ignore(just(Token::Op("..")))
+            .then(expr.clone())
+            .then(
+                expr.clone()
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
+            )
+            .map(|(((var, start), end), body)| Expr::Forall {
+                var,
+                start: Box::new(start),
+                end: Box::new(end),
+                body: Box::new(body),
+            });
+
+        let exists_expr = just(Token::Exists)
+            .ignore_then(select! { Token::Ident(name) => name })
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .then_ignore(just(Token::Op("..")))
+            .then(expr.clone())
+            .then(
+                expr.clone()
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
+            )
+            .map(|(((var, start), end), body)| Expr::Exists {
+                var,
+                start: Box::new(start),
+                end: Box::new(end),
+                body: Box::new(body),
+            });
+
         let atom = call
             .or(array_init)
             .or(paren)
+            .or(forall_expr)
+            .or(exists_expr)
             .or(lit)
             .or(var)
             .map_with(|expr, e| (expr, e.span()))
@@ -175,7 +212,23 @@ where
             },
         );
 
-        logical.labelled("expression").as_context()
+        // Implication (lowest precedence among binary operators)
+        let op_implies = just(Token::Op("==>")).to(BinOp::Implies);
+        let implication = logical.clone().foldl_with(
+            op_implies.then(logical).repeated(),
+            |lhs, (op, rhs), e| {
+                (
+                    Expr::BinOp {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    e.span(),
+                )
+            },
+        );
+
+        implication.labelled("expression").as_context()
     })
     .boxed()
 }
@@ -232,9 +285,48 @@ where
                 )
                 .map(|(func_name, args)| Expr::Call { func_name, args });
 
+            // Quantifier expressions: forall i in start..end { body }
+            let forall_expr = just(Token::Forall)
+                .ignore_then(select! { Token::Ident(name) => name })
+                .then_ignore(just(Token::In))
+                .then(inline_expr.clone())
+                .then_ignore(just(Token::Op("..")))
+                .then(inline_expr.clone())
+                .then(
+                    inline_expr
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
+                )
+                .map(|(((var, start), end), body)| Expr::Forall {
+                    var,
+                    start: Box::new(start),
+                    end: Box::new(end),
+                    body: Box::new(body),
+                });
+
+            let exists_expr = just(Token::Exists)
+                .ignore_then(select! { Token::Ident(name) => name })
+                .then_ignore(just(Token::In))
+                .then(inline_expr.clone())
+                .then_ignore(just(Token::Op("..")))
+                .then(inline_expr.clone())
+                .then(
+                    inline_expr
+                        .clone()
+                        .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
+                )
+                .map(|(((var, start), end), body)| Expr::Exists {
+                    var,
+                    start: Box::new(start),
+                    end: Box::new(end),
+                    body: Box::new(body),
+                });
+
             let atom = call
                 .or(array_init)
                 .or(paren)
+                .or(forall_expr)
+                .or(exists_expr)
                 .or(lit)
                 .or(var)
                 .map_with(|expr, e| (expr, e.span()))
@@ -355,7 +447,23 @@ where
                 },
             );
 
-            logical.labelled("expression").as_context()
+            // Implication (lowest precedence among binary operators)
+            let op_implies = just(Token::Op("==>")).to(BinOp::Implies);
+            let implication = logical.clone().foldl_with(
+                op_implies.then(logical).repeated(),
+                |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                },
+            );
+
+            implication.labelled("expression").as_context()
         });
 
         // Statements

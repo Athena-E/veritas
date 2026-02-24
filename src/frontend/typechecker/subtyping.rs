@@ -164,6 +164,42 @@ fn substitute_value_in_expr<'src>(expr: &Expr<'src>, var: &str, value: &'src IVa
             cond: Box::new((substitute_value_in_expr(&cond.0, var, value), cond.1)),
         },
 
+        Expr::Forall {
+            var: bound_var,
+            start,
+            end,
+            body,
+        } => {
+            if *bound_var == var {
+                expr.clone()
+            } else {
+                Expr::Forall {
+                    var: bound_var,
+                    start: Box::new((substitute_value_in_expr(&start.0, var, value), start.1)),
+                    end: Box::new((substitute_value_in_expr(&end.0, var, value), end.1)),
+                    body: Box::new((substitute_value_in_expr(&body.0, var, value), body.1)),
+                }
+            }
+        }
+
+        Expr::Exists {
+            var: bound_var,
+            start,
+            end,
+            body,
+        } => {
+            if *bound_var == var {
+                expr.clone()
+            } else {
+                Expr::Exists {
+                    var: bound_var,
+                    start: Box::new((substitute_value_in_expr(&start.0, var, value), start.1)),
+                    end: Box::new((substitute_value_in_expr(&end.0, var, value), end.1)),
+                    body: Box::new((substitute_value_in_expr(&body.0, var, value), body.1)),
+                }
+            }
+        }
+
         _ => expr.clone(),
     }
 }
@@ -194,6 +230,58 @@ fn rename_var_in_expr<'src>(expr: &Expr<'src>, old_var: &str, new_var: &'src str
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
             cond: Box::new((rename_var_in_expr(&cond.0, old_var, new_var), cond.1)),
+        },
+
+        Expr::Forall {
+            var: bound_var,
+            start,
+            end,
+            body,
+        } => {
+            if *bound_var == old_var {
+                // Bound variable shadows — don't rename inside body
+                Expr::Forall {
+                    var: bound_var,
+                    start: Box::new((rename_var_in_expr(&start.0, old_var, new_var), start.1)),
+                    end: Box::new((rename_var_in_expr(&end.0, old_var, new_var), end.1)),
+                    body: body.clone(),
+                }
+            } else {
+                Expr::Forall {
+                    var: bound_var,
+                    start: Box::new((rename_var_in_expr(&start.0, old_var, new_var), start.1)),
+                    end: Box::new((rename_var_in_expr(&end.0, old_var, new_var), end.1)),
+                    body: Box::new((rename_var_in_expr(&body.0, old_var, new_var), body.1)),
+                }
+            }
+        }
+
+        Expr::Exists {
+            var: bound_var,
+            start,
+            end,
+            body,
+        } => {
+            if *bound_var == old_var {
+                Expr::Exists {
+                    var: bound_var,
+                    start: Box::new((rename_var_in_expr(&start.0, old_var, new_var), start.1)),
+                    end: Box::new((rename_var_in_expr(&end.0, old_var, new_var), end.1)),
+                    body: body.clone(),
+                }
+            } else {
+                Expr::Exists {
+                    var: bound_var,
+                    start: Box::new((rename_var_in_expr(&start.0, old_var, new_var), start.1)),
+                    end: Box::new((rename_var_in_expr(&end.0, old_var, new_var), end.1)),
+                    body: Box::new((rename_var_in_expr(&body.0, old_var, new_var), body.1)),
+                }
+            }
+        }
+
+        Expr::Index { base, index } => Expr::Index {
+            base: Box::new((rename_var_in_expr(&base.0, old_var, new_var), base.1)),
+            index: Box::new((rename_var_in_expr(&index.0, old_var, new_var), index.1)),
         },
 
         _ => expr.clone(),

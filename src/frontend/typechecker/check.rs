@@ -810,6 +810,34 @@ fn substitute_var_with_literal<'src>(
                     .collect()
             }),
         },
+        Expr::Forall {
+            var, start, end, body,
+        } => {
+            if *var == var_name {
+                expr.clone()
+            } else {
+                Expr::Forall {
+                    var,
+                    start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+                    end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
+                    body: Box::new((substitute_var_with_literal(&body.0, var_name, value), body.1)),
+                }
+            }
+        }
+        Expr::Exists {
+            var, start, end, body,
+        } => {
+            if *var == var_name {
+                expr.clone()
+            } else {
+                Expr::Exists {
+                    var,
+                    start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+                    end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
+                    body: Box::new((substitute_var_with_literal(&body.0, var_name, value), body.1)),
+                }
+            }
+        }
     }
 }
 

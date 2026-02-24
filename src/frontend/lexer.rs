@@ -14,6 +14,7 @@ pub fn lexer<'src>()
 
     // A parser for operators
     let op = choice((
+        just("==>"),
         just("=="),
         just("!="),
         just("<="),
@@ -61,6 +62,8 @@ pub fn lexer<'src>()
             "requires" => Token::Requires,
             "ensures" => Token::Ensures,
             "invariant" => Token::Invariant,
+            "forall" => Token::Forall,
+            "exists" => Token::Exists,
             "int" => Token::Int,
             "bool" => Token::Bool,
             "true" => Token::True,
