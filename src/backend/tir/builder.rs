@@ -163,6 +163,32 @@ pub fn negate_constraint(c: Constraint) -> Constraint {
             Box::new(negate_constraint(*r)),
         ),
         Constraint::Not(c) => *c,
+        Constraint::Implies(l, r) => {
+            // !(P → Q) ≡ P ∧ ¬Q
+            Constraint::And(l, Box::new(negate_constraint(*r)))
+        }
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body: Box::new(negate_constraint(*body)),
+        },
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body: Box::new(negate_constraint(*body)),
+        },
     }
 }
 

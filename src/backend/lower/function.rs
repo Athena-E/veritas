@@ -108,12 +108,32 @@ fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
                     Box::new(expr_to_constraint(&lhs.0)?),
                     Box::new(expr_to_constraint(&rhs.0)?),
                 )),
+                BinOp::Implies => Some(Constraint::Implies(
+                    Box::new(expr_to_constraint(&lhs.0)?),
+                    Box::new(expr_to_constraint(&rhs.0)?),
+                )),
                 // Arithmetic operators can't be converted to constraints directly
                 _ => None,
             }
         }
         Expr::Literal(Literal::Bool(true)) => Some(Constraint::True),
         Expr::Literal(Literal::Bool(false)) => Some(Constraint::False),
+        Expr::Forall {
+            var, start, end, body,
+        } => Some(Constraint::Forall {
+            var: var.to_string(),
+            lower: expr_to_index(&start.0)?,
+            upper: expr_to_index(&end.0)?,
+            body: Box::new(expr_to_constraint(&body.0)?),
+        }),
+        Expr::Exists {
+            var, start, end, body,
+        } => Some(Constraint::Exists {
+            var: var.to_string(),
+            lower: expr_to_index(&start.0)?,
+            upper: expr_to_index(&end.0)?,
+            body: Box::new(expr_to_constraint(&body.0)?),
+        }),
         _ => None,
     }
 }
@@ -131,6 +151,14 @@ fn expr_to_index(expr: &Expr) -> Option<IndexExpr> {
                 BinOp::Sub => Some(IndexExpr::Sub(Box::new(l), Box::new(r))),
                 BinOp::Mul => Some(IndexExpr::Mul(Box::new(l), Box::new(r))),
                 _ => None,
+            }
+        }
+        Expr::Index { base, index } => {
+            if let Expr::Variable(name) = &base.0 {
+                let idx = expr_to_index(&index.0)?;
+                Some(IndexExpr::Select(name.to_string(), Box::new(idx)))
+            } else {
+                None
             }
         }
         _ => None,
