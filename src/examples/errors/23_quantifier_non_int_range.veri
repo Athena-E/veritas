@@ -1,0 +1,12 @@
+// Error: quantifier range bounds must be integers
+// Expected error: type mismatch - expected int, found bool
+
+fn bad_range(n: int) -> int
+    requires forall i in 0..n { i >= 0 }
+{
+    n
+}
+
+fn caller() -> int {
+    bad_range(true)
+}

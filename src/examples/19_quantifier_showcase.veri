@@ -1,0 +1,163 @@
+// ============================================================
+// Quantifier & Implication Showcase
+// Demonstrates each capability of the constraint language
+// ============================================================
+
+// --- 1. Basic implication ---
+// If x is positive, then y must also be positive.
+// Callers where x <= 0 may pass any y.
+fn guarded_positive(x: int, y: int) -> int
+    requires x > 0 ==> y > 0
+{
+    x + y
+}
+
+// --- 2. Nested implication ---
+// Chained conditional: if (a>0 implies b>0), then c must be positive.
+fn nested_implies(a: int, b: int, c: int) -> int
+    requires (a > 0 ==> b > 0) ==> c > 0
+{
+    c
+}
+
+// --- 3. Basic forall — all elements non-negative ---
+fn sum_nonneg(arr: [{v:int|v >= 0}; 4]) -> int
+    requires forall i in 0..4 { arr[i] >= 0 }
+{
+    arr[0] + arr[1] + arr[2] + arr[3]
+}
+
+// --- 4. Forall with arithmetic in the body ---
+// Sortedness: each element is <= its successor.
+fn first_of_sorted(arr: [int; 5]) -> int
+    requires forall i in 0..4 { arr[i] <= arr[i + 1] }
+{
+    arr[0]
+}
+
+// --- 5. Forall with symbolic (parameter) bound ---
+// The first n elements are positive, where n is a runtime value.
+fn first_n_positive(arr: [int; 10], n: int) -> int
+    requires n >= 0 && n <= 10 && forall i in 0..n { arr[i] > 0 }
+{
+    arr[0]
+}
+
+// --- 6. Nested forall — 2D matrix via flat array ---
+// All 3x3 entries are non-negative.
+fn matrix_min(mat: [int; 9]) -> int
+    requires forall r in 0..3 { forall c in 0..3 { mat[r * 3 + c] >= 0 } }
+{
+    mat[0]
+}
+
+// --- 7. Exists — at least one element satisfies a property ---
+fn has_zero(arr: [int; 4]) -> int
+    requires exists i in 0..4 { arr[i] == 0 }
+{
+    1
+}
+
+// --- 8. Exists with arithmetic index expression ---
+fn has_adjacent_sum(arr: [int; 5]) -> int
+    requires exists i in 0..4 { arr[i] + arr[i + 1] > 100 }
+{
+    1
+}
+
+// --- 9. Implication combined with forall ---
+// When the caller asserts n >= 1, all elements up to n must be bounded.
+fn guarded_bounds(arr: [int; 10], n: int) -> int
+    requires n >= 1 ==> forall i in 0..n { arr[i] >= 0 }
+{
+    arr[0]
+}
+
+// --- 10. Forall with multiple conditions via && ---
+// All elements lie within [lo, hi].
+fn all_in_range(arr: [int; 3], lo: int, hi: int) -> int
+    requires forall i in 0..3 { arr[i] >= lo } && forall i in 0..3 { arr[i] <= hi }
+{
+    arr[0]
+}
+
+// --- 11. Refinement lifting ---
+// The refined element type [{v:int|v > 0}; 3] automatically proves
+// the quantified precondition without the caller needing to state it.
+fn sum_positive(arr: [{v:int|v > 0}; 3]) -> int
+    requires forall i in 0..3 { arr[i] > 0 }
+{
+    arr[0] + arr[1] + arr[2]
+}
+
+fn call_sum_positive() -> int {
+    let arr: [{v:int|v > 0}; 3] = [1; 3];
+    sum_positive(arr)
+}
+
+// --- 12. Immutable binding with singleton lifting ---
+// Even a plain [int(K); N] singleton array proves forall i { arr[i] == K }.
+fn all_equal_to(arr: [int; 3], k: int) -> int
+    requires forall i in 0..3 { arr[i] == k }
+{
+    arr[0]
+}
+
+fn call_all_equal() -> int {
+    let arr: [int; 3] = [7; 3];
+    all_equal_to(arr, 7)
+}
+
+// --- main: exercises every function above ---
+fn main() -> int {
+    // 1. implication — x <= 0, so the antecedent is false; any y is fine
+    let r1: int = guarded_positive(0, -5);
+
+    // 2. nested implication — a<=0 makes inner implication vacuously true, so c>0 required
+    let r2: int = nested_implies(-1, -1, 1);
+
+    // 3. forall — refined element type lifts to quantified constraint
+    let a3: [{v:int|v >= 0}; 4] = [0; 4];
+    let r3: int = sum_nonneg(a3);
+
+    // 4. sortedness — all elements equal satisfies arr[i] <= arr[i+1]
+    let mut a4: [{v:int|v >= 0}; 5] = [0; 5];
+    a4[0] = 0;
+    a4[1] = 1;
+    a4[2] = 2;
+    a4[3] = 3;
+    a4[4] = 4;
+    let r4: int = first_of_sorted(a4);
+
+    // 5. symbolic bound — n=0 makes the forall range empty (vacuously true)
+    let a5: [int; 10] = [0; 10];
+    let r5: int = first_n_positive(a5, 0);
+
+    // 6. nested forall — singleton lifting proves all 3x3 entries >= 0
+    let a6: [int; 9] = [0; 9];
+    let r6: int = matrix_min(a6);
+
+    // 7. exists — singleton [0;4] proves exists i { arr[i] == 0 }
+    let a7: [int; 4] = [0; 4];
+    let r7: int = has_zero(a7);
+
+    // 8. exists with arithmetic — [51;5] proves exists i { arr[i]+arr[i+1] > 100 }
+    let a8: [int; 5] = [51; 5];
+    let r8: int = has_adjacent_sum(a8);
+
+    // 9. implication + forall — n=0 makes antecedent false (0 >= 1 is false)
+    let a9: [int; 10] = [0; 10];
+    let r9: int = guarded_bounds(a9, 0);
+
+    // 10. multiple forall via && — [5;3] proves arr[i]>=5 and arr[i]<=5
+    let a10: [int; 3] = [5; 3];
+    let r10: int = all_in_range(a10, 5, 5);
+
+    // 11. refinement lifting through a helper
+    let r11: int = call_sum_positive();
+
+    // 12. singleton lifting through a helper
+    let r12: int = call_all_equal();
+
+    r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9 + r10 + r11 + r12
+}

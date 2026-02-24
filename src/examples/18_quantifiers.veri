@@ -1,0 +1,57 @@
+// Test implication in preconditions
+fn implies_example(x: int, y: int) -> int
+    requires x > 0 ==> y > 0
+{
+    y
+}
+
+// Test forall quantifier over array elements
+fn sum_first_two(arr: [{v:int|v >= 0}; 3]) -> int
+    requires forall i in 0..3 { arr[i] >= 0 }
+{
+    let a: int = arr[0];
+    let b: int = arr[1];
+    a + b
+}
+
+// Test exists quantifier
+fn has_positive(x: int) -> int
+    requires exists i in 0..x { i > 0 }
+{
+    x
+}
+
+// Test implication combined with quantifier
+fn guarded_access(arr: [int; 10], n: int) -> int
+    requires n >= 0 ==> forall i in 0..n { arr[i] >= 0 }
+{
+    arr[0]
+}
+
+// Test nested implication
+fn nested_implies(a: int, b: int, c: int) -> int
+    requires (a > 0 ==> b > 0) ==> c > 0
+{
+    c
+}
+
+fn list_arg_sorted(arr: [int; 3]) -> int 
+    requires forall i in 0..2 { arr[i] <= arr[i+1] } 
+{
+    1
+}
+
+fn main() -> int {
+    // let mut x: {v:int|v > 0} = 1;
+    // let y: int = -1;
+    // x = y;
+    // let mut arr: [{x:int|x >= 0}; 3] = [0;3];
+    let mut arr: [int; 3] = [0;3];
+    arr[0] = 0;
+    arr[1] = 1;
+    arr[2] = 2;
+    // list_arg_sorted(arr)
+    // sum_first_two(arr)
+    // implies_example(1, -1)
+    // has_positive(0)
+}

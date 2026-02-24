@@ -1,0 +1,13 @@
+// Error: exists precondition that is unsatisfiable
+// The caller passes 0, so exists i in 0..0 { i > 0 } is vacuously false
+// Expected error: precondition not satisfied
+
+fn needs_positive_witness(n: int) -> int
+    requires exists i in 0..n { i > 0 }
+{
+    n
+}
+
+fn caller() -> int {
+    needs_positive_witness(0)
+}

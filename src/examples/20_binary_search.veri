@@ -1,0 +1,126 @@
+// ============================================================
+// Binary Search
+// Demonstrates refinement types, preconditions, quantifiers,
+// implications, loop invariants, singleton types, mutable
+// variables, array operations, and for loops.
+// ============================================================
+
+// --- Binary search over a sorted array ---
+// Precondition: the array is sorted in non-decreasing order.
+// Returns the index of the target if found, or -1 if not found.
+fn binary_search(arr: [int; 10], target: int) -> int
+    requires forall i in 0..9 { arr[i] <= arr[i + 1] }
+{
+    let mut lo: {v: int | v >= 0} = 0;
+    let mut hi: int = 9;
+    let mut result: int = -1;
+
+    for iter in 0..20
+        invariant lo >= 0 && hi < 10
+    {
+        if lo <= hi {
+            let mid: int = lo + (hi - lo) / 2;
+            let val: int = arr[mid];
+            if val == target {
+                result = mid;
+                lo = hi + 1;
+            } else {
+                if val < target {
+                    lo = mid + 1;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+        } else {
+            let done: int = 0;
+        }
+    }
+
+    result
+}
+
+// --- Verify that the array is sorted ---
+// Uses a quantified precondition to require sortedness,
+// then returns the first element (which must be the minimum).
+fn sorted_min(arr: [int; 10]) -> int
+    requires forall i in 0..9 { arr[i] <= arr[i + 1] }
+{
+    arr[0]
+}
+
+// --- Count how many elements equal a target ---
+// Demonstrates a simple loop with refined accumulator.
+fn count_equal(arr: [{v: int | v >= 0}; 10], target: {v: int | v >= 0}) -> {v: int | v >= 0}
+    requires forall i in 0..10 { arr[i] >= 0 }
+{
+    let mut count: {v: int | v >= 0} = 0;
+    for i in 0..10 {
+        let val: int = arr[i];
+        if val == target {
+            count = count + 1;
+        } else {
+            let skip: int = 0;
+        }
+    }
+    count
+}
+
+// --- Check if all elements are within a range ---
+// Implication: if the array is non-empty (n > 0), then
+// all elements must lie within [lo, hi].
+fn all_in_range(arr: [int; 10], lo: int, hi: int, n: {v: int | v >= 0}) -> int
+    requires n <= 10 && (n > 0 ==> forall i in 0..n { arr[i] >= lo && arr[i] <= hi })
+{
+    1
+}
+
+// --- Absolute value ---
+// Postcondition guarantees the result is non-negative.
+fn abs(x: int) -> {v: int | v >= 0}
+    ensures result >= 0
+{
+    if x >= 0 {
+        x
+    } else {
+        0 - x
+    }
+}
+
+// --- Main: tie everything together ---
+fn main() -> int {
+    // Build a sorted array using singleton types
+    let mut arr: [int; 10] = [0; 10];
+    arr[0] = 3;
+    arr[1] = 7;
+    arr[2] = 12;
+    arr[3] = 15;
+    arr[4] = 22;
+    arr[5] = 34;
+    arr[6] = 41;
+    arr[7] = 55;
+    arr[8] = 68;
+    arr[9] = 90;
+
+    // Search for a value present in the array
+    let found: int = binary_search(arr, 34);
+
+    // Search for a value not in the array
+    let not_found: int = binary_search(arr, 50);
+
+    // The sorted minimum must be arr[0]
+    let min: int = sorted_min(arr);
+
+    // Build a non-negative array and count occurrences
+    let mut vals: [{v: int | v >= 0}; 10] = [5; 10];
+    vals[3] = 7;
+    vals[7] = 7;
+    let sevens: {v: int | v >= 0} = count_equal(vals, 7);
+
+    // Range check with implication (n=0 makes antecedent false)
+    let trivial: int = all_in_range(arr, 0, 100, 0);
+
+    // Absolute value with postcondition
+    let pos: {v: int | v >= 0} = abs(0 - 42);
+
+    found
+}
