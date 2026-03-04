@@ -40,7 +40,37 @@ pub fn check_stmt<'src>(
             }
 
             // Add to context with the synthesized type (more precise)
-            let new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+            let mut new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+
+            // If RHS is an array index, add proposition: name == <snapshot>
+            // We snapshot the array element's current known value so that
+            // subsequent mutations to the array don't drag this binding along.
+            if let crate::common::ast::Expr::Index { base, index } = &value.0 {
+                if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
+                    // Try to resolve the value from existing pointwise propositions
+                    let snapshot_rhs =
+                        ctx.resolve_array_element_value(arr_name, &index.0);
+
+                    if let Some(rhs_expr) = snapshot_rhs {
+                        let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+                        let name_leaked: &'src str =
+                            Box::leak(name.to_string().into_boxed_str());
+                        let eq_expr = crate::common::ast::Expr::BinOp {
+                            op: crate::common::ast::BinOp::Eq,
+                            lhs: Box::new((
+                                crate::common::ast::Expr::Variable(name_leaked),
+                                dummy_span,
+                            )),
+                            rhs: Box::new((rhs_expr, dummy_span)),
+                        };
+                        let prop = IProposition {
+                            var: name.to_string(),
+                            predicate: Arc::new((eq_expr, dummy_span)),
+                        };
+                        new_ctx = new_ctx.with_proposition(prop);
+                    }
+                }
+            }
 
             let tstmt = TStmt::Let {
                 is_mut: false,
@@ -208,7 +238,27 @@ pub fn check_stmt<'src>(
                     if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
 
-                        // Build: arr[index] == rhs
+                        // Snapshot the RHS: if it's an array index with a known
+                        // value, resolve it now so the proposition doesn't contain
+                        // a live reference that becomes stale after later mutations.
+                        let snapshot_rhs = match &rhs.0 {
+                            crate::common::ast::Expr::Index {
+                                base: rhs_base,
+                                index: rhs_index,
+                            } => {
+                                if let crate::common::ast::Expr::Variable(rhs_arr) =
+                                    &rhs_base.0
+                                {
+                                    ctx.resolve_array_element_value(rhs_arr, &rhs_index.0)
+                                        .unwrap_or_else(|| rhs.0.clone())
+                                } else {
+                                    rhs.0.clone()
+                                }
+                            }
+                            _ => rhs.0.clone(),
+                        };
+
+                        // Build: arr[index] == snapshot_rhs
                         let arr_index_expr = crate::common::ast::Expr::Index {
                             base: Box::new((
                                 crate::common::ast::Expr::Variable(arr_name),
@@ -219,7 +269,7 @@ pub fn check_stmt<'src>(
                         let eq_expr = crate::common::ast::Expr::BinOp {
                             op: crate::common::ast::BinOp::Eq,
                             lhs: Box::new((arr_index_expr, dummy_span)),
-                            rhs: Box::new((rhs.0.clone(), dummy_span)),
+                            rhs: Box::new((snapshot_rhs, dummy_span)),
                         };
                         let prop = IProposition {
                             var: arr_name.to_string(),
