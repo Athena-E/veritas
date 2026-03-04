@@ -113,7 +113,10 @@ fn fmt_expr(expr: &Expr) -> String {
         }
         Expr::If { .. } => "<if-expr>".to_string(), // Simplified for type display
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => format!(
             "forall {} in {}..{} {{ {} }}",
             var,
@@ -122,7 +125,10 @@ fn fmt_expr(expr: &Expr) -> String {
             fmt_expr(&body.0)
         ),
         Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => format!(
             "exists {} in {}..{} {{ {} }}",
             var,

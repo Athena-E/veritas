@@ -104,11 +104,7 @@ impl ConstraintOracle {
                 let hi = Self::translate_index_expr(upper);
                 let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
                 let body_formula = Self::translate_constraint(body);
-                z3::ast::exists_const(
-                    &[&bound],
-                    &[],
-                    &Bool::and(&[&range_guard, &body_formula]),
-                )
+                z3::ast::exists_const(&[&bound], &[], &Bool::and(&[&range_guard, &body_formula]))
             }
         }
     }

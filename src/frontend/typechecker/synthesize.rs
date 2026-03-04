@@ -411,10 +411,16 @@ pub fn synth_expr<'src>(
 
         // FORALL/EXISTS: Quantifier expressions (specification-only)
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         }
         | Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             // Synthesize start and end — verify both are <: Int
             let (_tstart, start_ty) = synth_expr(ctx, start)?;
@@ -487,10 +493,10 @@ fn substitute_args_in_precond<'src>(
     // e.g. if param is "arr" and argument is variable "pos", rename arr -> pos
     let mut renamed_expr = precond.predicate.0.clone();
     for ((param_name, _), arg_expr) in params.iter().zip(arg_exprs.iter()) {
-        if let Expr::Variable(arg_var) = arg_expr {
-            if *arg_var != param_name.as_str() {
-                renamed_expr = rename_expr_var(&renamed_expr, param_name.as_str(), arg_var);
-            }
+        if let Expr::Variable(arg_var) = arg_expr
+            && *arg_var != param_name.as_str()
+        {
+            renamed_expr = rename_expr_var(&renamed_expr, param_name.as_str(), arg_var);
         }
     }
 
@@ -549,7 +555,10 @@ fn substitute_in_expr<'src>(
         },
 
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             if subs.contains_key(var) {
                 // Bound variable shadows substitution
@@ -565,7 +574,10 @@ fn substitute_in_expr<'src>(
         }
 
         Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             if subs.contains_key(var) {
                 expr.clone()

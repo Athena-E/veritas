@@ -459,8 +459,8 @@ pub fn lower_if_expr<'src>(
             cond: cond_reg,
             true_target: then_block,
             false_target: else_block,
-            true_constraint,
-            false_constraint,
+            true_constraint: Box::new(true_constraint),
+            false_constraint: Box::new(false_constraint),
         },
         vec![], // predecessors filled by builder
     );

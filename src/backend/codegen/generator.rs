@@ -229,7 +229,7 @@ fn lower_terminator<'src>(
 
             // Emit constraint assumption for the false branch
             instrs.push(DtalInstr::ConstraintAssume {
-                constraint: true_constraint.clone(),
+                constraint: *true_constraint.clone(),
             });
 
             // Emit phi moves for the false target (we're falling through to it)

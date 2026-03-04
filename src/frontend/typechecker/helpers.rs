@@ -185,7 +185,10 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
 
         // !forall{P} → exists{!P}
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => Expr::Exists {
             var,
             start: start.clone(),
@@ -195,7 +198,10 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
 
         // !exists{P} → forall{!P}
         Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => Expr::Forall {
             var,
             start: start.clone(),
@@ -339,7 +345,10 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
             length: Box::new((rename_expr_var(&length.0, old, new), length.1)),
         },
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             if *var == old {
                 // Bound variable shadows — don't rename inside body
@@ -359,7 +368,10 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
             }
         }
         Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             if *var == old {
                 Expr::Exists {
@@ -441,10 +453,16 @@ pub fn substitute_expr_for_var<'src>(
         },
         Expr::ArrayInit { value, length } => Expr::ArrayInit {
             value: Box::new((substitute_expr_for_var(&value.0, var, replacement), value.1)),
-            length: Box::new((substitute_expr_for_var(&length.0, var, replacement), length.1)),
+            length: Box::new((
+                substitute_expr_for_var(&length.0, var, replacement),
+                length.1,
+            )),
         },
         Expr::Forall {
-            var: bound, start, end, body,
+            var: bound,
+            start,
+            end,
+            body,
         } => {
             if *bound == var {
                 // Bound variable shadows — don't substitute inside body
@@ -464,7 +482,10 @@ pub fn substitute_expr_for_var<'src>(
             }
         }
         Expr::Exists {
-            var: bound, start, end, body,
+            var: bound,
+            start,
+            end,
+            body,
         } => {
             if *bound == var {
                 Expr::Exists {

@@ -45,30 +45,28 @@ pub fn check_stmt<'src>(
             // If RHS is an array index, add proposition: name == <snapshot>
             // We snapshot the array element's current known value so that
             // subsequent mutations to the array don't drag this binding along.
-            if let crate::common::ast::Expr::Index { base, index } = &value.0 {
-                if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
-                    // Try to resolve the value from existing pointwise propositions
-                    let snapshot_rhs =
-                        ctx.resolve_array_element_value(arr_name, &index.0);
+            if let crate::common::ast::Expr::Index { base, index } = &value.0
+                && let crate::common::ast::Expr::Variable(arr_name) = &base.0
+            {
+                // Try to resolve the value from existing pointwise propositions
+                let snapshot_rhs = ctx.resolve_array_element_value(arr_name, &index.0);
 
-                    if let Some(rhs_expr) = snapshot_rhs {
-                        let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
-                        let name_leaked: &'src str =
-                            Box::leak(name.to_string().into_boxed_str());
-                        let eq_expr = crate::common::ast::Expr::BinOp {
-                            op: crate::common::ast::BinOp::Eq,
-                            lhs: Box::new((
-                                crate::common::ast::Expr::Variable(name_leaked),
-                                dummy_span,
-                            )),
-                            rhs: Box::new((rhs_expr, dummy_span)),
-                        };
-                        let prop = IProposition {
-                            var: name.to_string(),
-                            predicate: Arc::new((eq_expr, dummy_span)),
-                        };
-                        new_ctx = new_ctx.with_proposition(prop);
-                    }
+                if let Some(rhs_expr) = snapshot_rhs {
+                    let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+                    let name_leaked: &'src str = Box::leak(name.to_string().into_boxed_str());
+                    let eq_expr = crate::common::ast::Expr::BinOp {
+                        op: crate::common::ast::BinOp::Eq,
+                        lhs: Box::new((
+                            crate::common::ast::Expr::Variable(name_leaked),
+                            dummy_span,
+                        )),
+                        rhs: Box::new((rhs_expr, dummy_span)),
+                    };
+                    let prop = IProposition {
+                        var: name.to_string(),
+                        predicate: Arc::new((eq_expr, dummy_span)),
+                    };
+                    new_ctx = new_ctx.with_proposition(prop);
                 }
             }
 
@@ -246,9 +244,7 @@ pub fn check_stmt<'src>(
                                 base: rhs_base,
                                 index: rhs_index,
                             } => {
-                                if let crate::common::ast::Expr::Variable(rhs_arr) =
-                                    &rhs_base.0
-                                {
+                                if let crate::common::ast::Expr::Variable(rhs_arr) = &rhs_base.0 {
                                     ctx.resolve_array_element_value(rhs_arr, &rhs_index.0)
                                         .unwrap_or_else(|| rhs.0.clone())
                                 } else {
@@ -290,14 +286,12 @@ pub fn check_stmt<'src>(
 
                         if let Some(idx_val) = resolved_idx {
                             // Known index: remove stale prop for this index, add new one
-                            new_ctx =
-                                new_ctx.without_array_element_prop(arr_name, idx_val);
+                            new_ctx = new_ctx.without_array_element_prop(arr_name, idx_val);
                             new_ctx = new_ctx.with_proposition(prop);
                         } else {
                             // Truly unknown index: any element could be modified,
                             // invalidate all pointwise propositions for this array
-                            new_ctx =
-                                new_ctx.without_all_array_element_props(arr_name);
+                            new_ctx = new_ctx.without_all_array_element_props(arr_name);
                         }
                     }
 
@@ -853,8 +847,7 @@ fn substitute_result_in_postcond<'src>(
         }
         _ => match return_ty {
             IType::SingletonInt(IValue::Int(n)) => {
-                let subst_expr =
-                    substitute_var_with_literal(&postcond.predicate.0, "result", *n);
+                let subst_expr = substitute_var_with_literal(&postcond.predicate.0, "result", *n);
                 IProposition {
                     var: "_".to_string(),
                     predicate: Arc::new((subst_expr, chumsky::span::SimpleSpan::new(0, 0))),
@@ -938,30 +931,48 @@ fn substitute_var_with_literal<'src>(
             }),
         },
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             if *var == var_name {
                 expr.clone()
             } else {
                 Expr::Forall {
                     var,
-                    start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+                    start: Box::new((
+                        substitute_var_with_literal(&start.0, var_name, value),
+                        start.1,
+                    )),
                     end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
-                    body: Box::new((substitute_var_with_literal(&body.0, var_name, value), body.1)),
+                    body: Box::new((
+                        substitute_var_with_literal(&body.0, var_name, value),
+                        body.1,
+                    )),
                 }
             }
         }
         Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => {
             if *var == var_name {
                 expr.clone()
             } else {
                 Expr::Exists {
                     var,
-                    start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+                    start: Box::new((
+                        substitute_var_with_literal(&start.0, var_name, value),
+                        start.1,
+                    )),
                     end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
-                    body: Box::new((substitute_var_with_literal(&body.0, var_name, value), body.1)),
+                    body: Box::new((
+                        substitute_var_with_literal(&body.0, var_name, value),
+                        body.1,
+                    )),
                 }
             }
         }
@@ -1053,7 +1064,9 @@ fn find_invalid_free_var<'src>(
         Expr::ArrayInit { value, length } => find_invalid_free_var(&value.0, allowed)
             .or_else(|| find_invalid_free_var(&length.0, allowed)),
         Expr::If {
-            cond, then_block, else_block,
+            cond,
+            then_block,
+            else_block,
         } => {
             if let Some(v) = find_invalid_free_var(&cond.0, allowed) {
                 return Some(v);
@@ -1072,7 +1085,18 @@ fn find_invalid_free_var<'src>(
             }
             None
         }
-        Expr::Forall { var, start, end, body } | Expr::Exists { var, start, end, body } => {
+        Expr::Forall {
+            var,
+            start,
+            end,
+            body,
+        }
+        | Expr::Exists {
+            var,
+            start,
+            end,
+            body,
+        } => {
             if let Some(v) = find_invalid_free_var(&start.0, allowed) {
                 return Some(v);
             }
@@ -1098,7 +1122,9 @@ fn find_invalid_free_var_in_stmt<'src>(
             .or_else(|| find_invalid_free_var(&rhs.0, allowed)),
         Stmt::Return { expr } => find_invalid_free_var(&expr.0, allowed),
         Stmt::Expr(e) => find_invalid_free_var(&e.0, allowed),
-        Stmt::For { start, end, body, .. } => {
+        Stmt::For {
+            start, end, body, ..
+        } => {
             if let Some(v) = find_invalid_free_var(&start.0, allowed) {
                 return Some(v);
             }

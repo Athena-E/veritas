@@ -129,7 +129,10 @@ impl SmtOracle {
             },
 
             Expr::Forall {
-                var, start, end, body,
+                var,
+                start,
+                end,
+                body,
             } => {
                 let bound = Int::new_const(var.to_string());
                 let lo = Self::translate_expr(&start.0);
@@ -140,7 +143,10 @@ impl SmtOracle {
             }
 
             Expr::Exists {
-                var, start, end, body,
+                var,
+                start,
+                end,
+                body,
             } => {
                 let bound = Int::new_const(var.to_string());
                 let lo = Self::translate_expr(&start.0);
@@ -232,22 +238,15 @@ impl SmtOracle {
                     predicate: Arc::new((eq_expr, dummy_span)),
                 })
             }
-            IType::Array {
-                element_type,
-                size,
-            } => {
+            IType::Array { element_type, size } => {
                 let size_int = match size {
                     IValue::Int(n) => Some(*n),
                     _ => None,
                 };
-                let size_int = match size_int {
-                    Some(n) => n,
-                    None => return None,
-                };
+                let size_int = size_int?;
 
                 let dummy_span = SimpleSpan::new(0, 0);
-                let var_leaked: &'src str =
-                    Box::leak(var_name.to_string().into_boxed_str());
+                let var_leaked: &'src str = Box::leak(var_name.to_string().into_boxed_str());
                 let idx_var: &'src str = Box::leak("__idx".to_string().into_boxed_str());
 
                 // Build arr[__idx]

@@ -120,9 +120,9 @@ pub enum Terminator {
         true_target: BlockId,
         false_target: BlockId,
         /// Constraint added to true branch
-        true_constraint: Constraint,
+        true_constraint: Box<Constraint>,
         /// Constraint added to false branch
-        false_constraint: Constraint,
+        false_constraint: Box<Constraint>,
     },
 
     /// Return from function

@@ -250,8 +250,8 @@ fn lower_for_loop<'src>(
             cond: cmp_reg,
             true_target: body_block,
             false_target: exit_block,
-            true_constraint,
-            false_constraint,
+            true_constraint: Box::new(true_constraint),
+            false_constraint: Box::new(false_constraint),
         },
         vec![entry_block], // Predecessor from entry's jump
     );

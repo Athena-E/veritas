@@ -119,7 +119,10 @@ fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
         Expr::Literal(Literal::Bool(true)) => Some(Constraint::True),
         Expr::Literal(Literal::Bool(false)) => Some(Constraint::False),
         Expr::Forall {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => Some(Constraint::Forall {
             var: var.to_string(),
             lower: expr_to_index(&start.0)?,
@@ -127,7 +130,10 @@ fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
             body: Box::new(expr_to_constraint(&body.0)?),
         }),
         Expr::Exists {
-            var, start, end, body,
+            var,
+            start,
+            end,
+            body,
         } => Some(Constraint::Exists {
             var: var.to_string(),
             lower: expr_to_index(&start.0)?,

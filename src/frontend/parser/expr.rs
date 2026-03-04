@@ -214,19 +214,19 @@ where
 
         // Implication (lowest precedence among binary operators)
         let op_implies = just(Token::Op("==>")).to(BinOp::Implies);
-        let implication = logical.clone().foldl_with(
-            op_implies.then(logical).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        );
+        let implication =
+            logical
+                .clone()
+                .foldl_with(op_implies.then(logical).repeated(), |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                });
 
         implication.labelled("expression").as_context()
     })

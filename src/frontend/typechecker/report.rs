@@ -393,7 +393,10 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
             .with_message("Invalid postcondition variable")
             .with_label(
                 Label::new(span.start..span.end)
-                    .with_message(format!("`{}` is not `result` or a parameter of `{}`", variable, function))
+                    .with_message(format!(
+                        "`{}` is not `result` or a parameter of `{}`",
+                        variable, function
+                    ))
                     .with_color(Color::Red),
             )
             .with_help("Postconditions should use `result` to refer to the return value")
