@@ -40,6 +40,7 @@ fn get_span_start(error: &TypeError) -> usize {
         TypeError::InvalidOperation { span, .. } => span.start,
         TypeError::UnsupportedFeature { span, .. } => span.start,
         TypeError::NotAConstant { span, .. } => span.start,
+        TypeError::InvalidPostconditionVariable { span, .. } => span.start,
     }
 }
 
@@ -381,6 +382,21 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                     .with_color(Color::Red),
             )
             .with_help("Array sizes must be known at compile time")
+            .finish(),
+
+        TypeError::InvalidPostconditionVariable {
+            variable,
+            function,
+            span,
+        } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E019")
+            .with_message("Invalid postcondition variable")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message(format!("`{}` is not `result` or a parameter of `{}`", variable, function))
+                    .with_color(Color::Red),
+            )
+            .with_help("Postconditions should use `result` to refer to the return value")
             .finish(),
     }
 }
