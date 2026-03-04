@@ -260,6 +260,99 @@ impl<'src> TypingContext<'src> {
 
         joined
     }
+
+    /// Look up the RHS of a pointwise proposition `arr_name[index] == <rhs>`.
+    /// Returns the RHS expression if found, so it can be snapshotted into a let binding.
+    pub fn resolve_array_element_value<'a>(
+        &'a self,
+        arr_name: &str,
+        index_expr: &Expr<'src>,
+    ) -> Option<Expr<'src>> {
+        for prop in self.phi.iter() {
+            if prop.var != arr_name {
+                continue;
+            }
+            if let Expr::BinOp {
+                op: BinOp::Eq,
+                lhs,
+                rhs,
+            } = &prop.predicate.0
+            {
+                if let Expr::Index { base, index } = &lhs.0 {
+                    let base_matches =
+                        matches!(&base.0, Expr::Variable(n) if *n == arr_name);
+                    let idx_matches =
+                        format!("{:?}", index.0) == format!("{:?}", index_expr);
+                    if base_matches && idx_matches {
+                        return Some(rhs.0.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Remove ALL pointwise propositions for arr_name[_] == ...
+    /// Used when a symbolic index assignment invalidates all element knowledge.
+    pub fn without_all_array_element_props(&self, arr_name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.phi = new_ctx
+            .phi
+            .into_iter()
+            .filter(|prop| {
+                if prop.var != arr_name {
+                    return true;
+                }
+                match &prop.predicate.0 {
+                    Expr::BinOp {
+                        op: BinOp::Eq,
+                        lhs,
+                        ..
+                    } => match &lhs.0 {
+                        Expr::Index { base, .. } => {
+                            !matches!(&base.0, Expr::Variable(n) if *n == arr_name)
+                        }
+                        _ => true,
+                    },
+                    _ => true,
+                }
+            })
+            .collect();
+        new_ctx
+    }
+
+    /// Remove any pointwise proposition for arr_name[idx_val] == ...
+    /// Used before adding a new proposition for the same index to prevent unsoundness.
+    pub fn without_array_element_prop(&self, arr_name: &str, idx_val: i64) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.phi = new_ctx
+            .phi
+            .into_iter()
+            .filter(|prop| {
+                if prop.var != arr_name {
+                    return true;
+                }
+                match &prop.predicate.0 {
+                    Expr::BinOp {
+                        op: BinOp::Eq,
+                        lhs,
+                        ..
+                    } => match &lhs.0 {
+                        Expr::Index { base, index } => {
+                            let base_matches =
+                                matches!(&base.0, Expr::Variable(n) if *n == arr_name);
+                            let idx_matches =
+                                matches!(&index.0, Expr::Literal(Literal::Int(v)) if *v == idx_val);
+                            !(base_matches && idx_matches)
+                        }
+                        _ => true,
+                    },
+                    _ => true,
+                }
+            })
+            .collect();
+        new_ctx
+    }
 }
 
 /// Compute the join (least upper bound) of two types

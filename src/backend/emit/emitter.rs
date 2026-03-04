@@ -303,7 +303,7 @@ fn emit_type<'src>(ty: &IType<'src>) -> String {
         IType::RefMut(inner) => format!("&mut {}", emit_type(inner)),
         IType::SingletonInt(val) => format!("int({})", val),
         IType::RefinedInt { base: _, prop } => {
-            format!("{{a: int | {} }}", prop.var)
+            format!("{{{}: int | {} }}", prop.var, prop)
         }
         IType::Master(inner) => format!("master({})", emit_type(inner)),
     }
@@ -320,6 +320,7 @@ fn emit_constraint(constraint: &Constraint) -> String {
             IndexExpr::Add(l, r) => format!("({} + {})", emit_index_expr(l), emit_index_expr(r)),
             IndexExpr::Sub(l, r) => format!("({} - {})", emit_index_expr(l), emit_index_expr(r)),
             IndexExpr::Mul(l, r) => format!("({} * {})", emit_index_expr(l), emit_index_expr(r)),
+            IndexExpr::Select(name, idx) => format!("{}[{}]", name, emit_index_expr(idx)),
         }
     }
 
@@ -335,6 +336,33 @@ fn emit_constraint(constraint: &Constraint) -> String {
         Constraint::And(l, r) => format!("({} && {})", emit_constraint(l), emit_constraint(r)),
         Constraint::Or(l, r) => format!("({} || {})", emit_constraint(l), emit_constraint(r)),
         Constraint::Not(c) => format!("!{}", emit_constraint(c)),
+        Constraint::Implies(l, r) => {
+            format!("({} ==> {})", emit_constraint(l), emit_constraint(r))
+        }
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => format!(
+            "(forall {} in {}..{} {{ {} }})",
+            var,
+            emit_index_expr(lower),
+            emit_index_expr(upper),
+            emit_constraint(body)
+        ),
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => format!(
+            "(exists {} in {}..{} {{ {} }})",
+            var,
+            emit_index_expr(lower),
+            emit_index_expr(upper),
+            emit_constraint(body)
+        ),
     }
 }
 

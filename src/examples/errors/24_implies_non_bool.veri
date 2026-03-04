@@ -1,0 +1,14 @@
+// Error: implication precondition not satisfied at call site
+// The precondition requires x > 0 ==> y > 0,
+// but caller passes x=5, y=-1 (which violates the implication)
+// Expected error: precondition not satisfied
+
+fn guarded(x: int, y: int) -> int
+    requires x > 0 ==> y > 0
+{
+    y
+}
+
+fn caller() -> int {
+    guarded(5, 0)
+}

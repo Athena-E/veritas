@@ -58,6 +58,15 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
             Box::new(expr_to_index_expr(rhs)?),
         )),
 
+        TExpr::Index { base, index, .. } => {
+            if let TExpr::Variable { name, .. } = &base.0 {
+                let idx = expr_to_index_expr(index)?;
+                Some(IndexExpr::Select(name.clone(), Box::new(idx)))
+            } else {
+                None
+            }
+        }
+
         _ => None,
     }
 }
@@ -105,6 +114,10 @@ fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
             }
             AstBinOp::And => and_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs)),
             AstBinOp::Or => or_constraints(expr_to_constraint(lhs), expr_to_constraint(rhs)),
+            AstBinOp::Implies => Constraint::Implies(
+                Box::new(expr_to_constraint(lhs)),
+                Box::new(expr_to_constraint(rhs)),
+            ),
             _ => Constraint::True,
         },
 
@@ -215,6 +228,7 @@ fn convert_binop(op: AstBinOp) -> BinaryOp {
         AstBinOp::Gte => BinaryOp::Ge,
         AstBinOp::And => BinaryOp::And,
         AstBinOp::Or => BinaryOp::Or,
+        AstBinOp::Implies => panic!("specification-only operator"),
     }
 }
 

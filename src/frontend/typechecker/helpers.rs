@@ -172,6 +172,37 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
             rhs: rhs.clone(),
         },
 
+        // !(P ==> Q) becomes P && !Q
+        Expr::BinOp {
+            op: BinOp::Implies,
+            lhs,
+            rhs,
+        } => Expr::BinOp {
+            op: BinOp::And,
+            lhs: lhs.clone(),
+            rhs: Box::new((negate_expr(&rhs.0), rhs.1)),
+        },
+
+        // !forall{P} → exists{!P}
+        Expr::Forall {
+            var, start, end, body,
+        } => Expr::Exists {
+            var,
+            start: start.clone(),
+            end: end.clone(),
+            body: Box::new((negate_expr(&body.0), body.1)),
+        },
+
+        // !exists{P} → forall{!P}
+        Expr::Exists {
+            var, start, end, body,
+        } => Expr::Forall {
+            var,
+            start: start.clone(),
+            end: end.clone(),
+            body: Box::new((negate_expr(&body.0), body.1)),
+        },
+
         _ => Expr::UnaryOp {
             op: UnaryOp::Not,
             cond: Box::new((expr.clone(), SimpleSpan::new(0, 0))),
@@ -307,6 +338,45 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
             value: Box::new((rename_expr_var(&value.0, old, new), value.1)),
             length: Box::new((rename_expr_var(&length.0, old, new), length.1)),
         },
+        Expr::Forall {
+            var, start, end, body,
+        } => {
+            if *var == old {
+                // Bound variable shadows — don't rename inside body
+                Expr::Forall {
+                    var,
+                    start: Box::new((rename_expr_var(&start.0, old, new), start.1)),
+                    end: Box::new((rename_expr_var(&end.0, old, new), end.1)),
+                    body: body.clone(),
+                }
+            } else {
+                Expr::Forall {
+                    var,
+                    start: Box::new((rename_expr_var(&start.0, old, new), start.1)),
+                    end: Box::new((rename_expr_var(&end.0, old, new), end.1)),
+                    body: Box::new((rename_expr_var(&body.0, old, new), body.1)),
+                }
+            }
+        }
+        Expr::Exists {
+            var, start, end, body,
+        } => {
+            if *var == old {
+                Expr::Exists {
+                    var,
+                    start: Box::new((rename_expr_var(&start.0, old, new), start.1)),
+                    end: Box::new((rename_expr_var(&end.0, old, new), end.1)),
+                    body: body.clone(),
+                }
+            } else {
+                Expr::Exists {
+                    var,
+                    start: Box::new((rename_expr_var(&start.0, old, new), start.1)),
+                    end: Box::new((rename_expr_var(&end.0, old, new), end.1)),
+                    body: Box::new((rename_expr_var(&body.0, old, new), body.1)),
+                }
+            }
+        }
         Expr::If {
             cond,
             then_block,
@@ -324,6 +394,96 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
                     .collect()
             }),
         },
+    }
+}
+
+/// Substitute an expression for all occurrences of a variable in an expression.
+/// Unlike `rename_expr_var` which replaces a variable with another variable name,
+/// this replaces a variable with an arbitrary expression (e.g., `arr[i]`).
+/// Respects bound variable shadowing in quantifiers.
+pub fn substitute_expr_for_var<'src>(
+    expr: &Expr<'src>,
+    var: &str,
+    replacement: &Expr<'src>,
+) -> Expr<'src> {
+    match expr {
+        Expr::Error => Expr::Error,
+        Expr::Literal(lit) => Expr::Literal(lit.clone()),
+        Expr::Variable(name) => {
+            if *name == var {
+                replacement.clone()
+            } else {
+                Expr::Variable(name)
+            }
+        }
+        Expr::BinOp { op, lhs, rhs } => Expr::BinOp {
+            op: *op,
+            lhs: Box::new((substitute_expr_for_var(&lhs.0, var, replacement), lhs.1)),
+            rhs: Box::new((substitute_expr_for_var(&rhs.0, var, replacement), rhs.1)),
+        },
+        Expr::UnaryOp { op, cond } => Expr::UnaryOp {
+            op: *op,
+            cond: Box::new((substitute_expr_for_var(&cond.0, var, replacement), cond.1)),
+        },
+        Expr::Index { base, index } => Expr::Index {
+            base: Box::new((substitute_expr_for_var(&base.0, var, replacement), base.1)),
+            index: Box::new((substitute_expr_for_var(&index.0, var, replacement), index.1)),
+        },
+        Expr::Call { func_name, args } => Expr::Call {
+            func_name,
+            args: (
+                args.0
+                    .iter()
+                    .map(|arg| (substitute_expr_for_var(&arg.0, var, replacement), arg.1))
+                    .collect(),
+                args.1,
+            ),
+        },
+        Expr::ArrayInit { value, length } => Expr::ArrayInit {
+            value: Box::new((substitute_expr_for_var(&value.0, var, replacement), value.1)),
+            length: Box::new((substitute_expr_for_var(&length.0, var, replacement), length.1)),
+        },
+        Expr::Forall {
+            var: bound, start, end, body,
+        } => {
+            if *bound == var {
+                // Bound variable shadows — don't substitute inside body
+                Expr::Forall {
+                    var: bound,
+                    start: Box::new((substitute_expr_for_var(&start.0, var, replacement), start.1)),
+                    end: Box::new((substitute_expr_for_var(&end.0, var, replacement), end.1)),
+                    body: body.clone(),
+                }
+            } else {
+                Expr::Forall {
+                    var: bound,
+                    start: Box::new((substitute_expr_for_var(&start.0, var, replacement), start.1)),
+                    end: Box::new((substitute_expr_for_var(&end.0, var, replacement), end.1)),
+                    body: Box::new((substitute_expr_for_var(&body.0, var, replacement), body.1)),
+                }
+            }
+        }
+        Expr::Exists {
+            var: bound, start, end, body,
+        } => {
+            if *bound == var {
+                Expr::Exists {
+                    var: bound,
+                    start: Box::new((substitute_expr_for_var(&start.0, var, replacement), start.1)),
+                    end: Box::new((substitute_expr_for_var(&end.0, var, replacement), end.1)),
+                    body: body.clone(),
+                }
+            } else {
+                Expr::Exists {
+                    var: bound,
+                    start: Box::new((substitute_expr_for_var(&start.0, var, replacement), start.1)),
+                    end: Box::new((substitute_expr_for_var(&end.0, var, replacement), end.1)),
+                    body: Box::new((substitute_expr_for_var(&body.0, var, replacement), body.1)),
+                }
+            }
+        }
+        // For specification-level expressions, If/For shouldn't appear
+        other => other.clone(),
     }
 }
 

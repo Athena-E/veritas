@@ -152,7 +152,7 @@ pub fn synth_expr<'src>(
 
         // BINOP-BOOL: Boolean operations
         Expr::BinOp {
-            op: op @ (BinOp::And | BinOp::Or),
+            op: op @ (BinOp::And | BinOp::Or | BinOp::Implies),
             lhs,
             rhs,
         } => {
@@ -309,9 +309,9 @@ pub fn synth_expr<'src>(
             // Check precondition if present
             if let Some(ref precond) = sig.precondition {
                 // Substitute argument values into the precondition
-                // For now, create a modified proposition with actual argument types
+                let arg_exprs: Vec<&Expr> = args.0.iter().map(|a| &a.0).collect();
                 let substituted_precond =
-                    substitute_args_in_precond(precond, &sig.parameters, &arg_types);
+                    substitute_args_in_precond(precond, &sig.parameters, &arg_types, &arg_exprs);
 
                 if !crate::frontend::typechecker::check_provable(ctx, &substituted_precond) {
                     return Err(TypeError::PreconditionViolation {
@@ -409,6 +409,52 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), result_ty))
         }
 
+        // FORALL/EXISTS: Quantifier expressions (specification-only)
+        Expr::Forall {
+            var, start, end, body,
+        }
+        | Expr::Exists {
+            var, start, end, body,
+        } => {
+            // Synthesize start and end — verify both are <: Int
+            let (_tstart, start_ty) = synth_expr(ctx, start)?;
+            if !is_subtype(ctx, &start_ty, &IType::Int) {
+                return Err(TypeError::TypeMismatch {
+                    expected: IType::Int,
+                    found: start_ty,
+                    span: start.1,
+                });
+            }
+            let (_tend, end_ty) = synth_expr(ctx, end)?;
+            if !is_subtype(ctx, &end_ty, &IType::Int) {
+                return Err(TypeError::TypeMismatch {
+                    expected: IType::Int,
+                    found: end_ty,
+                    span: end.1,
+                });
+            }
+
+            // Extend context with var: Int as an immutable binding
+            let extended_ctx = ctx.with_immutable(var.to_string(), IType::Int);
+
+            // Synthesize body — verify it is <: Bool
+            let (_tbody, body_ty) = synth_expr(&extended_ctx, body)?;
+            if !is_subtype(&extended_ctx, &body_ty, &IType::Bool) {
+                return Err(TypeError::TypeMismatch {
+                    expected: IType::Bool,
+                    found: body_ty,
+                    span: body.1,
+                });
+            }
+
+            // Quantifiers only appear in specification contexts (IProposition)
+            // Return a dummy TExpr — this should never appear in runtime code
+            Err(TypeError::UnsupportedFeature {
+                feature: "quantifier in runtime expression".to_string(),
+                span,
+            })
+        }
+
         _ => Err(TypeError::UnsupportedFeature {
             feature: "this expression form".to_string(),
             span,
@@ -431,19 +477,39 @@ fn substitute_args_in_precond<'src>(
     precond: &crate::common::types::IProposition<'src>,
     params: &[(String, IType<'src>)],
     arg_types: &[IType<'src>],
+    arg_exprs: &[&Expr<'src>],
 ) -> crate::common::types::IProposition<'src> {
     use crate::common::types::IProposition;
+    use crate::frontend::typechecker::helpers::rename_expr_var;
     use chumsky::span::SimpleSpan;
 
-    // Build a substitution map from parameter names to argument types
-    let mut substitutions: std::collections::HashMap<&str, &IType> =
-        std::collections::HashMap::new();
-    for ((param_name, _), arg_ty) in params.iter().zip(arg_types.iter()) {
-        substitutions.insert(param_name.as_str(), arg_ty);
+    // First pass: rename parameter variables to argument variable names
+    // e.g. if param is "arr" and argument is variable "pos", rename arr -> pos
+    let mut renamed_expr = precond.predicate.0.clone();
+    for ((param_name, _), arg_expr) in params.iter().zip(arg_exprs.iter()) {
+        if let Expr::Variable(arg_var) = arg_expr {
+            if *arg_var != param_name.as_str() {
+                renamed_expr = rename_expr_var(&renamed_expr, param_name.as_str(), arg_var);
+            }
+        }
     }
 
-    // Substitute in the predicate expression
-    let substituted_expr = substitute_in_expr(&precond.predicate.0, &substitutions);
+    // Second pass: substitute singleton values (int literals)
+    let mut substitutions: std::collections::HashMap<&str, &IType> =
+        std::collections::HashMap::new();
+    for ((param_name, _), (arg_ty, arg_expr)) in
+        params.iter().zip(arg_types.iter().zip(arg_exprs.iter()))
+    {
+        // Use the argument variable name if it was renamed, otherwise the param name
+        let key: &str = if let Expr::Variable(arg_var) = arg_expr {
+            arg_var
+        } else {
+            param_name.as_str()
+        };
+        substitutions.insert(key, arg_ty);
+    }
+
+    let substituted_expr = substitute_in_expr(&renamed_expr, &substitutions);
 
     IProposition {
         var: precond.var.clone(),
@@ -481,6 +547,37 @@ fn substitute_in_expr<'src>(
             op: *op,
             cond: Box::new((substitute_in_expr(&cond.0, subs), cond.1)),
         },
+
+        Expr::Forall {
+            var, start, end, body,
+        } => {
+            if subs.contains_key(var) {
+                // Bound variable shadows substitution
+                expr.clone()
+            } else {
+                Expr::Forall {
+                    var,
+                    start: Box::new((substitute_in_expr(&start.0, subs), start.1)),
+                    end: Box::new((substitute_in_expr(&end.0, subs), end.1)),
+                    body: Box::new((substitute_in_expr(&body.0, subs), body.1)),
+                }
+            }
+        }
+
+        Expr::Exists {
+            var, start, end, body,
+        } => {
+            if subs.contains_key(var) {
+                expr.clone()
+            } else {
+                Expr::Exists {
+                    var,
+                    start: Box::new((substitute_in_expr(&start.0, subs), start.1)),
+                    end: Box::new((substitute_in_expr(&end.0, subs), end.1)),
+                    body: Box::new((substitute_in_expr(&body.0, subs), body.1)),
+                }
+            }
+        }
 
         // Other expression forms stay as-is
         _ => expr.clone(),

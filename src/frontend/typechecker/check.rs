@@ -40,7 +40,37 @@ pub fn check_stmt<'src>(
             }
 
             // Add to context with the synthesized type (more precise)
-            let new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+            let mut new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+
+            // If RHS is an array index, add proposition: name == <snapshot>
+            // We snapshot the array element's current known value so that
+            // subsequent mutations to the array don't drag this binding along.
+            if let crate::common::ast::Expr::Index { base, index } = &value.0 {
+                if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
+                    // Try to resolve the value from existing pointwise propositions
+                    let snapshot_rhs =
+                        ctx.resolve_array_element_value(arr_name, &index.0);
+
+                    if let Some(rhs_expr) = snapshot_rhs {
+                        let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+                        let name_leaked: &'src str =
+                            Box::leak(name.to_string().into_boxed_str());
+                        let eq_expr = crate::common::ast::Expr::BinOp {
+                            op: crate::common::ast::BinOp::Eq,
+                            lhs: Box::new((
+                                crate::common::ast::Expr::Variable(name_leaked),
+                                dummy_span,
+                            )),
+                            rhs: Box::new((rhs_expr, dummy_span)),
+                        };
+                        let prop = IProposition {
+                            var: name.to_string(),
+                            predicate: Arc::new((eq_expr, dummy_span)),
+                        };
+                        new_ctx = new_ctx.with_proposition(prop);
+                    }
+                }
+            }
 
             let tstmt = TStmt::Let {
                 is_mut: false,
@@ -202,8 +232,76 @@ pub fn check_stmt<'src>(
                         rhs: trhs,
                     };
 
-                    // Context unchanged for array assignment
-                    Ok(((tstmt, span), ctx.clone()))
+                    // Add pointwise proposition: arr[index] == rhs
+                    let mut new_ctx = ctx.clone();
+
+                    if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
+                        let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+
+                        // Snapshot the RHS: if it's an array index with a known
+                        // value, resolve it now so the proposition doesn't contain
+                        // a live reference that becomes stale after later mutations.
+                        let snapshot_rhs = match &rhs.0 {
+                            crate::common::ast::Expr::Index {
+                                base: rhs_base,
+                                index: rhs_index,
+                            } => {
+                                if let crate::common::ast::Expr::Variable(rhs_arr) =
+                                    &rhs_base.0
+                                {
+                                    ctx.resolve_array_element_value(rhs_arr, &rhs_index.0)
+                                        .unwrap_or_else(|| rhs.0.clone())
+                                } else {
+                                    rhs.0.clone()
+                                }
+                            }
+                            _ => rhs.0.clone(),
+                        };
+
+                        // Build: arr[index] == snapshot_rhs
+                        let arr_index_expr = crate::common::ast::Expr::Index {
+                            base: Box::new((
+                                crate::common::ast::Expr::Variable(arr_name),
+                                dummy_span,
+                            )),
+                            index: Box::new((index.0.clone(), dummy_span)),
+                        };
+                        let eq_expr = crate::common::ast::Expr::BinOp {
+                            op: crate::common::ast::BinOp::Eq,
+                            lhs: Box::new((arr_index_expr, dummy_span)),
+                            rhs: Box::new((snapshot_rhs, dummy_span)),
+                        };
+                        let prop = IProposition {
+                            var: arr_name.to_string(),
+                            predicate: Arc::new((eq_expr, dummy_span)),
+                        };
+
+                        // Resolve the index to a concrete value if possible:
+                        // either a literal int, or a variable with singleton type
+                        let resolved_idx = match &index.0 {
+                            crate::common::ast::Expr::Literal(
+                                crate::common::ast::Literal::Int(n),
+                            ) => Some(*n),
+                            _ => match &index_ty {
+                                IType::SingletonInt(IValue::Int(n)) => Some(*n),
+                                _ => None,
+                            },
+                        };
+
+                        if let Some(idx_val) = resolved_idx {
+                            // Known index: remove stale prop for this index, add new one
+                            new_ctx =
+                                new_ctx.without_array_element_prop(arr_name, idx_val);
+                            new_ctx = new_ctx.with_proposition(prop);
+                        } else {
+                            // Truly unknown index: any element could be modified,
+                            // invalidate all pointwise propositions for this array
+                            new_ctx =
+                                new_ctx.without_all_array_element_props(arr_name);
+                        }
+                    }
+
+                    Ok(((tstmt, span), new_ctx))
                 }
 
                 _ => Err(TypeError::InvalidAssignment {
@@ -231,7 +329,7 @@ pub fn check_stmt<'src>(
 
             // Check postcondition if present
             if let Some(postcond) = ctx.get_postcondition() {
-                let substituted = substitute_result_in_postcond(postcond, &ret_ty);
+                let substituted = substitute_result_in_postcond(postcond, &ret_ty, &expr.0);
                 if !check_postcondition_provable(ctx, &substituted) {
                     return Err(TypeError::PostconditionViolation {
                         function: ctx.get_current_function().cloned().unwrap_or_default(),
@@ -537,7 +635,7 @@ pub fn check_function<'src>(
 
         // Verify postcondition at implicit return
         if let Some(ref postcond) = postcondition {
-            let substituted = substitute_result_in_postcond(postcond, &ret_ty);
+            let substituted = substitute_result_in_postcond(postcond, &ret_ty, &ret_expr.0);
             if !check_postcondition_provable(&final_ctx, &substituted) {
                 return Err(TypeError::PostconditionViolation {
                     function: func_inner.name.to_string(),
@@ -629,6 +727,22 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
                     predicate: Arc::new(postcond_expr.clone()),
                 });
 
+        // Validate postcondition only references `result` and parameter names
+        if let Some(postcond_expr) = &func.postcondition {
+            let mut allowed: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            allowed.insert("result");
+            for p in &func.parameters {
+                allowed.insert(p.0.name);
+            }
+            if let Some(bad_var) = find_invalid_free_var(&postcond_expr.0, &allowed) {
+                return Err(TypeError::InvalidPostconditionVariable {
+                    variable: bad_var.to_string(),
+                    function: func.name.to_string(),
+                    span: postcond_expr.1,
+                });
+            }
+        }
+
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
@@ -718,23 +832,36 @@ fn eval_array_size<'src>(
     }
 }
 
-/// Substitute "result" in postcondition with concrete value from return type
+/// Substitute "result" in postcondition with the return value.
+/// When the return expression is a bare variable, rename "result" to that variable
+/// so existing propositions in the context (e.g. pointwise array facts) are visible.
+/// When the return type is a singleton int, substitute the literal value directly.
 fn substitute_result_in_postcond<'src>(
     postcond: &IProposition<'src>,
     return_ty: &IType<'src>,
+    return_expr: &crate::common::ast::Expr<'src>,
 ) -> IProposition<'src> {
-    // If the return type is a singleton, we can substitute the concrete value for "result"
-    // Otherwise, we keep the postcondition as-is and rely on SMT solving
-    match return_ty {
-        IType::SingletonInt(IValue::Int(n)) => {
-            // Substitute "result" with the literal value in the predicate
-            let subst_expr = substitute_var_with_literal(&postcond.predicate.0, "result", *n);
+    use crate::frontend::typechecker::helpers::rename_expr_var;
+
+    match return_expr {
+        crate::common::ast::Expr::Variable(var_name) => {
+            let renamed = rename_expr_var(&postcond.predicate.0, "result", var_name);
             IProposition {
-                var: "_".to_string(),
-                predicate: Arc::new((subst_expr, chumsky::span::SimpleSpan::new(0, 0))),
+                var: var_name.to_string(),
+                predicate: Arc::new((renamed, postcond.predicate.1)),
             }
         }
-        _ => postcond.clone(),
+        _ => match return_ty {
+            IType::SingletonInt(IValue::Int(n)) => {
+                let subst_expr =
+                    substitute_var_with_literal(&postcond.predicate.0, "result", *n);
+                IProposition {
+                    var: "_".to_string(),
+                    predicate: Arc::new((subst_expr, chumsky::span::SimpleSpan::new(0, 0))),
+                }
+            }
+            _ => postcond.clone(),
+        },
     }
 }
 
@@ -810,6 +937,34 @@ fn substitute_var_with_literal<'src>(
                     .collect()
             }),
         },
+        Expr::Forall {
+            var, start, end, body,
+        } => {
+            if *var == var_name {
+                expr.clone()
+            } else {
+                Expr::Forall {
+                    var,
+                    start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+                    end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
+                    body: Box::new((substitute_var_with_literal(&body.0, var_name, value), body.1)),
+                }
+            }
+        }
+        Expr::Exists {
+            var, start, end, body,
+        } => {
+            if *var == var_name {
+                expr.clone()
+            } else {
+                Expr::Exists {
+                    var,
+                    start: Box::new((substitute_var_with_literal(&start.0, var_name, value), start.1)),
+                    end: Box::new((substitute_var_with_literal(&end.0, var_name, value), end.1)),
+                    body: Box::new((substitute_var_with_literal(&body.0, var_name, value), body.1)),
+                }
+            }
+        }
     }
 }
 
@@ -865,6 +1020,98 @@ fn substitute_var_in_stmt<'src>(
                 .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
                 .collect(),
         },
+    }
+}
+
+/// Find the first free variable in an expression that is not in the allowed set.
+/// Returns None if all free variables are allowed.
+/// Respects quantifier-bound variables (forall/exists introduce scoped bindings).
+fn find_invalid_free_var<'src>(
+    expr: &crate::common::ast::Expr<'src>,
+    allowed: &std::collections::HashSet<&str>,
+) -> Option<&'src str> {
+    use crate::common::ast::Expr;
+
+    match expr {
+        Expr::Variable(name) => {
+            if allowed.contains(name) {
+                None
+            } else {
+                Some(name)
+            }
+        }
+        Expr::Literal(_) | Expr::Error => None,
+        Expr::BinOp { lhs, rhs, .. } => find_invalid_free_var(&lhs.0, allowed)
+            .or_else(|| find_invalid_free_var(&rhs.0, allowed)),
+        Expr::UnaryOp { cond, .. } => find_invalid_free_var(&cond.0, allowed),
+        Expr::Index { base, index } => find_invalid_free_var(&base.0, allowed)
+            .or_else(|| find_invalid_free_var(&index.0, allowed)),
+        Expr::Call { args, .. } => args
+            .0
+            .iter()
+            .find_map(|(arg, _)| find_invalid_free_var(arg, allowed)),
+        Expr::ArrayInit { value, length } => find_invalid_free_var(&value.0, allowed)
+            .or_else(|| find_invalid_free_var(&length.0, allowed)),
+        Expr::If {
+            cond, then_block, else_block,
+        } => {
+            if let Some(v) = find_invalid_free_var(&cond.0, allowed) {
+                return Some(v);
+            }
+            for (stmt, _) in then_block {
+                if let Some(v) = find_invalid_free_var_in_stmt(stmt, allowed) {
+                    return Some(v);
+                }
+            }
+            if let Some(stmts) = else_block {
+                for (stmt, _) in stmts {
+                    if let Some(v) = find_invalid_free_var_in_stmt(stmt, allowed) {
+                        return Some(v);
+                    }
+                }
+            }
+            None
+        }
+        Expr::Forall { var, start, end, body } | Expr::Exists { var, start, end, body } => {
+            if let Some(v) = find_invalid_free_var(&start.0, allowed) {
+                return Some(v);
+            }
+            if let Some(v) = find_invalid_free_var(&end.0, allowed) {
+                return Some(v);
+            }
+            let mut inner_allowed = allowed.clone();
+            inner_allowed.insert(var);
+            find_invalid_free_var(&body.0, &inner_allowed)
+        }
+    }
+}
+
+fn find_invalid_free_var_in_stmt<'src>(
+    stmt: &crate::common::ast::Stmt<'src>,
+    allowed: &std::collections::HashSet<&str>,
+) -> Option<&'src str> {
+    use crate::common::ast::Stmt;
+
+    match stmt {
+        Stmt::Let { value, .. } => find_invalid_free_var(&value.0, allowed),
+        Stmt::Assignment { lhs, rhs } => find_invalid_free_var(&lhs.0, allowed)
+            .or_else(|| find_invalid_free_var(&rhs.0, allowed)),
+        Stmt::Return { expr } => find_invalid_free_var(&expr.0, allowed),
+        Stmt::Expr(e) => find_invalid_free_var(&e.0, allowed),
+        Stmt::For { start, end, body, .. } => {
+            if let Some(v) = find_invalid_free_var(&start.0, allowed) {
+                return Some(v);
+            }
+            if let Some(v) = find_invalid_free_var(&end.0, allowed) {
+                return Some(v);
+            }
+            for (s, _) in body {
+                if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
+                    return Some(v);
+                }
+            }
+            None
+        }
     }
 }
 

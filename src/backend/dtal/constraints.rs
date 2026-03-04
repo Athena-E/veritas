@@ -19,6 +19,19 @@ pub enum Constraint {
     And(Box<Constraint>, Box<Constraint>),
     Or(Box<Constraint>, Box<Constraint>),
     Not(Box<Constraint>),
+    Implies(Box<Constraint>, Box<Constraint>),
+    Forall {
+        var: String,
+        lower: IndexExpr,
+        upper: IndexExpr,
+        body: Box<Constraint>,
+    },
+    Exists {
+        var: String,
+        lower: IndexExpr,
+        upper: IndexExpr,
+        body: Box<Constraint>,
+    },
 }
 
 /// An expression in the index domain
@@ -29,6 +42,7 @@ pub enum IndexExpr {
     Add(Box<IndexExpr>, Box<IndexExpr>),
     Sub(Box<IndexExpr>, Box<IndexExpr>),
     Mul(Box<IndexExpr>, Box<IndexExpr>),
+    Select(String, Box<IndexExpr>),
 }
 
 impl fmt::Display for IndexExpr {
@@ -39,6 +53,7 @@ impl fmt::Display for IndexExpr {
             IndexExpr::Add(l, r) => write!(f, "({} + {})", l, r),
             IndexExpr::Sub(l, r) => write!(f, "({} - {})", l, r),
             IndexExpr::Mul(l, r) => write!(f, "({} * {})", l, r),
+            IndexExpr::Select(name, idx) => write!(f, "{}[{}]", name, idx),
         }
     }
 }
@@ -57,6 +72,19 @@ impl fmt::Display for Constraint {
             Constraint::And(l, r) => write!(f, "({} && {})", l, r),
             Constraint::Or(l, r) => write!(f, "({} || {})", l, r),
             Constraint::Not(c) => write!(f, "!{}", c),
+            Constraint::Implies(l, r) => write!(f, "({} ==> {})", l, r),
+            Constraint::Forall {
+                var,
+                lower,
+                upper,
+                body,
+            } => write!(f, "(forall {} in {}..{} {{ {} }})", var, lower, upper, body),
+            Constraint::Exists {
+                var,
+                lower,
+                upper,
+                body,
+            } => write!(f, "(exists {} in {}..{} {{ {} }})", var, lower, upper, body),
         }
     }
 }

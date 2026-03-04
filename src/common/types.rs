@@ -85,6 +85,7 @@ fn fmt_expr(expr: &Expr) -> String {
                 BinOp::Gte => ">=",
                 BinOp::And => "&&",
                 BinOp::Or => "||",
+                BinOp::Implies => "==>",
             };
             format!("{} {} {}", fmt_expr(&lhs.0), op_str, fmt_expr(&rhs.0))
         }
@@ -111,6 +112,24 @@ fn fmt_expr(expr: &Expr) -> String {
             format!("[{}; {}]", fmt_expr(&value.0), fmt_expr(&length.0))
         }
         Expr::If { .. } => "<if-expr>".to_string(), // Simplified for type display
+        Expr::Forall {
+            var, start, end, body,
+        } => format!(
+            "forall {} in {}..{} {{ {} }}",
+            var,
+            fmt_expr(&start.0),
+            fmt_expr(&end.0),
+            fmt_expr(&body.0)
+        ),
+        Expr::Exists {
+            var, start, end, body,
+        } => format!(
+            "exists {} in {}..{} {{ {} }}",
+            var,
+            fmt_expr(&start.0),
+            fmt_expr(&end.0),
+            fmt_expr(&body.0)
+        ),
     }
 }
 

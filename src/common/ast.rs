@@ -20,6 +20,8 @@ pub enum Token<'src> {
     Requires,
     Ensures,
     Invariant,
+    Forall,
+    Exists,
     // Type keywords
     Int,
     Bool,
@@ -45,10 +47,31 @@ impl fmt::Display for Token<'_> {
             Token::Requires => write!(f, "requires"),
             Token::Ensures => write!(f, "ensures"),
             Token::Invariant => write!(f, "invariant"),
+            Token::Forall => write!(f, "forall"),
+            Token::Exists => write!(f, "exists"),
             Token::Int => write!(f, "int"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
+        }
+    }
+}
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BinOp::Add => write!(f, "+"),
+            BinOp::Sub => write!(f, "-"),
+            BinOp::Mul => write!(f, "*"),
+            BinOp::Eq => write!(f, "=="),
+            BinOp::NotEq => write!(f, "!="),
+            BinOp::Lt => write!(f, "<"),
+            BinOp::Lte => write!(f, "<="),
+            BinOp::Gt => write!(f, ">"),
+            BinOp::Gte => write!(f, ">="),
+            BinOp::And => write!(f, "&&"),
+            BinOp::Or => write!(f, "||"),
+            BinOp::Implies => write!(f, "==>"),
         }
     }
 }
@@ -67,6 +90,7 @@ pub enum BinOp {
     Gte,
     And,
     Or,
+    Implies,
 }
 
 // Unary operators
@@ -133,6 +157,18 @@ pub enum Expr<'src> {
         cond: Box<Spanned<Self>>,
         then_block: Vec<Spanned<Stmt<'src>>>,
         else_block: Option<Vec<Spanned<Stmt<'src>>>>,
+    },
+    Forall {
+        var: &'src str,
+        start: Box<Spanned<Self>>,
+        end: Box<Spanned<Self>>,
+        body: Box<Spanned<Self>>,
+    },
+    Exists {
+        var: &'src str,
+        start: Box<Spanned<Self>>,
+        end: Box<Spanned<Self>>,
+        body: Box<Spanned<Self>>,
     },
 }
 

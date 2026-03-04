@@ -122,6 +122,12 @@ pub enum TypeError<'src> {
     NotAConstant {
         span: Span,
     },
+
+    InvalidPostconditionVariable {
+        variable: String,
+        function: String,
+        span: Span,
+    },
 }
 
 impl<'src> fmt::Display for TypeError<'src> {
@@ -318,6 +324,18 @@ impl<'src> fmt::Display for TypeError<'src> {
 
             TypeError::NotAConstant { span } => {
                 write!(f, "Expression at {:?} is not a compile-time constant", span)
+            }
+
+            TypeError::InvalidPostconditionVariable {
+                variable,
+                function,
+                span,
+            } => {
+                write!(
+                    f,
+                    "Postcondition of `{}` at {:?} references `{}`, which is not `result` or a parameter",
+                    function, span, variable
+                )
             }
         }
     }
