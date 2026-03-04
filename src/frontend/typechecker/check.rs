@@ -202,8 +202,47 @@ pub fn check_stmt<'src>(
                         rhs: trhs,
                     };
 
-                    // Context unchanged for array assignment
-                    Ok(((tstmt, span), ctx.clone()))
+                    // Add pointwise proposition: arr[index] == rhs
+                    let mut new_ctx = ctx.clone();
+
+                    if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
+                        let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+
+                        // Build: arr[index] == rhs
+                        let arr_index_expr = crate::common::ast::Expr::Index {
+                            base: Box::new((
+                                crate::common::ast::Expr::Variable(arr_name),
+                                dummy_span,
+                            )),
+                            index: Box::new((index.0.clone(), dummy_span)),
+                        };
+                        let eq_expr = crate::common::ast::Expr::BinOp {
+                            op: crate::common::ast::BinOp::Eq,
+                            lhs: Box::new((arr_index_expr, dummy_span)),
+                            rhs: Box::new((rhs.0.clone(), dummy_span)),
+                        };
+                        let prop = IProposition {
+                            var: arr_name.to_string(),
+                            predicate: Arc::new((eq_expr, dummy_span)),
+                        };
+
+                        if let crate::common::ast::Expr::Literal(
+                            crate::common::ast::Literal::Int(idx_val),
+                        ) = &index.0
+                        {
+                            // Literal index: remove stale prop for this index, add new one
+                            new_ctx =
+                                new_ctx.without_array_element_prop(arr_name, *idx_val);
+                            new_ctx = new_ctx.with_proposition(prop);
+                        } else {
+                            // Symbolic index: any element could be modified,
+                            // invalidate all pointwise propositions for this array
+                            new_ctx =
+                                new_ctx.without_all_array_element_props(arr_name);
+                        }
+                    }
+
+                    Ok(((tstmt, span), new_ctx))
                 }
 
                 _ => Err(TypeError::InvalidAssignment {
