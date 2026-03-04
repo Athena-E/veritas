@@ -1,0 +1,40 @@
+fn list_arg_sorted(arr: [int; 3]) -> int 
+    requires forall i in 0..2 { arr[i] <= arr[i+1] } 
+{
+    1
+}
+
+fn list_return_sorted() -> [int; 3] 
+    ensures forall i in 0..2 { result[i] <= result[i+1] } 
+{
+    let mut arr: [int; 3] = [0;3];
+    arr[0] = 0;
+    arr[1] = 1;
+    arr[2] = 2;
+    arr
+}
+
+fn main() -> int {
+    let ret_arr: [int; 3] = list_return_sorted();
+
+    // test error
+    //let mut arr: [int; 3] = [0;3];
+    //arr[0] = 0;
+    //arr[1] = 1;
+    //arr[2] = 0;
+
+    // test success
+    let mut arr: [int; 3] = [0;3];
+    arr[0] = 0;
+    arr[1] = 1;
+    arr[2] = 2;
+    let a: int = 1;
+    let b: int = a + 1;
+    
+    let c: int = arr[1];
+    arr[1] = arr[2];
+    arr[2] = c;
+    arr[2] = arr[1];
+    arr[1] = c;
+    list_arg_sorted(arr)
+}
