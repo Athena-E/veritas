@@ -4,8 +4,8 @@ use crate::frontend::typechecker::context::TypingContext;
 use crate::frontend::typechecker::helpers::{rename_expr_var, substitute_expr_for_var};
 use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
-use z3::ast::{Bool, Int};
-use z3::{FuncDecl, SatResult, Solver, Sort};
+use z3::ast::{Array as Z3Array, Bool, Int};
+use z3::{SatResult, Solver, Sort};
 
 pub struct SmtOracle;
 
@@ -41,13 +41,12 @@ impl SmtOracle {
             },
 
             Expr::Index { base, index } => {
-                // Encode array indexing as uninterpreted function: arr[i] → f_arr(i)
+                // Encode array indexing using Z3 array theory: arr[i] → select(arr, i)
                 if let Expr::Variable(name) = &base.0 {
-                    let func_name = format!("f_{}", name);
                     let int_sort = Sort::int();
-                    let func = FuncDecl::new(func_name.as_str(), &[&int_sort], &int_sort);
+                    let arr = Z3Array::new_const(name.to_string(), &int_sort, &int_sort);
                     let idx = Self::translate_expr(&index.0);
-                    func.apply(&[&idx]).as_int().unwrap()
+                    arr.select(&idx).as_int().unwrap()
                 } else {
                     panic!("Complex array base not supported in SMT")
                 }
