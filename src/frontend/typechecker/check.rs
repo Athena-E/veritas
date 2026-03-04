@@ -226,16 +226,25 @@ pub fn check_stmt<'src>(
                             predicate: Arc::new((eq_expr, dummy_span)),
                         };
 
-                        if let crate::common::ast::Expr::Literal(
-                            crate::common::ast::Literal::Int(idx_val),
-                        ) = &index.0
-                        {
-                            // Literal index: remove stale prop for this index, add new one
+                        // Resolve the index to a concrete value if possible:
+                        // either a literal int, or a variable with singleton type
+                        let resolved_idx = match &index.0 {
+                            crate::common::ast::Expr::Literal(
+                                crate::common::ast::Literal::Int(n),
+                            ) => Some(*n),
+                            _ => match &index_ty {
+                                IType::SingletonInt(IValue::Int(n)) => Some(*n),
+                                _ => None,
+                            },
+                        };
+
+                        if let Some(idx_val) = resolved_idx {
+                            // Known index: remove stale prop for this index, add new one
                             new_ctx =
-                                new_ctx.without_array_element_prop(arr_name, *idx_val);
+                                new_ctx.without_array_element_prop(arr_name, idx_val);
                             new_ctx = new_ctx.with_proposition(prop);
                         } else {
-                            // Symbolic index: any element could be modified,
+                            // Truly unknown index: any element could be modified,
                             // invalidate all pointwise propositions for this array
                             new_ctx =
                                 new_ctx.without_all_array_element_props(arr_name);
