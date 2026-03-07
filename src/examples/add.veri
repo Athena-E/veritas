@@ -7,7 +7,7 @@
 // n + n should synthesize to {v: int | v = n + n}
 // The SMT solver should prove: (n > 0) ∧ (v = n + n) ⟹ v > 0
 fn double(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
-    let result: { v:int | v > 0 } = n + n;
+    let result: int = n + n;
     result
 }
 
