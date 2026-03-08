@@ -1,0 +1,21 @@
+fn sorted(arr: [int; 5]) -> int
+    requires forall i in 0..4 { arr[i] <= arr[i+1] }
+{ 1 }
+
+fn main() -> int {
+    let mut arr: [int; 5] = [0;5];
+    //for i in 0..5 invariant forall j in 0..i { arr[j] == j } {
+    //    arr[i] = i;
+    //}
+    //sorted(arr)
+    let mut sum: int = 1;
+    let mut a: int = 0;
+    for i in 0..5 invariant forall j in 0..i { arr[j] <= 2 } {
+        if i > 2 {
+            arr[i] = 1;
+        } else {
+            arr[i] = 1;
+        }
+    }
+    a
+}

@@ -16,6 +16,10 @@ fn list_return_sorted() -> [int; 3]
 
 fn main() -> int {
     let ret_arr: [int; 3] = list_return_sorted();
+    list_arg_sorted(ret_arr);
+
+    let mut zero_arr: [int; 3] = [0; 3];
+    list_arg_sorted(zero_arr);
 
     // test error
     //let mut arr: [int; 3] = [0;3];

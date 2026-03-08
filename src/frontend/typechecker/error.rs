@@ -128,6 +128,14 @@ pub enum TypeError<'src> {
         function: String,
         span: Span,
     },
+
+    InvariantNotEstablished {
+        invariant_span: Span,
+    },
+
+    InvariantNotPreserved {
+        invariant_span: Span,
+    },
 }
 
 impl<'src> fmt::Display for TypeError<'src> {
@@ -335,6 +343,22 @@ impl<'src> fmt::Display for TypeError<'src> {
                     f,
                     "Postcondition of `{}` at {:?} references `{}`, which is not `result` or a parameter",
                     function, span, variable
+                )
+            }
+
+            TypeError::InvariantNotEstablished { invariant_span } => {
+                write!(
+                    f,
+                    "Loop invariant not established at entry at {:?}",
+                    invariant_span
+                )
+            }
+
+            TypeError::InvariantNotPreserved { invariant_span } => {
+                write!(
+                    f,
+                    "Loop invariant not preserved by loop body at {:?}",
+                    invariant_span
                 )
             }
         }

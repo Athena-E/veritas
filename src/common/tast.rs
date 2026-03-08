@@ -102,7 +102,7 @@ pub enum TStmt<'src> {
         var_ty: IType<'src>,
         start: Box<Spanned<TExpr<'src>>>,
         end: Box<Spanned<TExpr<'src>>>,
-        invariant: Option<Spanned<TExpr<'src>>>,
+        invariant: Option<crate::backend::dtal::constraints::Constraint>,
         body: Vec<Spanned<TStmt<'src>>>,
     },
 }

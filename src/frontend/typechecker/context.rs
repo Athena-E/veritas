@@ -50,6 +50,10 @@ pub struct TypingContext<'src> {
 
     // Current function name (for error reporting)
     current_function: Option<String>,
+
+    // Whether quantifier expressions (forall/exists) are allowed
+    // True in specification contexts (invariants, requires, ensures)
+    pub allow_quantifiers: bool,
 }
 
 impl<'src> TypingContext<'src> {
@@ -62,6 +66,7 @@ impl<'src> TypingContext<'src> {
             expected_return: None,
             postcondition: None,
             current_function: None,
+            allow_quantifiers: false,
         }
     }
 
@@ -75,6 +80,7 @@ impl<'src> TypingContext<'src> {
             expected_return: None,
             postcondition: None,
             current_function: None,
+            allow_quantifiers: false,
         }
     }
 
@@ -489,15 +495,75 @@ fn intersect_propositions<'src>(
     phi2: &Vector<IProposition<'src>>,
 ) -> Vector<IProposition<'src>> {
     let mut result = Vector::new();
+    let mut matched_in_phi2 = std::collections::HashSet::new();
+
     for p1 in phi1.iter() {
-        for p2 in phi2.iter() {
+        let mut found_exact = false;
+        for (i2, p2) in phi2.iter().enumerate() {
             if propositions_equivalent(p1, p2) {
                 result.push_back(p1.clone());
+                matched_in_phi2.insert(i2);
+                found_exact = true;
                 break;
+            }
+        }
+        if !found_exact {
+            // Try to form a disjunction with a matching array element prop
+            if let Some(p1_parts) = extract_array_eq_parts(p1) {
+                for (i2, p2) in phi2.iter().enumerate() {
+                    if matched_in_phi2.contains(&i2) {
+                        continue;
+                    }
+                    if let Some(p2_parts) = extract_array_eq_parts(p2) {
+                        // Same array, same index → disjoin the equalities
+                        if p1_parts.arr_name == p2_parts.arr_name
+                            && format!("{:?}", p1_parts.index) == format!("{:?}", p2_parts.index)
+                        {
+                            let disj_expr = Expr::BinOp {
+                                op: BinOp::Or,
+                                lhs: Box::new(p1.predicate.as_ref().clone()),
+                                rhs: Box::new(p2.predicate.as_ref().clone()),
+                            };
+                            let dummy_span = SimpleSpan::new(0, 0);
+                            result.push_back(IProposition {
+                                var: p1.var.clone(),
+                                predicate: Arc::new((disj_expr, dummy_span)),
+                            });
+                            matched_in_phi2.insert(i2);
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
     result
+}
+
+/// Parts of an array element equality proposition: arr[index] == rhs
+struct ArrayEqParts<'a, 'src> {
+    arr_name: &'a str,
+    index: &'a Expr<'src>,
+}
+
+/// Extract arr_name and index from a proposition of the form `arr[index] == rhs`
+fn extract_array_eq_parts<'a, 'src>(prop: &'a IProposition<'src>) -> Option<ArrayEqParts<'a, 'src>> {
+    if let Expr::BinOp {
+        op: BinOp::Eq,
+        lhs,
+        ..
+    } = &prop.predicate.0
+    {
+        if let Expr::Index { base, index } = &lhs.0 {
+            if let Expr::Variable(name) = &base.0 {
+                return Some(ArrayEqParts {
+                    arr_name: name,
+                    index: &index.0,
+                });
+            }
+        }
+    }
+    None
 }
 
 /// Check if two propositions are structurally equivalent

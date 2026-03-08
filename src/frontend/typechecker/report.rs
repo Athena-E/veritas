@@ -41,6 +41,12 @@ fn get_span_start(error: &TypeError) -> usize {
         TypeError::UnsupportedFeature { span, .. } => span.start,
         TypeError::NotAConstant { span, .. } => span.start,
         TypeError::InvalidPostconditionVariable { span, .. } => span.start,
+        TypeError::InvariantNotEstablished {
+            invariant_span, ..
+        } => invariant_span.start,
+        TypeError::InvariantNotPreserved {
+            invariant_span, ..
+        } => invariant_span.start,
     }
 }
 
@@ -401,5 +407,35 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
             )
             .with_help("Postconditions should use `result` to refer to the return value")
             .finish(),
+
+        TypeError::InvariantNotEstablished { invariant_span } => {
+            Report::build(ReportKind::Error, invariant_span.start..invariant_span.end)
+                .with_code("E020")
+                .with_message("Loop invariant not established at entry")
+                .with_label(
+                    Label::new(invariant_span.start..invariant_span.end)
+                        .with_message("this invariant does not hold when the loop begins")
+                        .with_color(Color::Red),
+                )
+                .with_help(
+                    "The invariant must be true before the first iteration. Check the initial values of variables referenced in the invariant.",
+                )
+                .finish()
+        }
+
+        TypeError::InvariantNotPreserved { invariant_span } => {
+            Report::build(ReportKind::Error, invariant_span.start..invariant_span.end)
+                .with_code("E021")
+                .with_message("Loop invariant not preserved by loop body")
+                .with_label(
+                    Label::new(invariant_span.start..invariant_span.end)
+                        .with_message("this invariant may not hold after the loop body executes")
+                        .with_color(Color::Red),
+                )
+                .with_help(
+                    "The loop body must maintain the invariant. Ensure that the invariant at (i+1) follows from the invariant at i and the body's effects.",
+                )
+                .finish()
+        }
     }
 }

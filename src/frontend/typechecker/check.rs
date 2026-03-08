@@ -287,12 +287,13 @@ pub fn check_stmt<'src>(
                         if let Some(idx_val) = resolved_idx {
                             // Known index: remove stale prop for this index, add new one
                             new_ctx = new_ctx.without_array_element_prop(arr_name, idx_val);
-                            new_ctx = new_ctx.with_proposition(prop);
                         } else {
                             // Truly unknown index: any element could be modified,
                             // invalidate all pointwise propositions for this array
                             new_ctx = new_ctx.without_all_array_element_props(arr_name);
                         }
+                        // Always add the new proposition (arr[idx] == rhs)
+                        new_ctx = new_ctx.with_proposition(prop);
                     }
 
                     Ok(((tstmt, span), new_ctx))
@@ -402,7 +403,10 @@ pub fn check_stmt<'src>(
             // Process invariant if present
             let tinvariant = if let Some(inv_expr) = invariant {
                 // Type-check the invariant expression (must be bool)
-                let (tinv, inv_ty) = synth_expr(&loop_ctx, inv_expr)?;
+                // Allow quantifiers in specification context
+                let mut spec_ctx = loop_ctx.clone();
+                spec_ctx.allow_quantifiers = true;
+                let (_tinv, inv_ty) = synth_expr(&spec_ctx, inv_expr)?;
 
                 if !is_subtype(&loop_ctx, &inv_ty, &IType::Bool) {
                     return Err(TypeError::TypeMismatch {
@@ -412,24 +416,60 @@ pub fn check_stmt<'src>(
                     });
                 }
 
-                // Check that invariant holds at loop entry (with i = start)
-                // For now, we add the invariant as an assumption for the loop body
-                // A full implementation would verify it holds initially and is preserved
+                // Step 3: Verify invariant holds at loop entry (base case)
+                // Substitute start for var in invariant
+                use crate::frontend::typechecker::helpers::substitute_expr_for_var;
+                let inv_at_entry =
+                    substitute_expr_for_var(&inv_expr.0, var, &start.0);
+                let inv_at_entry_prop = IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new((inv_at_entry, inv_expr.1)),
+                };
+                if !crate::frontend::typechecker::check_provable(ctx, &inv_at_entry_prop) {
+                    return Err(TypeError::InvariantNotEstablished {
+                        invariant_span: inv_expr.1,
+                    });
+                }
 
                 // Add invariant as proposition to loop body context
-                let inv_prop = crate::common::types::IProposition {
+                let inv_prop = IProposition {
                     var: var.to_string(),
                     predicate: Arc::new(inv_expr.clone()),
                 };
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
-                Some(tinv)
+                // Convert invariant to Constraint for lowering
+                crate::backend::lower::function::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };
 
             // Check body statements with invariant in context
-            let (tbody, _) = check_stmts(&loop_ctx, body)?;
+            let (tbody, body_ctx) = check_stmts(&loop_ctx, body)?;
+
+            // Step 4: Verify loop body preserves invariant (inductive step)
+            if let Some(inv_expr) = invariant {
+                use crate::frontend::typechecker::helpers::substitute_expr_for_var;
+                let var_plus_1 = crate::common::ast::Expr::BinOp {
+                    op: crate::common::ast::BinOp::Add,
+                    lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                    rhs: Box::new((
+                        crate::common::ast::Expr::Literal(crate::common::ast::Literal::Int(1)),
+                        dummy_span,
+                    )),
+                };
+                let inv_at_next =
+                    substitute_expr_for_var(&inv_expr.0, var, &var_plus_1);
+                let inv_at_next_prop = IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new((inv_at_next, inv_expr.1)),
+                };
+                if !crate::frontend::typechecker::check_provable(&body_ctx, &inv_at_next_prop) {
+                    return Err(TypeError::InvariantNotPreserved {
+                        invariant_span: inv_expr.1,
+                    });
+                }
+            }
 
             let tstmt = TStmt::For {
                 var: var.to_string(),
@@ -440,8 +480,31 @@ pub fn check_stmt<'src>(
                 body: tbody,
             };
 
-            // Context unchanged after loop (loop variable goes out of scope)
-            Ok(((tstmt, span), ctx.clone()))
+            // Step 5: Project invariant into post-loop context
+            let post_ctx = if let Some(inv_expr) = invariant {
+                use crate::frontend::typechecker::helpers::substitute_expr_for_var;
+                let mut post = ctx.clone();
+
+                // Invalidate pointwise props for arrays modified in loop body
+                let modified = collect_modified_arrays(body);
+                for arr_name in &modified {
+                    post = post.without_all_array_element_props(arr_name);
+                }
+
+                // Substitute end for var in invariant
+                let inv_at_end =
+                    substitute_expr_for_var(&inv_expr.0, var, &end.0);
+                let inv_at_end_prop = IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new((inv_at_end, inv_expr.1)),
+                };
+                post = post.with_proposition(inv_at_end_prop);
+                post
+            } else {
+                ctx.clone()
+            };
+
+            Ok(((tstmt, span), post_ctx))
         }
 
         // EXPR-STMT: Expression statement
@@ -461,6 +524,48 @@ pub fn check_stmt<'src>(
                     Ok(((tstmt, span), ctx.clone()))
                 }
             }
+        }
+    }
+}
+
+/// Collect names of arrays modified by index assignment in a statement list.
+/// Recurses into if-blocks and nested for-loops.
+fn collect_modified_arrays<'src>(stmts: &[Spanned<Stmt<'src>>]) -> std::collections::HashSet<String> {
+    let mut modified = std::collections::HashSet::new();
+    collect_modified_arrays_inner(stmts, &mut modified);
+    modified
+}
+
+fn collect_modified_arrays_inner<'src>(
+    stmts: &[Spanned<Stmt<'src>>],
+    modified: &mut std::collections::HashSet<String>,
+) {
+    for stmt in stmts {
+        match &stmt.0 {
+            Stmt::Assignment { lhs, .. } => {
+                if let crate::common::ast::Expr::Index { base, .. } = &lhs.0 {
+                    if let crate::common::ast::Expr::Variable(name) = &base.0 {
+                        modified.insert(name.to_string());
+                    }
+                }
+            }
+            Stmt::Expr(expr) => {
+                if let crate::common::ast::Expr::If {
+                    then_block,
+                    else_block,
+                    ..
+                } = &expr.0
+                {
+                    collect_modified_arrays_inner(then_block, modified);
+                    if let Some(else_stmts) = else_block {
+                        collect_modified_arrays_inner(else_stmts, modified);
+                    }
+                }
+            }
+            Stmt::For { body, .. } => {
+                collect_modified_arrays_inner(body, modified);
+            }
+            _ => {}
         }
     }
 }

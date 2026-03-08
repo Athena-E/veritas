@@ -74,6 +74,12 @@ pub enum TirInstr<'src> {
 
     /// Assume a constraint (from branch or precondition)
     AssumeConstraint { constraint: Constraint },
+
+    /// Assert a constraint (proven by frontend, carried for verification)
+    AssertConstraint {
+        constraint: Constraint,
+        msg: String,
+    },
 }
 
 impl<'src> TirInstr<'src> {
@@ -89,6 +95,7 @@ impl<'src> TirInstr<'src> {
             TirInstr::Call { dst, .. } => *dst,
             TirInstr::AllocArray { dst, .. } => Some(*dst),
             TirInstr::AssumeConstraint { .. } => None,
+            TirInstr::AssertConstraint { .. } => None,
         }
     }
 
@@ -104,6 +111,7 @@ impl<'src> TirInstr<'src> {
             TirInstr::Call { result_ty, .. } => Some(result_ty),
             TirInstr::AllocArray { element_ty, .. } => Some(element_ty),
             TirInstr::AssumeConstraint { .. } => None,
+            TirInstr::AssertConstraint { .. } => None,
         }
     }
 }
