@@ -440,8 +440,33 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extend context with var: Int as an immutable binding
-            let extended_ctx = ctx.with_immutable(var.to_string(), IType::Int);
+            // Extend context with var: Int and range propositions
+            let mut extended_ctx = ctx.with_immutable(var.to_string(), IType::Int);
+
+            // Add range propositions: var >= start && var < end
+            let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+            let lower_bound_expr = Expr::BinOp {
+                op: BinOp::Gte,
+                lhs: Box::new((Expr::Variable(var), dummy_span)),
+                rhs: Box::new((*start.clone()).clone()),
+            };
+            extended_ctx = extended_ctx.with_proposition(
+                crate::common::types::IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new((lower_bound_expr, dummy_span)),
+                },
+            );
+            let upper_bound_expr = Expr::BinOp {
+                op: BinOp::Lt,
+                lhs: Box::new((Expr::Variable(var), dummy_span)),
+                rhs: Box::new((*end.clone()).clone()),
+            };
+            extended_ctx = extended_ctx.with_proposition(
+                crate::common::types::IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new((upper_bound_expr, dummy_span)),
+                },
+            );
 
             // Synthesize body — verify it is <: Bool
             let (_tbody, body_ty) = synth_expr(&extended_ctx, body)?;
@@ -453,12 +478,26 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Quantifiers only appear in specification contexts (IProposition)
-            // Return a dummy TExpr — this should never appear in runtime code
-            Err(TypeError::UnsupportedFeature {
-                feature: "quantifier in runtime expression".to_string(),
-                span,
-            })
+            // Quantifiers only appear in specification contexts (invariants, requires, ensures).
+            // Return a dummy TExpr — the invariant is consumed as raw Expr, not TExpr.
+            // Callers in specification context should use allow_quantifiers=true.
+            if ctx.allow_quantifiers {
+                Ok((
+                    (
+                        TExpr::Literal {
+                            value: Literal::Bool(true),
+                            ty: IType::Bool,
+                        },
+                        span,
+                    ),
+                    IType::Bool,
+                ))
+            } else {
+                Err(TypeError::UnsupportedFeature {
+                    feature: "quantifier in runtime expression".to_string(),
+                    span,
+                })
+            }
         }
 
         _ => Err(TypeError::UnsupportedFeature {
