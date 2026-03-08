@@ -3,6 +3,9 @@ name = "veritas"
 version = "0.1.0"
 edition = "2024"
 
+[profile.dev]
+debug = "line-tables-only"
+
 [dependencies]
 ariadne = "0.5.1"
 chumsky = "1.0.0-alpha.8"
