@@ -50,6 +50,10 @@ pub struct TypingContext<'src> {
 
     // Current function name (for error reporting)
     current_function: Option<String>,
+
+    // Whether quantifier expressions (forall/exists) are allowed
+    // True in specification contexts (invariants, requires, ensures)
+    pub allow_quantifiers: bool,
 }
 
 impl<'src> TypingContext<'src> {
@@ -62,6 +66,7 @@ impl<'src> TypingContext<'src> {
             expected_return: None,
             postcondition: None,
             current_function: None,
+            allow_quantifiers: false,
         }
     }
 
@@ -75,6 +80,7 @@ impl<'src> TypingContext<'src> {
             expected_return: None,
             postcondition: None,
             current_function: None,
+            allow_quantifiers: false,
         }
     }
 
