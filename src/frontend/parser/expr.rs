@@ -161,20 +161,22 @@ where
         // Addition and subtraction
         let op_add = just(Token::Op("+")).to(BinOp::Add);
         let op_sub = just(Token::Op("-")).to(BinOp::Sub);
-        let sum = product.clone().foldl_with(
-            choice((op_add, op_sub)).then(product).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        )
-        .boxed();
+        let sum = product
+            .clone()
+            .foldl_with(
+                choice((op_add, op_sub)).then(product).repeated(),
+                |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                },
+            )
+            .boxed();
 
         // Comparisons
         let op_lt = just(Token::Op("<")).to(BinOp::Lt);
@@ -202,20 +204,22 @@ where
         // Logical operators
         let op_and = just(Token::Op("&&")).to(BinOp::And);
         let op_or = just(Token::Op("||")).to(BinOp::Or);
-        let logical = comparison.clone().foldl_with(
-            choice((op_and, op_or)).then(comparison).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        )
-        .boxed();
+        let logical = comparison
+            .clone()
+            .foldl_with(
+                choice((op_and, op_or)).then(comparison).repeated(),
+                |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                },
+            )
+            .boxed();
 
         // Implication (lowest precedence among binary operators)
         let op_implies = just(Token::Op("==>")).to(BinOp::Implies);
