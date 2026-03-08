@@ -527,9 +527,18 @@ pub fn check_stmt<'src>(
     }
 }
 
-/// Collect names of arrays modified by index assignment in a statement list
+/// Collect names of arrays modified by index assignment in a statement list.
+/// Recurses into if-blocks and nested for-loops.
 fn collect_modified_arrays<'src>(stmts: &[Spanned<Stmt<'src>>]) -> std::collections::HashSet<String> {
     let mut modified = std::collections::HashSet::new();
+    collect_modified_arrays_inner(stmts, &mut modified);
+    modified
+}
+
+fn collect_modified_arrays_inner<'src>(
+    stmts: &[Spanned<Stmt<'src>>],
+    modified: &mut std::collections::HashSet<String>,
+) {
     for stmt in stmts {
         match &stmt.0 {
             Stmt::Assignment { lhs, .. } => {
@@ -539,10 +548,25 @@ fn collect_modified_arrays<'src>(stmts: &[Spanned<Stmt<'src>>]) -> std::collecti
                     }
                 }
             }
+            Stmt::Expr(expr) => {
+                if let crate::common::ast::Expr::If {
+                    then_block,
+                    else_block,
+                    ..
+                } = &expr.0
+                {
+                    collect_modified_arrays_inner(then_block, modified);
+                    if let Some(else_stmts) = else_block {
+                        collect_modified_arrays_inner(else_stmts, modified);
+                    }
+                }
+            }
+            Stmt::For { body, .. } => {
+                collect_modified_arrays_inner(body, modified);
+            }
             _ => {}
         }
     }
-    modified
 }
 
 /// Check an if-statement with context joining
