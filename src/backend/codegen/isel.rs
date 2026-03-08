@@ -131,6 +131,13 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
                 constraint: constraint.clone(),
             });
         }
+
+        TirInstr::AssertConstraint { constraint, msg } => {
+            instrs.push(DtalInstr::ConstraintAssert {
+                constraint: constraint.clone(),
+                msg: msg.clone(),
+            });
+        }
     }
 }
 

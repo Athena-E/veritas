@@ -406,7 +406,7 @@ pub fn check_stmt<'src>(
                 // Allow quantifiers in specification context
                 let mut spec_ctx = loop_ctx.clone();
                 spec_ctx.allow_quantifiers = true;
-                let (tinv, inv_ty) = synth_expr(&spec_ctx, inv_expr)?;
+                let (_tinv, inv_ty) = synth_expr(&spec_ctx, inv_expr)?;
 
                 if !is_subtype(&loop_ctx, &inv_ty, &IType::Bool) {
                     return Err(TypeError::TypeMismatch {
@@ -438,7 +438,8 @@ pub fn check_stmt<'src>(
                 };
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
-                Some(tinv)
+                // Convert invariant to Constraint for lowering
+                crate::backend::lower::function::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };

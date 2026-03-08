@@ -171,7 +171,7 @@ fn lower_for_loop<'src>(
     var_ty: &IType<'src>,
     start: &Spanned<TExpr<'src>>,
     end: &Spanned<TExpr<'src>>,
-    _invariant: Option<&Spanned<TExpr<'src>>>,
+    invariant: Option<&Constraint>,
     body: &[Spanned<TStmt<'src>>],
 ) {
     // 1. In the entry block (current), lower start and end expressions
@@ -224,6 +224,14 @@ fn lower_for_loop<'src>(
             ctx.bind_var(name, phi_reg);
             loop_carried_vars.push((name.clone(), phi_reg));
         }
+    }
+
+    // Emit loop invariant assertion (if present)
+    if let Some(inv_constraint) = invariant {
+        ctx.emit(TirInstr::AssertConstraint {
+            constraint: inv_constraint.clone(),
+            msg: format!("loop invariant: {}", inv_constraint),
+        });
     }
 
     // 4. Compare i < end

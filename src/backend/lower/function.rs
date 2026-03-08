@@ -65,12 +65,12 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
 }
 
 /// Convert an IProposition to a Constraint
-fn proposition_to_constraint(prop: &IProposition) -> Option<Constraint> {
+pub(super) fn proposition_to_constraint(prop: &IProposition) -> Option<Constraint> {
     expr_to_constraint(&prop.predicate.0)
 }
 
 /// Convert an Expr to a Constraint (for boolean expressions)
-fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
+pub fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
     match expr {
         Expr::BinOp { op, lhs, rhs } => {
             match op {
