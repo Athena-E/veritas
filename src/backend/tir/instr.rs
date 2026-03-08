@@ -76,10 +76,7 @@ pub enum TirInstr<'src> {
     AssumeConstraint { constraint: Constraint },
 
     /// Assert a constraint (proven by frontend, carried for verification)
-    AssertConstraint {
-        constraint: Constraint,
-        msg: String,
-    },
+    AssertConstraint { constraint: Constraint, msg: String },
 }
 
 impl<'src> TirInstr<'src> {

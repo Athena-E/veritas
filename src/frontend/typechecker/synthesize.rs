@@ -450,23 +450,19 @@ pub fn synth_expr<'src>(
                 lhs: Box::new((Expr::Variable(var), dummy_span)),
                 rhs: Box::new((*start.clone()).clone()),
             };
-            extended_ctx = extended_ctx.with_proposition(
-                crate::common::types::IProposition {
-                    var: var.to_string(),
-                    predicate: Arc::new((lower_bound_expr, dummy_span)),
-                },
-            );
+            extended_ctx = extended_ctx.with_proposition(crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new((lower_bound_expr, dummy_span)),
+            });
             let upper_bound_expr = Expr::BinOp {
                 op: BinOp::Lt,
                 lhs: Box::new((Expr::Variable(var), dummy_span)),
                 rhs: Box::new((*end.clone()).clone()),
             };
-            extended_ctx = extended_ctx.with_proposition(
-                crate::common::types::IProposition {
-                    var: var.to_string(),
-                    predicate: Arc::new((upper_bound_expr, dummy_span)),
-                },
-            );
+            extended_ctx = extended_ctx.with_proposition(crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new((upper_bound_expr, dummy_span)),
+            });
 
             // Synthesize body — verify it is <: Bool
             let (_tbody, body_ty) = synth_expr(&extended_ctx, body)?;

@@ -547,21 +547,19 @@ struct ArrayEqParts<'a, 'src> {
 }
 
 /// Extract arr_name and index from a proposition of the form `arr[index] == rhs`
-fn extract_array_eq_parts<'a, 'src>(prop: &'a IProposition<'src>) -> Option<ArrayEqParts<'a, 'src>> {
+fn extract_array_eq_parts<'a, 'src>(
+    prop: &'a IProposition<'src>,
+) -> Option<ArrayEqParts<'a, 'src>> {
     if let Expr::BinOp {
-        op: BinOp::Eq,
-        lhs,
-        ..
+        op: BinOp::Eq, lhs, ..
     } = &prop.predicate.0
+        && let Expr::Index { base, index } = &lhs.0
+        && let Expr::Variable(name) = &base.0
     {
-        if let Expr::Index { base, index } = &lhs.0 {
-            if let Expr::Variable(name) = &base.0 {
-                return Some(ArrayEqParts {
-                    arr_name: name,
-                    index: &index.0,
-                });
-            }
-        }
+        return Some(ArrayEqParts {
+            arr_name: name,
+            index: &index.0,
+        });
     }
     None
 }

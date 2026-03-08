@@ -41,12 +41,8 @@ fn get_span_start(error: &TypeError) -> usize {
         TypeError::UnsupportedFeature { span, .. } => span.start,
         TypeError::NotAConstant { span, .. } => span.start,
         TypeError::InvalidPostconditionVariable { span, .. } => span.start,
-        TypeError::InvariantNotEstablished {
-            invariant_span, ..
-        } => invariant_span.start,
-        TypeError::InvariantNotPreserved {
-            invariant_span, ..
-        } => invariant_span.start,
+        TypeError::InvariantNotEstablished { invariant_span, .. } => invariant_span.start,
+        TypeError::InvariantNotPreserved { invariant_span, .. } => invariant_span.start,
     }
 }
 

@@ -419,8 +419,7 @@ pub fn check_stmt<'src>(
                 // Step 3: Verify invariant holds at loop entry (base case)
                 // Substitute start for var in invariant
                 use crate::frontend::typechecker::helpers::substitute_expr_for_var;
-                let inv_at_entry =
-                    substitute_expr_for_var(&inv_expr.0, var, &start.0);
+                let inv_at_entry = substitute_expr_for_var(&inv_expr.0, var, &start.0);
                 let inv_at_entry_prop = IProposition {
                     var: var.to_string(),
                     predicate: Arc::new((inv_at_entry, inv_expr.1)),
@@ -458,8 +457,7 @@ pub fn check_stmt<'src>(
                         dummy_span,
                     )),
                 };
-                let inv_at_next =
-                    substitute_expr_for_var(&inv_expr.0, var, &var_plus_1);
+                let inv_at_next = substitute_expr_for_var(&inv_expr.0, var, &var_plus_1);
                 let inv_at_next_prop = IProposition {
                     var: var.to_string(),
                     predicate: Arc::new((inv_at_next, inv_expr.1)),
@@ -492,8 +490,7 @@ pub fn check_stmt<'src>(
                 }
 
                 // Substitute end for var in invariant
-                let inv_at_end =
-                    substitute_expr_for_var(&inv_expr.0, var, &end.0);
+                let inv_at_end = substitute_expr_for_var(&inv_expr.0, var, &end.0);
                 let inv_at_end_prop = IProposition {
                     var: var.to_string(),
                     predicate: Arc::new((inv_at_end, inv_expr.1)),
@@ -530,7 +527,9 @@ pub fn check_stmt<'src>(
 
 /// Collect names of arrays modified by index assignment in a statement list.
 /// Recurses into if-blocks and nested for-loops.
-fn collect_modified_arrays<'src>(stmts: &[Spanned<Stmt<'src>>]) -> std::collections::HashSet<String> {
+fn collect_modified_arrays<'src>(
+    stmts: &[Spanned<Stmt<'src>>],
+) -> std::collections::HashSet<String> {
     let mut modified = std::collections::HashSet::new();
     collect_modified_arrays_inner(stmts, &mut modified);
     modified
@@ -543,10 +542,10 @@ fn collect_modified_arrays_inner<'src>(
     for stmt in stmts {
         match &stmt.0 {
             Stmt::Assignment { lhs, .. } => {
-                if let crate::common::ast::Expr::Index { base, .. } = &lhs.0 {
-                    if let crate::common::ast::Expr::Variable(name) = &base.0 {
-                        modified.insert(name.to_string());
-                    }
+                if let crate::common::ast::Expr::Index { base, .. } = &lhs.0
+                    && let crate::common::ast::Expr::Variable(name) = &base.0
+                {
+                    modified.insert(name.to_string());
                 }
             }
             Stmt::Expr(expr) => {
