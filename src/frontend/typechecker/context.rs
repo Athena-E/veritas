@@ -295,7 +295,8 @@ impl<'src> TypingContext<'src> {
         None
     }
 
-    /// Remove ALL pointwise propositions for arr_name[_] == ...
+    /// Remove ALL propositions about arr_name elements — both pointwise
+    /// `arr[k] == v` and quantified `forall i { ... arr[i] ... }`.
     /// Used when a symbolic index assignment invalidates all element knowledge.
     pub fn without_all_array_element_props(&self, arr_name: &str) -> Self {
         let mut new_ctx = self.clone();
@@ -306,24 +307,15 @@ impl<'src> TypingContext<'src> {
                 if prop.var != arr_name {
                     return true;
                 }
-                match &prop.predicate.0 {
-                    Expr::BinOp {
-                        op: BinOp::Eq, lhs, ..
-                    } => match &lhs.0 {
-                        Expr::Index { base, .. } => {
-                            !matches!(&base.0, Expr::Variable(n) if *n == arr_name)
-                        }
-                        _ => true,
-                    },
-                    _ => true,
-                }
+                !expr_references_array_index(&prop.predicate.0, arr_name)
             })
             .collect();
         new_ctx
     }
 
-    /// Remove any pointwise proposition for arr_name[idx_val] == ...
-    /// Used before adding a new proposition for the same index to prevent unsoundness.
+    /// Remove the pointwise proposition for arr_name[idx_val] == ... and any
+    /// quantified propositions over arr_name (since modifying one element
+    /// invalidates a universal claim).
     pub fn without_array_element_prop(&self, arr_name: &str, idx_val: i64) -> Self {
         let mut new_ctx = self.clone();
         new_ctx.phi = new_ctx
@@ -334,6 +326,11 @@ impl<'src> TypingContext<'src> {
                     return true;
                 }
                 match &prop.predicate.0 {
+                    // Remove quantified propositions over this array
+                    Expr::Forall { .. } | Expr::Exists { .. } => {
+                        !expr_references_array_index(&prop.predicate.0, arr_name)
+                    }
+                    // Remove matching pointwise proposition
                     Expr::BinOp {
                         op: BinOp::Eq, lhs, ..
                     } => match &lhs.0 {
@@ -351,6 +348,27 @@ impl<'src> TypingContext<'src> {
             })
             .collect();
         new_ctx
+    }
+}
+
+/// Check if an expression contains an array index reference `arr_name[...]`
+fn expr_references_array_index(expr: &Expr, arr_name: &str) -> bool {
+    match expr {
+        Expr::Index { base, index } => {
+            matches!(&base.0, Expr::Variable(n) if *n == arr_name)
+                || expr_references_array_index(&index.0, arr_name)
+        }
+        Expr::BinOp { lhs, rhs, .. } => {
+            expr_references_array_index(&lhs.0, arr_name)
+                || expr_references_array_index(&rhs.0, arr_name)
+        }
+        Expr::UnaryOp { cond, .. } => expr_references_array_index(&cond.0, arr_name),
+        Expr::Forall { start, end, body, .. } | Expr::Exists { start, end, body, .. } => {
+            expr_references_array_index(&start.0, arr_name)
+                || expr_references_array_index(&end.0, arr_name)
+                || expr_references_array_index(&body.0, arr_name)
+        }
+        _ => false,
     }
 }
 
