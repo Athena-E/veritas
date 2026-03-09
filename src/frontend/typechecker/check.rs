@@ -116,50 +116,46 @@ pub fn check_stmt<'src>(
                 IType::Array { .. } => ann_ty.clone(),
                 _ => value_ty.clone(),
             };
-            let mut new_ctx =
-                ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            let mut new_ctx = ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
 
             // For mutable array init, add pointwise propositions for each index
             // rather than a single forall. This way, `arr[k] = v` only invalidates
             // the proposition at index k, preserving knowledge of other elements.
             // e.g. `let mut a = [0;3]` produces:
             //   select(a, 0) == 0, select(a, 1) == 0, select(a, 2) == 0
-            if let IType::Array { element_type, size } = &value_ty {
-                if let IValue::Int(n) = size {
-                    let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
-                    let var_leaked: &'src str =
-                        Box::leak(name.to_string().into_boxed_str());
-                    for idx in 0..*n {
-                        let arr_index = crate::common::ast::Expr::Index {
-                            base: Box::new((
-                                crate::common::ast::Expr::Variable(var_leaked),
-                                dummy_span,
+            if let IType::Array { element_type, size } = &value_ty
+                && let IValue::Int(n) = size
+            {
+                let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+                let var_leaked: &'src str = Box::leak(name.to_string().into_boxed_str());
+                for idx in 0..*n {
+                    let arr_index = crate::common::ast::Expr::Index {
+                        base: Box::new((
+                            crate::common::ast::Expr::Variable(var_leaked),
+                            dummy_span,
+                        )),
+                        index: Box::new((
+                            crate::common::ast::Expr::Literal(crate::common::ast::Literal::Int(
+                                idx,
                             )),
-                            index: Box::new((
-                                crate::common::ast::Expr::Literal(
-                                    crate::common::ast::Literal::Int(idx),
-                                ),
-                                dummy_span,
-                            )),
-                        };
-                        let rhs_expr = match element_type.as_ref() {
-                            IType::SingletonInt(IValue::Int(v)) => {
-                                crate::common::ast::Expr::Literal(
-                                    crate::common::ast::Literal::Int(*v),
-                                )
-                            }
-                            _ => continue,
-                        };
-                        let eq_expr = crate::common::ast::Expr::BinOp {
-                            op: crate::common::ast::BinOp::Eq,
-                            lhs: Box::new((arr_index, dummy_span)),
-                            rhs: Box::new((rhs_expr, dummy_span)),
-                        };
-                        new_ctx = new_ctx.with_proposition(IProposition {
-                            var: name.to_string(),
-                            predicate: Arc::new((eq_expr, dummy_span)),
-                        });
-                    }
+                            dummy_span,
+                        )),
+                    };
+                    let rhs_expr = match element_type.as_ref() {
+                        IType::SingletonInt(IValue::Int(v)) => {
+                            crate::common::ast::Expr::Literal(crate::common::ast::Literal::Int(*v))
+                        }
+                        _ => continue,
+                    };
+                    let eq_expr = crate::common::ast::Expr::BinOp {
+                        op: crate::common::ast::BinOp::Eq,
+                        lhs: Box::new((arr_index, dummy_span)),
+                        rhs: Box::new((rhs_expr, dummy_span)),
+                    };
+                    new_ctx = new_ctx.with_proposition(IProposition {
+                        var: name.to_string(),
+                        predicate: Arc::new((eq_expr, dummy_span)),
+                    });
                 }
             }
 
@@ -1202,19 +1198,16 @@ fn postcondition_for_call<'src>(
 ) -> Option<IProposition<'src>> {
     use crate::frontend::typechecker::helpers::rename_expr_var;
 
-    if let crate::common::ast::Expr::Call { func_name, .. } = value_expr {
-        if let Some(sig) = ctx.lookup_function(func_name) {
-            if let Some(ref postcond) = sig.postcondition {
-                let binding_leaked: &'src str =
-                    Box::leak(binding_name.to_string().into_boxed_str());
-                let renamed =
-                    rename_expr_var(&postcond.predicate.0, "result", binding_leaked);
-                return Some(IProposition {
-                    var: binding_name.to_string(),
-                    predicate: Arc::new((renamed, postcond.predicate.1)),
-                });
-            }
-        }
+    if let crate::common::ast::Expr::Call { func_name, .. } = value_expr
+        && let Some(sig) = ctx.lookup_function(func_name)
+        && let Some(ref postcond) = sig.postcondition
+    {
+        let binding_leaked: &'src str = Box::leak(binding_name.to_string().into_boxed_str());
+        let renamed = rename_expr_var(&postcond.predicate.0, "result", binding_leaked);
+        return Some(IProposition {
+            var: binding_name.to_string(),
+            predicate: Arc::new((renamed, postcond.predicate.1)),
+        });
     }
     None
 }

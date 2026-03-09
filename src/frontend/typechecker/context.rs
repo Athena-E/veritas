@@ -363,7 +363,12 @@ fn expr_references_array_index(expr: &Expr, arr_name: &str) -> bool {
                 || expr_references_array_index(&rhs.0, arr_name)
         }
         Expr::UnaryOp { cond, .. } => expr_references_array_index(&cond.0, arr_name),
-        Expr::Forall { start, end, body, .. } | Expr::Exists { start, end, body, .. } => {
+        Expr::Forall {
+            start, end, body, ..
+        }
+        | Expr::Exists {
+            start, end, body, ..
+        } => {
             expr_references_array_index(&start.0, arr_name)
                 || expr_references_array_index(&end.0, arr_name)
                 || expr_references_array_index(&body.0, arr_name)
