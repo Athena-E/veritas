@@ -203,7 +203,7 @@ impl SmtOracle {
 
     /// Extract a proposition from a refined type by substituting the variable name
     /// For `n: {v: int | v > 0}`, produces the proposition `n > 0`
-    fn extract_refinement_as_proposition<'src>(
+    pub fn extract_refinement_as_proposition<'src>(
         var_name: &str,
         ty: &IType<'src>,
     ) -> Option<IProposition<'src>> {
