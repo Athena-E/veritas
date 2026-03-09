@@ -70,6 +70,11 @@ pub fn check_stmt<'src>(
                 }
             }
 
+            // Propagate postcondition from function calls to the binding
+            if let Some(prop) = postcondition_for_call(ctx, name, &value.0) {
+                new_ctx = new_ctx.with_proposition(prop);
+            }
+
             let tstmt = TStmt::Let {
                 is_mut: false,
                 name: name.to_string(),
@@ -1186,6 +1191,32 @@ fn substitute_var_in_stmt<'src>(
                 .collect(),
         },
     }
+}
+
+/// If the value expression is a function call with a postcondition,
+/// produce a proposition with `result` renamed to the binding variable.
+fn postcondition_for_call<'src>(
+    ctx: &TypingContext<'src>,
+    binding_name: &str,
+    value_expr: &crate::common::ast::Expr<'src>,
+) -> Option<IProposition<'src>> {
+    use crate::frontend::typechecker::helpers::rename_expr_var;
+
+    if let crate::common::ast::Expr::Call { func_name, .. } = value_expr {
+        if let Some(sig) = ctx.lookup_function(func_name) {
+            if let Some(ref postcond) = sig.postcondition {
+                let binding_leaked: &'src str =
+                    Box::leak(binding_name.to_string().into_boxed_str());
+                let renamed =
+                    rename_expr_var(&postcond.predicate.0, "result", binding_leaked);
+                return Some(IProposition {
+                    var: binding_name.to_string(),
+                    predicate: Arc::new((renamed, postcond.predicate.1)),
+                });
+            }
+        }
+    }
+    None
 }
 
 /// Find the first free variable in an expression that is not in the allowed set.
