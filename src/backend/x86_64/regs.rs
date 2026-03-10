@@ -41,8 +41,8 @@ impl X86Reg {
         X86Reg::Rdi,
         X86Reg::R8,
         X86Reg::R9,
-        X86Reg::R10,
-        // R11 reserved for scratch
+        // R10 reserved: used as scratch for array index in load/store
+        // R11 reserved: used as scratch for binop RHS and store value
         X86Reg::Rbx,
         X86Reg::R12,
         X86Reg::R13,
