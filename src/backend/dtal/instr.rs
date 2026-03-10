@@ -83,6 +83,7 @@ pub enum BinaryOp {
     Add,
     Sub,
     Mul,
+    Div,
     And,
     Or,
 }
@@ -93,6 +94,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Add => write!(f, "add"),
             BinaryOp::Sub => write!(f, "sub"),
             BinaryOp::Mul => write!(f, "mul"),
+            BinaryOp::Div => write!(f, "div"),
             BinaryOp::And => write!(f, "and"),
             BinaryOp::Or => write!(f, "or"),
         }

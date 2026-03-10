@@ -34,9 +34,9 @@ impl X86Reg {
     /// Registers available for allocation (excludes RSP, RBP, R11)
     /// Note: R11 is reserved as a scratch register for x86 lowering
     pub const ALLOCATABLE: &'static [X86Reg] = &[
-        X86Reg::Rax,
+        // Rax reserved: used as scratch by lowering (binop lhs) and return value
+        // Rdx reserved: implicitly clobbered by cqo/idiv (division)
         X86Reg::Rcx,
-        X86Reg::Rdx,
         X86Reg::Rsi,
         X86Reg::Rdi,
         X86Reg::R8,

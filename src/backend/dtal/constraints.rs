@@ -42,6 +42,7 @@ pub enum IndexExpr {
     Add(Box<IndexExpr>, Box<IndexExpr>),
     Sub(Box<IndexExpr>, Box<IndexExpr>),
     Mul(Box<IndexExpr>, Box<IndexExpr>),
+    Div(Box<IndexExpr>, Box<IndexExpr>),
     Select(String, Box<IndexExpr>),
 }
 
@@ -53,6 +54,7 @@ impl fmt::Display for IndexExpr {
             IndexExpr::Add(l, r) => write!(f, "({} + {})", l, r),
             IndexExpr::Sub(l, r) => write!(f, "({} - {})", l, r),
             IndexExpr::Mul(l, r) => write!(f, "({} * {})", l, r),
+            IndexExpr::Div(l, r) => write!(f, "({} / {})", l, r),
             IndexExpr::Select(name, idx) => write!(f, "{}[{}]", name, idx),
         }
     }

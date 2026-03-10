@@ -143,11 +143,13 @@ where
 
         // Binary operators with precedence
         // Multiplication
-        let op_mul = just(Token::Op("*")).to(BinOp::Mul);
+        let op_mul_div = just(Token::Op("*"))
+            .to(BinOp::Mul)
+            .or(just(Token::Op("/")).to(BinOp::Div));
         let product =
             unary
                 .clone()
-                .foldl_with(op_mul.then(unary).repeated(), |lhs, (op, rhs), e| {
+                .foldl_with(op_mul_div.then(unary).repeated(), |lhs, (op, rhs), e| {
                     (
                         Expr::BinOp {
                             op,
@@ -283,58 +285,29 @@ where
 
     let stmt = choice((let_stmt, assign_stmt));
 
-    // If expression
-    let if_expr = just(Token::If)
-        .ignore_then(inline_expr.clone())
-        .then(
+    // Block parser: { stmts* expr? }
+    // Supports both statement-only blocks and blocks with a trailing expression
+    let block = just(Token::Ctrl('{'))
+        .ignore_then(
             stmt.clone()
                 .repeated()
                 .collect::<Vec<_>>()
-                .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
-                .recover_with(via_parser(nested_delimiters(
-                    Token::Ctrl('{'),
-                    Token::Ctrl('}'),
-                    [
-                        (Token::Ctrl('('), Token::Ctrl(')')),
-                        (Token::Ctrl('['), Token::Ctrl(']')),
-                    ],
-                    |span| {
-                        vec![(
-                            Stmt::Assignment {
-                                lhs: (Expr::Error, span),
-                                rhs: (Expr::Error, span),
-                            },
-                            span,
-                        )]
-                    },
-                ))),
+                .then(inline_expr.clone().or_not()),
         )
-        .then(
-            just(Token::Else)
-                .ignore_then(
-                    stmt.repeated()
-                        .collect::<Vec<_>>()
-                        .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
-                        .recover_with(via_parser(nested_delimiters(
-                            Token::Ctrl('{'),
-                            Token::Ctrl('}'),
-                            [
-                                (Token::Ctrl('('), Token::Ctrl(')')),
-                                (Token::Ctrl('['), Token::Ctrl(']')),
-                            ],
-                            |span| {
-                                vec![(
-                                    Stmt::Assignment {
-                                        lhs: (Expr::Error, span),
-                                        rhs: (Expr::Error, span),
-                                    },
-                                    span,
-                                )]
-                            },
-                        ))),
-                )
-                .or_not(),
-        )
+        .then_ignore(just(Token::Ctrl('}')))
+        .map(|(mut stmts, trailing)| {
+            if let Some(expr) = trailing {
+                let span = expr.1;
+                stmts.push((Stmt::Expr(expr), span));
+            }
+            stmts
+        });
+
+    // If expression
+    let if_expr = just(Token::If)
+        .ignore_then(inline_expr.clone())
+        .then(block.clone())
+        .then(just(Token::Else).ignore_then(block).or_not())
         .map_with(|((cond, then_block), else_block), e| {
             (
                 Expr::If {

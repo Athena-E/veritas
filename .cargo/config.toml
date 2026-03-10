@@ -11,9 +11,9 @@ linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [build]
-# Set build jobs to limit parallelism if needed (helps with memory on low-RAM systems)
-# jobs = 4
+# Limit parallel jobs to prevent OOM during test compilation
+jobs = 4
 # rustflags = "-Zthreads=8"
 
 [profile.dev]
-codegen-units = 16
+codegen-units = 32

@@ -89,25 +89,28 @@ where
             .then_ignore(just(Token::Ctrl(';')))
             .map_with(|(lhs, rhs), e| (Stmt::Assignment { lhs, rhs }, e.span()));
 
-        // If statement (if expression used as statement, no semicolon needed)
-        let if_stmt = just(Token::If)
-            .ignore_then(expr.clone())
-            .then(
+        // Block parser: { stmts* expr? }
+        let block = just(Token::Ctrl('{'))
+            .ignore_then(
                 stmt.clone()
                     .repeated()
                     .collect::<Vec<_>>()
-                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
+                    .then(expr.clone().or_not()),
             )
-            .then(
-                just(Token::Else)
-                    .ignore_then(
-                        stmt.clone()
-                            .repeated()
-                            .collect::<Vec<_>>()
-                            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
-                    )
-                    .or_not(),
-            )
+            .then_ignore(just(Token::Ctrl('}')))
+            .map(|(mut stmts, trailing)| {
+                if let Some(trailing_expr) = trailing {
+                    let span = trailing_expr.1;
+                    stmts.push((Stmt::Expr(trailing_expr), span));
+                }
+                stmts
+            });
+
+        // If statement (if expression used as statement, no semicolon needed)
+        let if_stmt = just(Token::If)
+            .ignore_then(expr.clone())
+            .then(block.clone())
+            .then(just(Token::Else).ignore_then(block).or_not())
             .map_with(|((cond, then_block), else_block), e| {
                 (
                     Stmt::Expr((

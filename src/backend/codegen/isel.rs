@@ -179,6 +179,15 @@ fn lower_binop<'src>(
                 ty: ty.clone(),
             });
         }
+        TirBinaryOp::Div => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::Div,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: ty.clone(),
+            });
+        }
 
         // Comparison operations: emit cmp followed by set (using branch pattern)
         // For simplicity, we set the result based on comparison

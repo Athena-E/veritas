@@ -156,6 +156,7 @@ fn expr_to_index(expr: &Expr) -> Option<IndexExpr> {
                 BinOp::Add => Some(IndexExpr::Add(Box::new(l), Box::new(r))),
                 BinOp::Sub => Some(IndexExpr::Sub(Box::new(l), Box::new(r))),
                 BinOp::Mul => Some(IndexExpr::Mul(Box::new(l), Box::new(r))),
+                BinOp::Div => Some(IndexExpr::Div(Box::new(l), Box::new(r))),
                 _ => None,
             }
         }

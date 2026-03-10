@@ -58,6 +58,16 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
             Box::new(expr_to_index_expr(rhs)?),
         )),
 
+        TExpr::BinOp {
+            op: AstBinOp::Div,
+            lhs,
+            rhs,
+            ..
+        } => Some(IndexExpr::Div(
+            Box::new(expr_to_index_expr(lhs)?),
+            Box::new(expr_to_index_expr(rhs)?),
+        )),
+
         TExpr::Index { base, index, .. } => {
             if let TExpr::Variable { name, .. } = &base.0 {
                 let idx = expr_to_index_expr(index)?;
@@ -220,6 +230,7 @@ fn convert_binop(op: AstBinOp) -> BinaryOp {
         AstBinOp::Add => BinaryOp::Add,
         AstBinOp::Sub => BinaryOp::Sub,
         AstBinOp::Mul => BinaryOp::Mul,
+        AstBinOp::Div => BinaryOp::Div,
         AstBinOp::Eq => BinaryOp::Eq,
         AstBinOp::NotEq => BinaryOp::Ne,
         AstBinOp::Lt => BinaryOp::Lt,
