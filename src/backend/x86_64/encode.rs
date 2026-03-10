@@ -189,6 +189,11 @@ impl Encoder {
             X86Instr::SubRM { dst, src } => self.mem_instr_size(*dst, src),
             X86Instr::CmpRM { lhs, rhs } => self.mem_instr_size(*lhs, rhs),
 
+            X86Instr::Cqo => 2,                                // REX.W + 0x99
+            X86Instr::IdivR { src } => {
+                if src.needs_rex_b() { 3 } else { 3 } // REX.W + 0xF7 + ModR/M
+            }
+
             X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
 
             X86Instr::SetCC { dst, .. } => {
@@ -359,6 +364,19 @@ impl Encoder {
                 self.emit_byte(0x69);
                 self.emit_modrm(0b11, dst.reg3(), src.reg3());
                 self.emit_i32(*imm);
+            }
+
+            X86Instr::Cqo => {
+                // CQO: sign-extend rax into rdx:rax
+                // Encoding: REX.W + 0x99
+                self.emit_byte(0x48);
+                self.emit_byte(0x99);
+            }
+
+            X86Instr::IdivR { src } => {
+                // IDIV r/m64: signed divide rdx:rax by r/m64
+                // Encoding: REX.W + 0xF7 /7
+                self.encode_unary(0xF7, 7, *src);
             }
 
             X86Instr::Neg { dst } => {

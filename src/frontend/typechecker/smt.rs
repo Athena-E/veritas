@@ -28,6 +28,7 @@ impl SmtOracle {
                     BinOp::Add => left + right,
                     BinOp::Sub => left - right,
                     BinOp::Mul => left * right,
+                    BinOp::Div => left / right,
                     _ => panic!("Comparison operator in integer expression context"),
                 }
             }
@@ -115,7 +116,7 @@ impl SmtOracle {
                     left.implies(&right)
                 }
 
-                BinOp::Add | BinOp::Sub | BinOp::Mul => {
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                     panic!("Arithmetic operation in boolean expression context")
                 }
             },

@@ -421,6 +421,20 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                     src: rhs_reg,
                 });
             }
+            BinaryOp::Div => {
+                // x86 idiv: dividend in rdx:rax, divisor in src reg
+                // quotient -> rax, remainder -> rdx
+                self.instructions.push(X86Instr::MovRR {
+                    dst: X86Reg::Rax,
+                    src: lhs_reg,
+                });
+                self.instructions.push(X86Instr::Cqo);
+                self.instructions.push(X86Instr::IdivR { src: rhs_reg });
+                self.instructions.push(X86Instr::MovRR {
+                    dst: lhs_reg,
+                    src: X86Reg::Rax,
+                });
+            }
             BinaryOp::And => {
                 self.instructions.push(X86Instr::AndRR {
                     dst: lhs_reg,

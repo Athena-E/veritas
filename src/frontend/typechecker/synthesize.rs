@@ -2,7 +2,7 @@
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Spanned;
-use crate::common::tast::TExpr;
+use crate::common::tast::{TExpr, TStmt};
 use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
@@ -67,7 +67,7 @@ pub fn synth_expr<'src>(
 
         // BINOP-ARITH: Arithmetic operations with SMT synthesis
         Expr::BinOp {
-            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul),
+            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div),
             lhs,
             rhs,
         } => {
@@ -378,8 +378,14 @@ pub fn synth_expr<'src>(
                 then_ctx = then_ctx.with_proposition(prop);
             }
 
-            // Check then block
-            let (tthen_block, _) = check_stmts(&then_ctx, then_block)?;
+            // Check then block, extracting trailing expression type
+            let (tthen_block, then_ctx_out) = check_stmts(&then_ctx, then_block)?;
+            let then_result_ty = tthen_block
+                .last()
+                .and_then(|(tstmt, _)| match tstmt {
+                    TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
+                    _ => None,
+                });
 
             // Type the else block
             let (telse_block, result_ty) = if let Some(else_stmts) = else_block {
@@ -391,13 +397,33 @@ pub fn synth_expr<'src>(
                 }
 
                 let (telse_stmts, _) = check_stmts(&else_ctx, else_stmts)?;
+                let else_result_ty = telse_stmts
+                    .last()
+                    .and_then(|(tstmt, _)| match tstmt {
+                        TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
+                        _ => None,
+                    });
 
-                // Temp fix: if-expressions with both branches produce unit type
-                // In a full implementation, need to handle return expressions
-                (Some(telse_stmts), IType::Unit)
+                // If both branches have a trailing expression, use their join
+                let ty = match (then_result_ty, else_result_ty) {
+                    (Some(ref t1), Some(ref t2))
+                        if !matches!(t1, IType::Unit) && !matches!(t2, IType::Unit) =>
+                    {
+                        if is_subtype(ctx, t1, t2) {
+                            t2.clone()
+                        } else if is_subtype(ctx, t2, t1) {
+                            t1.clone()
+                        } else {
+                            IType::Int // widen to int as fallback
+                        }
+                    }
+                    _ => IType::Unit,
+                };
+                (Some(telse_stmts), ty)
             } else {
-                (None, IType::Unit)
+                (None, then_result_ty.unwrap_or(IType::Unit))
             };
+            let _ = then_ctx_out;
 
             let texpr = TExpr::If {
                 cond: Box::new(tcond),

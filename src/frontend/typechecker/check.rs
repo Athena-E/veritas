@@ -199,7 +199,7 @@ pub fn check_stmt<'src>(
                         _ => &binding.master_type,
                     };
 
-                    if !is_subtype(ctx, &rhs_ty, master_base) {
+                    if !check_expr_satisfies_refined(ctx, &rhs.0, &rhs_ty, master_base) {
                         return Err(TypeError::TypeMismatch {
                             expected: master_base.clone(),
                             found: rhs_ty,
@@ -774,7 +774,7 @@ pub fn check_function<'src>(
         let (texpr, ret_ty) = synth_expr(&final_ctx, ret_expr)?;
 
         // Check return type matches signature
-        if !is_subtype(&final_ctx, &ret_ty, &return_type) {
+        if !check_expr_satisfies_refined(&final_ctx, &ret_expr.0, &ret_ty, &return_type) {
             return Err(TypeError::TypeMismatch {
                 expected: return_type.clone(),
                 found: ret_ty,
@@ -1187,6 +1187,35 @@ fn substitute_var_in_stmt<'src>(
                 .collect(),
         },
     }
+}
+
+/// Check if an expression of type `expr_ty` can satisfy a refined target type
+/// by substituting the expression into the refinement predicate and checking provability.
+/// Falls back when `is_subtype` alone cannot prove `int <: {v: int | P}`.
+fn check_expr_satisfies_refined<'src>(
+    ctx: &TypingContext<'src>,
+    expr: &crate::common::ast::Expr<'src>,
+    expr_ty: &IType<'src>,
+    target: &IType<'src>,
+) -> bool {
+    if is_subtype(ctx, expr_ty, target) {
+        return true;
+    }
+    if let IType::RefinedInt { base, prop } = target {
+        if is_subtype(ctx, expr_ty, base) {
+            use crate::frontend::typechecker::helpers::substitute_expr_for_var;
+            let substituted =
+                substitute_expr_for_var(&prop.predicate.0, &prop.var, expr);
+            let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+            let goal = IProposition {
+                var: prop.var.clone(),
+                predicate: Arc::new((substituted, dummy_span)),
+            };
+            return crate::frontend::typechecker::smt::SmtOracle::new()
+                .is_provable(ctx, &goal);
+        }
+    }
+    false
 }
 
 /// If the value expression is a function call with a postcondition,

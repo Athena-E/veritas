@@ -191,6 +191,12 @@ pub enum X86Instr {
     /// imul reg, reg, imm32
     ImulRRI { dst: X86Reg, src: X86Reg, imm: i32 },
 
+    /// cqo (sign-extend rax into rdx:rax for idiv)
+    Cqo,
+
+    /// idiv reg (signed divide rdx:rax by reg, quotient in rax)
+    IdivR { src: X86Reg },
+
     /// neg reg (two's complement negate)
     Neg { dst: X86Reg },
 
@@ -289,6 +295,9 @@ impl fmt::Display for X86Instr {
 
             X86Instr::ImulRR { dst, src } => write!(f, "imul {}, {}", dst, src),
             X86Instr::ImulRRI { dst, src, imm } => write!(f, "imul {}, {}, {}", dst, src, imm),
+
+            X86Instr::Cqo => write!(f, "cqo"),
+            X86Instr::IdivR { src } => write!(f, "idiv {}", src),
 
             X86Instr::Neg { dst } => write!(f, "neg {}", dst),
 

@@ -273,6 +273,7 @@ fn emit_binop(op: &BinaryOp) -> &'static str {
         BinaryOp::Add => "add",
         BinaryOp::Sub => "sub",
         BinaryOp::Mul => "mul",
+        BinaryOp::Div => "div",
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
     }
@@ -320,6 +321,7 @@ fn emit_constraint(constraint: &Constraint) -> String {
             IndexExpr::Add(l, r) => format!("({} + {})", emit_index_expr(l), emit_index_expr(r)),
             IndexExpr::Sub(l, r) => format!("({} - {})", emit_index_expr(l), emit_index_expr(r)),
             IndexExpr::Mul(l, r) => format!("({} * {})", emit_index_expr(l), emit_index_expr(r)),
+            IndexExpr::Div(l, r) => format!("({} / {})", emit_index_expr(l), emit_index_expr(r)),
             IndexExpr::Select(name, idx) => format!("{}[{}]", name, emit_index_expr(idx)),
         }
     }

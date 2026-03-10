@@ -215,7 +215,7 @@ fn verify_binop<'src>(
             }
         }
         // Arithmetic operations require numeric operands
-        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => {
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
@@ -233,6 +233,7 @@ fn verify_binop<'src>(
                     BinaryOp::Add => l + r,
                     BinaryOp::Sub => l - r,
                     BinaryOp::Mul => l * r,
+                    BinaryOp::Div => if *r != 0 { l / r } else { 0 },
                     _ => unreachable!(),
                 };
 
