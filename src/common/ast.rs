@@ -157,8 +157,8 @@ pub enum Expr<'src> {
     },
     If {
         cond: Box<Spanned<Self>>,
-        then_block: Vec<Spanned<Stmt<'src>>>,
-        else_block: Option<Vec<Spanned<Stmt<'src>>>>,
+        then_block: Block<'src>,
+        else_block: Option<Block<'src>>,
     },
     Forall {
         var: &'src str,
@@ -172,6 +172,15 @@ pub enum Expr<'src> {
         end: Box<Spanned<Self>>,
         body: Box<Spanned<Self>>,
     },
+}
+
+// A block: statements followed by an optional trailing expression (the block's value)
+// { stmts*; trailing_expr? }
+// `{ 1 }` has trailing_expr = Some(1), `{ 1; }` has trailing_expr = None
+#[derive(Clone, Debug)]
+pub struct Block<'src> {
+    pub statements: Vec<Spanned<Stmt<'src>>>,
+    pub trailing_expr: Option<Box<Spanned<Expr<'src>>>>,
 }
 
 // Statement nodes
@@ -196,7 +205,7 @@ pub enum Stmt<'src> {
         start: Box<Spanned<Expr<'src>>>,
         end: Box<Spanned<Expr<'src>>>,
         invariant: Option<Spanned<Expr<'src>>>,
-        body: Vec<Spanned<Stmt<'src>>>,
+        body: Block<'src>,
     },
 }
 
@@ -207,12 +216,8 @@ pub struct Parameter<'src> {
     pub ty: Spanned<Type<'src>>,
 }
 
-// Function body
-#[derive(Debug)]
-pub struct FunctionBody<'src> {
-    pub statements: Vec<Spanned<Stmt<'src>>>,
-    pub return_expr: Option<Box<Spanned<Expr<'src>>>>,
-}
+// Function body is a Block
+pub type FunctionBody<'src> = Block<'src>;
 
 // Function definition
 #[derive(Debug)]

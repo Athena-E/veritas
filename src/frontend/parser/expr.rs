@@ -1,5 +1,5 @@
 use super::types::type_parser;
-use crate::common::ast::{BinOp, Expr, Literal, Stmt, Token, UnaryOp};
+use crate::common::ast::{BinOp, Block, Expr, Literal, Stmt, Token, UnaryOp};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -295,12 +295,9 @@ where
                 .then(inline_expr.clone().or_not()),
         )
         .then_ignore(just(Token::Ctrl('}')))
-        .map(|(mut stmts, trailing)| {
-            if let Some(expr) = trailing {
-                let span = expr.1;
-                stmts.push((Stmt::Expr(expr), span));
-            }
-            stmts
+        .map(|(stmts, trailing)| Block {
+            statements: stmts,
+            trailing_expr: trailing.map(Box::new),
         });
 
     // If expression

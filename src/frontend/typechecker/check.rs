@@ -1,8 +1,8 @@
 // Statement and program type checking
 
-use crate::common::ast::{Function, Program, Stmt, Type as AstType};
+use crate::common::ast::{Block, Function, Program, Stmt, Type as AstType};
 use crate::common::span::{Span, Spanned};
-use crate::common::tast::{TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
+use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_expr};
 use im::HashMap;
@@ -495,7 +495,7 @@ pub fn check_stmt<'src>(
             };
 
             // Check body statements with invariant in context
-            let (tbody, body_ctx) = check_stmts(&loop_ctx, body)?;
+            let (tbody, body_ctx) = check_stmts(&loop_ctx, &body.statements)?;
 
             // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
@@ -526,7 +526,7 @@ pub fn check_stmt<'src>(
                 start: Box::new(tstart),
                 end: Box::new(tend),
                 invariant: tinvariant,
-                body: tbody,
+                body: TBlock { statements: tbody, trailing_expr: None },
             };
 
             // Step 5: Project invariant into post-loop context
@@ -535,7 +535,7 @@ pub fn check_stmt<'src>(
                 let mut post = ctx.clone();
 
                 // Invalidate pointwise props for arrays modified in loop body
-                let modified = collect_modified_arrays(body);
+                let modified = collect_modified_arrays(&body.statements);
                 for arr_name in &modified {
                     post = post.without_all_array_element_props(arr_name);
                 }
@@ -606,14 +606,14 @@ fn collect_modified_arrays_inner<'src>(
                     ..
                 } = &expr.0
                 {
-                    collect_modified_arrays_inner(then_block, modified);
+                    collect_modified_arrays_inner(&then_block.statements, modified);
                     if let Some(else_stmts) = else_block {
-                        collect_modified_arrays_inner(else_stmts, modified);
+                        collect_modified_arrays_inner(&else_stmts.statements, modified);
                     }
                 }
             }
             Stmt::For { body, .. } => {
-                collect_modified_arrays_inner(body, modified);
+                collect_modified_arrays_inner(&body.statements, modified);
             }
             _ => {}
         }
@@ -625,8 +625,8 @@ fn collect_modified_arrays_inner<'src>(
 fn check_if_stmt<'src>(
     ctx: &TypingContext<'src>,
     cond: &Spanned<crate::common::ast::Expr<'src>>,
-    then_block: &[Spanned<crate::common::ast::Stmt<'src>>],
-    else_block: Option<&Vec<Spanned<crate::common::ast::Stmt<'src>>>>,
+    then_block: &Block<'src>,
+    else_block: Option<&Block<'src>>,
     span: Span,
 ) -> Result<(Spanned<TStmt<'src>>, TypingContext<'src>), TypeError<'src>> {
     use crate::frontend::typechecker::{extract_proposition, negate_proposition};
@@ -649,7 +649,11 @@ fn check_if_stmt<'src>(
     }
 
     // Check then block and get final context
-    let (tthen_block, then_final_ctx) = check_stmts(&then_ctx, then_block)?;
+    let (tthen_stmts, then_final_ctx) = check_stmts(&then_ctx, &then_block.statements)?;
+    let tthen_block = TBlock {
+        statements: tthen_stmts,
+        trailing_expr: None,
+    };
 
     // Check else block (if present) and get final context
     let (telse_block, else_final_ctx) = if let Some(else_stmts) = else_block {
@@ -659,8 +663,8 @@ fn check_if_stmt<'src>(
             else_ctx = else_ctx.with_proposition(neg_prop);
         }
 
-        let (typed_else, else_ctx_final) = check_stmts(&else_ctx, else_stmts)?;
-        (Some(typed_else), else_ctx_final)
+        let (typed_else, else_ctx_final) = check_stmts(&else_ctx, &else_stmts.statements)?;
+        (Some(TBlock { statements: typed_else, trailing_expr: None }), else_ctx_final)
     } else {
         // No else branch - context unchanged from original
         (None, ctx.clone())
@@ -759,7 +763,7 @@ pub fn check_function<'src>(
             match stmt {
                 TStmt::Return { .. } => return true,
                 TStmt::For { body, .. } => {
-                    if has_return_stmt(body) {
+                    if has_return_stmt(&body.statements) {
                         return true;
                     }
                 }
@@ -770,7 +774,7 @@ pub fn check_function<'src>(
     }
 
     // Check return expression (if present)
-    let treturn = if let Some(ret_expr) = &func_inner.body.return_expr {
+    let treturn = if let Some(ret_expr) = &func_inner.body.trailing_expr {
         let (texpr, ret_ty) = synth_expr(&final_ctx, ret_expr)?;
 
         // Check return type matches signature
@@ -824,7 +828,7 @@ pub fn check_function<'src>(
         postcondition,
         body: TFunctionBody {
             statements: tbody,
-            return_expr: treturn.map(Box::new),
+            trailing_expr: treturn.map(Box::new),
         },
         span: *func_span,
     };
@@ -1074,15 +1078,13 @@ fn substitute_var_with_literal<'src>(
                 substitute_var_with_literal(&cond.0, var_name, value),
                 cond.1,
             )),
-            then_block: then_block
-                .iter()
-                .map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span))
-                .collect(),
-            else_block: else_block.as_ref().map(|stmts| {
-                stmts
-                    .iter()
-                    .map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span))
-                    .collect()
+            then_block: Block {
+                statements: then_block.statements.iter().map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span)).collect(),
+                trailing_expr: then_block.trailing_expr.as_ref().map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
+            },
+            else_block: else_block.as_ref().map(|block| Block {
+                statements: block.statements.iter().map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span)).collect(),
+                trailing_expr: block.trailing_expr.as_ref().map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
             }),
         },
         Expr::Forall {
@@ -1181,10 +1183,10 @@ fn substitute_var_in_stmt<'src>(
             invariant: invariant
                 .as_ref()
                 .map(|(inv, span)| (substitute_var_with_literal(inv, var_name, value), *span)),
-            body: body
-                .iter()
-                .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
-                .collect(),
+            body: Block {
+                statements: body.statements.iter().map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span)).collect(),
+                trailing_expr: body.trailing_expr.as_ref().map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
+            },
         },
     }
 }
@@ -1276,13 +1278,13 @@ fn find_invalid_free_var<'src>(
             if let Some(v) = find_invalid_free_var(&cond.0, allowed) {
                 return Some(v);
             }
-            for (stmt, _) in then_block {
+            for (stmt, _) in &then_block.statements {
                 if let Some(v) = find_invalid_free_var_in_stmt(stmt, allowed) {
                     return Some(v);
                 }
             }
-            if let Some(stmts) = else_block {
-                for (stmt, _) in stmts {
+            if let Some(else_block) = else_block {
+                for (stmt, _) in &else_block.statements {
                     if let Some(v) = find_invalid_free_var_in_stmt(stmt, allowed) {
                         return Some(v);
                     }
@@ -1336,7 +1338,7 @@ fn find_invalid_free_var_in_stmt<'src>(
             if let Some(v) = find_invalid_free_var(&end.0, allowed) {
                 return Some(v);
             }
-            for (s, _) in body {
+            for (s, _) in &body.statements {
                 if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
                     return Some(v);
                 }

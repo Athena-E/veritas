@@ -4,7 +4,7 @@ use crate::backend::lower::lower_function;
 use crate::backend::tir::{Terminator, TirInstr};
 use crate::common::ast::Literal;
 use crate::common::span::{Span, Spanned};
-use crate::common::tast::{TExpr, TFunction, TFunctionBody, TParameter, TStmt};
+use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TStmt};
 use crate::common::types::IType;
 
 /// Helper to create a spanned value with a dummy span
@@ -25,7 +25,7 @@ fn test_lower_identity_function() {
         postcondition: None,
         body: TFunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(TExpr::Variable {
+            trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                 name: "x".to_string(),
                 ty: IType::Int,
             }))),
@@ -86,7 +86,7 @@ fn test_lower_function_with_let() {
                 }),
                 checked_ty: IType::Int,
             })],
-            return_expr: Some(Box::new(spanned(TExpr::Variable {
+            trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                 name: "z".to_string(),
                 ty: IType::Int,
             }))),
@@ -119,7 +119,7 @@ fn test_lower_function_returning_literal() {
         postcondition: None,
         body: TFunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(TExpr::Literal {
+            trailing_expr: Some(Box::new(spanned(TExpr::Literal {
                 value: Literal::Int(5),
                 ty: IType::Int,
             }))),
@@ -157,7 +157,7 @@ fn test_lower_if_expression() {
         postcondition: None,
         body: TFunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(TExpr::If {
+            trailing_expr: Some(Box::new(spanned(TExpr::If {
                 cond: Box::new(spanned(TExpr::BinOp {
                     op: BinOp::Gte,
                     lhs: Box::new(spanned(TExpr::Variable {
@@ -170,22 +170,28 @@ fn test_lower_if_expression() {
                     })),
                     ty: IType::Bool,
                 })),
-                then_block: vec![spanned(TStmt::Expr(spanned(TExpr::Variable {
-                    name: "x".to_string(),
-                    ty: IType::Int,
-                })))],
-                else_block: Some(vec![spanned(TStmt::Expr(spanned(TExpr::BinOp {
-                    op: BinOp::Sub,
-                    lhs: Box::new(spanned(TExpr::Literal {
-                        value: Literal::Int(0),
-                        ty: IType::Int,
-                    })),
-                    rhs: Box::new(spanned(TExpr::Variable {
+                then_block: TBlock {
+                    statements: vec![spanned(TStmt::Expr(spanned(TExpr::Variable {
                         name: "x".to_string(),
                         ty: IType::Int,
-                    })),
-                    ty: IType::Int,
-                })))]),
+                    })))],
+                    trailing_expr: None,
+                },
+                else_block: Some(TBlock {
+                    statements: vec![spanned(TStmt::Expr(spanned(TExpr::BinOp {
+                        op: BinOp::Sub,
+                        lhs: Box::new(spanned(TExpr::Literal {
+                            value: Literal::Int(0),
+                            ty: IType::Int,
+                        })),
+                        rhs: Box::new(spanned(TExpr::Variable {
+                            name: "x".to_string(),
+                            ty: IType::Int,
+                        })),
+                        ty: IType::Int,
+                    })))],
+                    trailing_expr: None,
+                }),
                 ty: IType::Int,
             }))),
         },
@@ -243,7 +249,7 @@ fn test_lower_function_with_postcondition() {
         postcondition: Some(postcondition),
         body: TFunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(TExpr::Literal {
+            trailing_expr: Some(Box::new(spanned(TExpr::Literal {
                 value: Literal::Int(5),
                 ty: IType::Int,
             }))),
@@ -272,7 +278,7 @@ fn test_lower_function_without_postcondition() {
         postcondition: None,
         body: TFunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(TExpr::Literal {
+            trailing_expr: Some(Box::new(spanned(TExpr::Literal {
                 value: Literal::Int(42),
                 ty: IType::Int,
             }))),

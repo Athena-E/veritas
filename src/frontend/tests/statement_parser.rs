@@ -95,7 +95,7 @@ fn test_simple_for_loop() {
         assert_eq!(func.body.statements.len(), 1);
         if let Stmt::For { var, body, .. } = &func.body.statements[0].0 {
             assert_eq!(var, &"i");
-            assert_eq!(body.len(), 1);
+            assert_eq!(body.statements.len(), 1);
         } else {
             panic!("Expected For statement");
         }
@@ -131,7 +131,7 @@ fn test_for_loop_with_multiple_statements() {
     if let Ok((func, _)) = result
         && let Stmt::For { body, .. } = &func.body.statements[0].0
     {
-        assert_eq!(body.len(), 3);
+        assert_eq!(body.statements.len(), 3);
     }
 }
 

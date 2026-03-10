@@ -151,6 +151,12 @@ impl LinearScanAllocator {
                         uses: Vec::new(),
                     });
                     interval.start = interval.start.min(position);
+                    // Also extend end to cover this def point. This prevents
+                    // the allocator from reusing the register between defs,
+                    // which would cause a later def to clobber another variable
+                    // that was assigned the same register after the interval
+                    // appeared to expire.
+                    interval.end = interval.end.max(position);
                 }
 
                 // Handle uses

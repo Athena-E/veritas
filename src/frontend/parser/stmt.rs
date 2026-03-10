@@ -1,5 +1,5 @@
 use super::types::type_parser;
-use crate::common::ast::{Expr, Stmt, Token};
+use crate::common::ast::{Block, Expr, Stmt, Token};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -66,7 +66,11 @@ where
                 stmt.clone()
                     .repeated()
                     .collect::<Vec<_>>()
-                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}'))),
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+                    .map(|stmts| Block {
+                        statements: stmts,
+                        trailing_expr: None,
+                    }),
             )
             .map_with(|((((var, start), end), invariant), body), e| {
                 (
@@ -98,12 +102,9 @@ where
                     .then(expr.clone().or_not()),
             )
             .then_ignore(just(Token::Ctrl('}')))
-            .map(|(mut stmts, trailing)| {
-                if let Some(trailing_expr) = trailing {
-                    let span = trailing_expr.1;
-                    stmts.push((Stmt::Expr(trailing_expr), span));
-                }
-                stmts
+            .map(|(stmts, trailing)| Block {
+                statements: stmts,
+                trailing_expr: trailing.map(Box::new),
             });
 
         // If statement (if expression used as statement, no semicolon needed)

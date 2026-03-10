@@ -1,7 +1,7 @@
 use super::expr::expr_parser;
 use super::stmt::stmt_parser;
 use super::types::type_parser;
-use crate::common::ast::{Function, FunctionBody, Parameter, Program, Stmt, Token, Type};
+use crate::common::ast::{Function, FunctionBody, Parameter, Program, Token, Type};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -42,28 +42,10 @@ where
     let body = just(Token::Ctrl('{'))
         .ignore_then(stmt.repeated().collect::<Vec<_>>().then(expr.or_not()))
         .then_ignore(just(Token::Ctrl('}')))
-        .map(|(mut statements, return_expr)| {
-            // If no trailing return expression but last statement is a bare
-            // expression (e.g. if-else), promote it to the return expression
-            let return_expr = if return_expr.is_some() {
-                return_expr
-            } else if let Some(last) = statements.last() {
-                if matches!(&last.0, Stmt::Expr(_)) {
-                    let last = statements.pop().unwrap();
-                    if let Stmt::Expr(expr) = last.0 {
-                        Some(expr)
-                    } else {
-                        unreachable!()
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+        .map(|(statements, trailing_expr)| {
             FunctionBody {
                 statements,
-                return_expr: return_expr.map(Box::new),
+                trailing_expr: trailing_expr.map(Box::new),
             }
         });
 
