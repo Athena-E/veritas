@@ -2,7 +2,7 @@
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Spanned;
-use crate::common::tast::{TExpr, TStmt};
+use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
@@ -378,12 +378,19 @@ pub fn synth_expr<'src>(
                 then_ctx = then_ctx.with_proposition(prop);
             }
 
-            // Check then block, extracting trailing expression type
-            let (tthen_block, then_ctx_out) = check_stmts(&then_ctx, then_block)?;
-            let then_result_ty = tthen_block.last().and_then(|(tstmt, _)| match tstmt {
-                TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
-                _ => None,
-            });
+            // Check then block statements, then handle trailing expression
+            let (tthen_stmts, then_ctx_out) = check_stmts(&then_ctx, &then_block.statements)?;
+            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr {
+                let (texpr, ty) = synth_expr(&then_ctx_out, trailing)?;
+                (Some(Box::new(texpr)), Some(ty))
+            } else {
+                (None, None)
+            };
+
+            let tthen_block = TBlock {
+                statements: tthen_stmts,
+                trailing_expr: then_trailing,
+            };
 
             // Type the else block
             let (telse_block, result_ty) = if let Some(else_stmts) = else_block {
@@ -394,17 +401,22 @@ pub fn synth_expr<'src>(
                     else_ctx = else_ctx.with_proposition(neg_prop);
                 }
 
-                let (telse_stmts, _) = check_stmts(&else_ctx, else_stmts)?;
-                let else_result_ty = telse_stmts.last().and_then(|(tstmt, _)| match tstmt {
-                    TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
-                    _ => None,
-                });
+                let (telse_stmts, else_ctx_out) = check_stmts(&else_ctx, &else_stmts.statements)?;
+                let (else_trailing, else_result_ty) = if let Some(trailing) = &else_stmts.trailing_expr {
+                    let (texpr, ty) = synth_expr(&else_ctx_out, trailing)?;
+                    (Some(Box::new(texpr)), Some(ty))
+                } else {
+                    (None, None)
+                };
+
+                let telse_block_val = TBlock {
+                    statements: telse_stmts,
+                    trailing_expr: else_trailing,
+                };
 
                 // If both branches have a trailing expression, use their join
-                let ty = match (then_result_ty, else_result_ty) {
-                    (Some(ref t1), Some(ref t2))
-                        if !matches!(t1, IType::Unit) && !matches!(t2, IType::Unit) =>
-                    {
+                let ty = match (&then_result_ty, &else_result_ty) {
+                    (Some(t1), Some(t2)) => {
                         if is_subtype(ctx, t1, t2) {
                             t2.clone()
                         } else if is_subtype(ctx, t2, t1) {
@@ -415,7 +427,7 @@ pub fn synth_expr<'src>(
                     }
                     _ => IType::Unit,
                 };
-                (Some(telse_stmts), ty)
+                (Some(telse_block_val), ty)
             } else {
                 (None, then_result_ty.unwrap_or(IType::Unit))
             };

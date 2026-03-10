@@ -40,7 +40,7 @@ fn test_postcondition_singleton_satisfied() {
         postcondition: Some(postcond),
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(5))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(5))))),
         },
     };
 
@@ -71,7 +71,7 @@ fn test_postcondition_singleton_violated() {
         postcondition: Some(postcond),
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(10))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(10))))),
         },
     };
 
@@ -102,7 +102,7 @@ fn test_postcondition_inequality_satisfied() {
         postcondition: Some(postcond),
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(42))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(42))))),
         },
     };
 
@@ -133,7 +133,7 @@ fn test_postcondition_inequality_violated() {
         postcondition: Some(postcond),
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(0))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(0))))),
         },
     };
 
@@ -164,7 +164,7 @@ fn test_postcondition_negative_violated() {
         postcondition: Some(postcond),
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(-1))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(-1))))),
         },
     };
 
@@ -185,7 +185,7 @@ fn test_no_postcondition() {
         postcondition: None,
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(42))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(42))))),
         },
     };
 
@@ -215,7 +215,7 @@ fn test_postcondition_gte_satisfied() {
         postcondition: Some(postcond),
         body: FunctionBody {
             statements: vec![],
-            return_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(0))))),
+            trailing_expr: Some(Box::new(spanned(Expr::Literal(Literal::Int(0))))),
         },
     };
 

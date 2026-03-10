@@ -1,7 +1,7 @@
 // Helper functions for type checking
 // constant folding, proposition extraction, context joining, SMT synthesis
 
-use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
+use crate::common::ast::{BinOp, Block, Expr, Literal, UnaryOp};
 use crate::common::span::Span;
 use crate::common::types::{IProposition, IType, IValue};
 use chumsky::prelude::SimpleSpan;
@@ -400,15 +400,13 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
             else_block,
         } => Expr::If {
             cond: Box::new((rename_expr_var(&cond.0, old, new), cond.1)),
-            then_block: then_block
-                .iter()
-                .map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1))
-                .collect(),
-            else_block: else_block.as_ref().map(|stmts| {
-                stmts
-                    .iter()
-                    .map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1))
-                    .collect()
+            then_block: Block {
+                statements: then_block.statements.iter().map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1)).collect(),
+                trailing_expr: then_block.trailing_expr.as_ref().map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+            },
+            else_block: else_block.as_ref().map(|block| Block {
+                statements: block.statements.iter().map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1)).collect(),
+                trailing_expr: block.trailing_expr.as_ref().map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
             }),
         },
     }
@@ -556,10 +554,10 @@ fn rename_stmt_var<'src>(
             invariant: invariant
                 .as_ref()
                 .map(|inv| (rename_expr_var(&inv.0, old, new), inv.1)),
-            body: body
-                .iter()
-                .map(|s| (rename_stmt_var(&s.0, old, new), s.1))
-                .collect(),
+            body: Block {
+                statements: body.statements.iter().map(|s| (rename_stmt_var(&s.0, old, new), s.1)).collect(),
+                trailing_expr: body.trailing_expr.as_ref().map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+            },
         },
     }
 }

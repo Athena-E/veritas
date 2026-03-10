@@ -18,7 +18,7 @@ fn test_simple_function() {
     if let Ok((func, _)) = result {
         assert_eq!(func.name, "main");
         assert_eq!(func.body.statements.len(), 1);
-        assert!(func.body.return_expr.is_none());
+        assert!(func.body.trailing_expr.is_none());
     }
 }
 
@@ -71,7 +71,7 @@ fn test_empty_function() {
     if let Ok((func, _)) = result {
         assert_eq!(func.name, "empty");
         assert_eq!(func.body.statements.len(), 0);
-        assert!(func.body.return_expr.is_none());
+        assert!(func.body.trailing_expr.is_none());
     }
 }
 
@@ -240,7 +240,7 @@ fn test_function_with_explicit_return() {
         assert_eq!(func.name, "add");
         assert!(matches!(func.return_type.0, Type::Int));
         assert_eq!(func.body.statements.len(), 1);
-        assert!(func.body.return_expr.is_none());
+        assert!(func.body.trailing_expr.is_none());
     }
 }
 
@@ -260,7 +260,7 @@ fn test_function_with_implicit_return() {
         assert_eq!(func.name, "add");
         assert!(matches!(func.return_type.0, Type::Int));
         assert_eq!(func.body.statements.len(), 0);
-        assert!(func.body.return_expr.is_some());
+        assert!(func.body.trailing_expr.is_some());
     }
 }
 
@@ -280,7 +280,7 @@ fn test_function_with_statements_and_implicit_return() {
         assert_eq!(func.name, "compute");
         assert!(matches!(func.return_type.0, Type::Int));
         assert_eq!(func.body.statements.len(), 1);
-        assert!(func.body.return_expr.is_some());
+        assert!(func.body.trailing_expr.is_some());
     }
 }
 
@@ -312,7 +312,7 @@ fn test_function_with_expression_statement() {
     assert!(result.is_ok());
     if let Ok((func, _)) = result {
         assert_eq!(func.body.statements.len(), 2);
-        assert!(func.body.return_expr.is_none());
+        assert!(func.body.trailing_expr.is_none());
     }
 }
 
@@ -403,7 +403,7 @@ fn test_function_with_unary_minus() {
     assert!(result.is_ok());
     if let Ok((func, _)) = result {
         assert_eq!(func.name, "neg");
-        assert!(func.body.return_expr.is_some());
+        assert!(func.body.trailing_expr.is_some());
     }
 }
 

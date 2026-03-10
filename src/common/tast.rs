@@ -2,6 +2,13 @@ use crate::common::ast::{BinOp, Literal, UnaryOp};
 use crate::common::span::{Span, Spanned};
 use crate::common::types::{IProposition, IType};
 
+/// A typed block: statements followed by an optional trailing expression (the block's value)
+#[derive(Clone, Debug)]
+pub struct TBlock<'src> {
+    pub statements: Vec<Spanned<TStmt<'src>>>,
+    pub trailing_expr: Option<Box<Spanned<TExpr<'src>>>>,
+}
+
 /// Typed expression AST - output of type checking
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -54,8 +61,8 @@ pub enum TExpr<'src> {
 
     If {
         cond: Box<Spanned<Self>>,
-        then_block: Vec<Spanned<TStmt<'src>>>,
-        else_block: Option<Vec<Spanned<TStmt<'src>>>>,
+        then_block: TBlock<'src>,
+        else_block: Option<TBlock<'src>>,
         ty: IType<'src>,
     },
 }
@@ -103,7 +110,7 @@ pub enum TStmt<'src> {
         start: Box<Spanned<TExpr<'src>>>,
         end: Box<Spanned<TExpr<'src>>>,
         invariant: Option<crate::backend::dtal::constraints::Constraint>,
-        body: Vec<Spanned<TStmt<'src>>>,
+        body: TBlock<'src>,
     },
 }
 
@@ -113,11 +120,8 @@ pub struct TParameter<'src> {
     pub ty: IType<'src>,
 }
 
-#[derive(Clone, Debug)]
-pub struct TFunctionBody<'src> {
-    pub statements: Vec<Spanned<TStmt<'src>>>,
-    pub return_expr: Option<Box<Spanned<TExpr<'src>>>>,
-}
+// Typed function body is a TBlock
+pub type TFunctionBody<'src> = TBlock<'src>;
 
 /// Typed function - output of type checking a function
 #[derive(Clone, Debug)]

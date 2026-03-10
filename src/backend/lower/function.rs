@@ -35,9 +35,9 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     // Lower the return expression (if any) and create the return terminator
     let return_value = func
         .body
-        .return_expr
+        .trailing_expr
         .as_ref()
-        .map(|return_expr| lower_expr(&mut ctx, return_expr));
+        .map(|trailing_expr| lower_expr(&mut ctx, trailing_expr));
 
     // Finish the entry block with a return terminator
     ctx.finish_block(

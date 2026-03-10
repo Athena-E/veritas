@@ -11,7 +11,7 @@ use crate::backend::tir::{
     BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
 };
 use crate::common::span::Spanned;
-use crate::common::tast::{TExpr, TStmt};
+use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
 
 /// Lower a statement to TIR
@@ -172,7 +172,7 @@ fn lower_for_loop<'src>(
     start: &Spanned<TExpr<'src>>,
     end: &Spanned<TExpr<'src>>,
     invariant: Option<&Constraint>,
-    body: &[Spanned<TStmt<'src>>],
+    body: &TBlock<'src>,
 ) {
     // 1. In the entry block (current), lower start and end expressions
     let start_reg = lower_expr(ctx, start);
@@ -268,7 +268,7 @@ fn lower_for_loop<'src>(
     ctx.start_block(body_block);
 
     // Lower body statements
-    for stmt in body {
+    for stmt in &body.statements {
         lower_stmt(ctx, stmt);
     }
 

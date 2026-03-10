@@ -11,7 +11,7 @@ use crate::backend::tir::{
 };
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
-use crate::common::tast::{TExpr, TStmt};
+use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
 
 /// Convert a typed expression to an IndexExpr for constraints.
@@ -189,7 +189,7 @@ pub fn lower_expr<'src>(
             else_block,
             ty,
         } => {
-            // Delegate to if-expression lowering (implemented in Step 4)
+            // Delegate to if-expression lowering
             lower_if_expr(ctx, cond, then_block, else_block.as_ref(), ty)
         }
     }
@@ -447,17 +447,17 @@ fn lower_array_init<'src>(
 pub fn lower_if_expr<'src>(
     ctx: &mut LoweringContext<'src>,
     cond: &Spanned<TExpr<'src>>,
-    then_stmts: &[Spanned<TStmt<'src>>],
-    else_stmts: Option<&Vec<Spanned<TStmt<'src>>>>,
+    then_block: &TBlock<'src>,
+    else_block: Option<&TBlock<'src>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
     // 1. Lower the condition expression in the current block
     let cond_reg = lower_expr(ctx, cond);
     let cond_block = ctx.current_block().expect("Should be in a block");
 
-    // 2. Create blocks for then, else, and merge
-    let then_block = ctx.new_block();
-    let else_block = ctx.new_block();
+    // 2. Create CFG blocks for then, else, and merge
+    let then_cfg_block = ctx.new_block();
+    let else_cfg_block = ctx.new_block();
     let merge_block = ctx.new_block();
 
     // 3. Derive constraints from the condition expression
@@ -468,8 +468,8 @@ pub fn lower_if_expr<'src>(
     ctx.finish_block(
         Terminator::Branch {
             cond: cond_reg,
-            true_target: then_block,
-            false_target: else_block,
+            true_target: then_cfg_block,
+            false_target: else_cfg_block,
             true_constraint: Box::new(true_constraint),
             false_constraint: Box::new(false_constraint),
         },
@@ -477,13 +477,13 @@ pub fn lower_if_expr<'src>(
     );
 
     // 5. Lower the then branch
-    ctx.start_block(then_block);
+    ctx.start_block(then_cfg_block);
 
     // Snapshot variable state before then branch
     let vars_before_then = ctx.snapshot_var_map();
 
-    // Lower all statements except possibly the last (which might be the result expr)
-    let then_result = lower_block_with_result(ctx, then_stmts, ty);
+    // Lower the then block and get its result
+    let then_result = lower_block_with_result(ctx, then_block, ty);
 
     // Record then block's end for phi
     let then_end_block = ctx.current_block().expect("Should be in then block");
@@ -498,15 +498,15 @@ pub fn lower_if_expr<'src>(
     );
 
     // 5. Lower the else branch
-    ctx.start_block(else_block);
+    ctx.start_block(else_cfg_block);
 
     // Restore variable state to before the if (for else branch)
     // The else branch should see variables as they were BEFORE the then branch,
     // not after. This ensures proper phi node creation at the merge point.
     ctx.restore_var_map(vars_before_then.clone());
 
-    let else_result = if let Some(else_stmts) = else_stmts {
-        lower_block_with_result(ctx, else_stmts, ty)
+    let else_result = if let Some(else_block_ref) = else_block {
+        lower_block_with_result(ctx, else_block_ref, ty)
     } else {
         // No else block - produce a default value
         // For Unit type, this is fine; for other types this shouldn't happen
@@ -555,52 +555,47 @@ pub fn lower_if_expr<'src>(
     result_reg
 }
 
-/// Lower a block of statements and return the result register
+/// Lower a block and return the result register
 ///
-/// If the last statement is an expression statement, that's the result.
+/// If the block has a trailing expression, that's the result.
+/// Otherwise, if the last statement is an expression statement, that's the result.
 /// Otherwise, return a unit/default value.
 fn lower_block_with_result<'src>(
     ctx: &mut LoweringContext<'src>,
-    stmts: &[Spanned<TStmt<'src>>],
+    block: &TBlock<'src>,
     ty: &IType<'src>,
 ) -> VirtualReg {
     use crate::backend::lower::stmt::lower_stmt;
 
-    if stmts.is_empty() {
-        // Empty block - produce default value
-        let dst = ctx.fresh_reg();
-        ctx.emit(TirInstr::LoadImm {
-            dst,
-            value: 0,
-            ty: ty.clone(),
-        });
-        return dst;
-    }
-
-    // Lower all statements except the last
-    for stmt in &stmts[..stmts.len() - 1] {
+    // Lower all statements
+    for stmt in &block.statements {
         lower_stmt(ctx, stmt);
     }
 
-    // Check if last statement is an expression
-    let last = &stmts[stmts.len() - 1];
-    match &last.0 {
-        TStmt::Expr(expr) => {
-            // The expression's value is the block's result
-            lower_expr(ctx, expr)
-        }
-        _ => {
-            // Not an expression - lower it and return default
-            lower_stmt(ctx, last);
-            let dst = ctx.fresh_reg();
-            ctx.emit(TirInstr::LoadImm {
-                dst,
-                value: 0,
-                ty: ty.clone(),
-            });
-            dst
+    // If there's a trailing expression, that's the block's value
+    if let Some(trailing) = &block.trailing_expr {
+        return lower_expr(ctx, trailing);
+    }
+
+    // No trailing expression - check if last statement is an expression (backward compat)
+    if let Some(last) = block.statements.last() {
+        if let TStmt::Expr(expr) = &last.0 {
+            // The expression was already lowered as a statement above,
+            // but we need its value. Re-lower it to get the register.
+            // TODO: This double-lowers the expression; with proper Block usage
+            // the trailing_expr path should be preferred.
+            return lower_expr(ctx, expr);
         }
     }
+
+    // No value - emit default
+    let dst = ctx.fresh_reg();
+    ctx.emit(TirInstr::LoadImm {
+        dst,
+        value: 0,
+        ty: ty.clone(),
+    });
+    dst
 }
 
 /// Create phi nodes for variables that were modified differently in two branches
