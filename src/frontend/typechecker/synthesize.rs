@@ -380,12 +380,10 @@ pub fn synth_expr<'src>(
 
             // Check then block, extracting trailing expression type
             let (tthen_block, then_ctx_out) = check_stmts(&then_ctx, then_block)?;
-            let then_result_ty = tthen_block
-                .last()
-                .and_then(|(tstmt, _)| match tstmt {
-                    TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
-                    _ => None,
-                });
+            let then_result_ty = tthen_block.last().and_then(|(tstmt, _)| match tstmt {
+                TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
+                _ => None,
+            });
 
             // Type the else block
             let (telse_block, result_ty) = if let Some(else_stmts) = else_block {
@@ -397,12 +395,10 @@ pub fn synth_expr<'src>(
                 }
 
                 let (telse_stmts, _) = check_stmts(&else_ctx, else_stmts)?;
-                let else_result_ty = telse_stmts
-                    .last()
-                    .and_then(|(tstmt, _)| match tstmt {
-                        TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
-                        _ => None,
-                    });
+                let else_result_ty = telse_stmts.last().and_then(|(tstmt, _)| match tstmt {
+                    TStmt::Expr(texpr) => Some(texpr.0.get_type().clone()),
+                    _ => None,
+                });
 
                 // If both branches have a trailing expression, use their join
                 let ty = match (then_result_ty, else_result_ty) {

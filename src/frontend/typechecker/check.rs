@@ -1201,19 +1201,17 @@ fn check_expr_satisfies_refined<'src>(
     if is_subtype(ctx, expr_ty, target) {
         return true;
     }
-    if let IType::RefinedInt { base, prop } = target {
-        if is_subtype(ctx, expr_ty, base) {
-            use crate::frontend::typechecker::helpers::substitute_expr_for_var;
-            let substituted =
-                substitute_expr_for_var(&prop.predicate.0, &prop.var, expr);
-            let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
-            let goal = IProposition {
-                var: prop.var.clone(),
-                predicate: Arc::new((substituted, dummy_span)),
-            };
-            return crate::frontend::typechecker::smt::SmtOracle::new()
-                .is_provable(ctx, &goal);
-        }
+    if let IType::RefinedInt { base, prop } = target
+        && is_subtype(ctx, expr_ty, base)
+    {
+        use crate::frontend::typechecker::helpers::substitute_expr_for_var;
+        let substituted = substitute_expr_for_var(&prop.predicate.0, &prop.var, expr);
+        let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+        let goal = IProposition {
+            var: prop.var.clone(),
+            predicate: Arc::new((substituted, dummy_span)),
+        };
+        return crate::frontend::typechecker::smt::SmtOracle::new().is_provable(ctx, &goal);
     }
     false
 }

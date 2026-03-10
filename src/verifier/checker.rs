@@ -233,7 +233,13 @@ fn verify_binop<'src>(
                     BinaryOp::Add => l + r,
                     BinaryOp::Sub => l - r,
                     BinaryOp::Mul => l * r,
-                    BinaryOp::Div => if *r != 0 { l / r } else { 0 },
+                    BinaryOp::Div => {
+                        if *r != 0 {
+                            l / r
+                        } else {
+                            0
+                        }
+                    }
                     _ => unreachable!(),
                 };
 
