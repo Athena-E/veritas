@@ -1,7 +1,7 @@
 use super::expr::expr_parser;
 use super::stmt::stmt_parser;
 use super::types::type_parser;
-use crate::common::ast::{Function, FunctionBody, Parameter, Program, Stmt, Token, Type};
+use crate::common::ast::{Expr, Function, FunctionBody, Parameter, Program, Stmt, Token, Type};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -48,7 +48,10 @@ where
             let return_expr = if return_expr.is_some() {
                 return_expr
             } else if let Some(last) = statements.last() {
-                if matches!(&last.0, Stmt::Expr(_)) {
+                // Only promote if-else expressions (which are parsed as
+                // statements without semicolons). Don't promote semicolon-
+                // terminated expression statements like function calls.
+                if matches!(&last.0, Stmt::Expr((Expr::If { .. }, _))) {
                     let last = statements.pop().unwrap();
                     if let Stmt::Expr(expr) = last.0 {
                         Some(expr)
