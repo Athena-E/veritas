@@ -42,11 +42,9 @@ where
     let body = just(Token::Ctrl('{'))
         .ignore_then(stmt.repeated().collect::<Vec<_>>().then(expr.or_not()))
         .then_ignore(just(Token::Ctrl('}')))
-        .map(|(statements, trailing_expr)| {
-            FunctionBody {
-                statements,
-                trailing_expr: trailing_expr.map(Box::new),
-            }
+        .map(|(statements, trailing_expr)| FunctionBody {
+            statements,
+            trailing_expr: trailing_expr.map(Box::new),
         });
 
     just(Token::Fn)

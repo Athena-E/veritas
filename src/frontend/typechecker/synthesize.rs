@@ -380,7 +380,8 @@ pub fn synth_expr<'src>(
 
             // Check then block statements, then handle trailing expression
             let (tthen_stmts, then_ctx_out) = check_stmts(&then_ctx, &then_block.statements)?;
-            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr {
+            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr
+            {
                 let (texpr, ty) = synth_expr(&then_ctx_out, trailing)?;
                 (Some(Box::new(texpr)), Some(ty))
             } else {
@@ -402,12 +403,13 @@ pub fn synth_expr<'src>(
                 }
 
                 let (telse_stmts, else_ctx_out) = check_stmts(&else_ctx, &else_stmts.statements)?;
-                let (else_trailing, else_result_ty) = if let Some(trailing) = &else_stmts.trailing_expr {
-                    let (texpr, ty) = synth_expr(&else_ctx_out, trailing)?;
-                    (Some(Box::new(texpr)), Some(ty))
-                } else {
-                    (None, None)
-                };
+                let (else_trailing, else_result_ty) =
+                    if let Some(trailing) = &else_stmts.trailing_expr {
+                        let (texpr, ty) = synth_expr(&else_ctx_out, trailing)?;
+                        (Some(Box::new(texpr)), Some(ty))
+                    } else {
+                        (None, None)
+                    };
 
                 let telse_block_val = TBlock {
                     statements: telse_stmts,

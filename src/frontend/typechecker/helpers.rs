@@ -401,12 +401,26 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
         } => Expr::If {
             cond: Box::new((rename_expr_var(&cond.0, old, new), cond.1)),
             then_block: Block {
-                statements: then_block.statements.iter().map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1)).collect(),
-                trailing_expr: then_block.trailing_expr.as_ref().map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+                statements: then_block
+                    .statements
+                    .iter()
+                    .map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1))
+                    .collect(),
+                trailing_expr: then_block
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
             },
             else_block: else_block.as_ref().map(|block| Block {
-                statements: block.statements.iter().map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1)).collect(),
-                trailing_expr: block.trailing_expr.as_ref().map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+                statements: block
+                    .statements
+                    .iter()
+                    .map(|stmt| (rename_stmt_var(&stmt.0, old, new), stmt.1))
+                    .collect(),
+                trailing_expr: block
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
             }),
         },
     }
@@ -555,8 +569,15 @@ fn rename_stmt_var<'src>(
                 .as_ref()
                 .map(|inv| (rename_expr_var(&inv.0, old, new), inv.1)),
             body: Block {
-                statements: body.statements.iter().map(|s| (rename_stmt_var(&s.0, old, new), s.1)).collect(),
-                trailing_expr: body.trailing_expr.as_ref().map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|s| (rename_stmt_var(&s.0, old, new), s.1))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
             },
         },
     }

@@ -190,9 +190,7 @@ impl Encoder {
             X86Instr::CmpRM { lhs, rhs } => self.mem_instr_size(*lhs, rhs),
 
             X86Instr::Cqo => 2, // REX.W + 0x99
-            X86Instr::IdivR { src } => {
-                if src.needs_rex_b() { 3 } else { 3 } // REX.W + 0xF7 + ModR/M
-            }
+            X86Instr::IdivR { src: _ } => 3, // REX.W + 0xF7 + ModR/M (REX.B comes free with REX.W)
 
             X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
 

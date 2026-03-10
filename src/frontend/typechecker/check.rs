@@ -526,7 +526,10 @@ pub fn check_stmt<'src>(
                 start: Box::new(tstart),
                 end: Box::new(tend),
                 invariant: tinvariant,
-                body: TBlock { statements: tbody, trailing_expr: None },
+                body: TBlock {
+                    statements: tbody,
+                    trailing_expr: None,
+                },
             };
 
             // Step 5: Project invariant into post-loop context
@@ -664,7 +667,13 @@ fn check_if_stmt<'src>(
         }
 
         let (typed_else, else_ctx_final) = check_stmts(&else_ctx, &else_stmts.statements)?;
-        (Some(TBlock { statements: typed_else, trailing_expr: None }), else_ctx_final)
+        (
+            Some(TBlock {
+                statements: typed_else,
+                trailing_expr: None,
+            }),
+            else_ctx_final,
+        )
     } else {
         // No else branch - context unchanged from original
         (None, ctx.clone())
@@ -1073,20 +1082,34 @@ fn substitute_var_with_literal<'src>(
             cond,
             then_block,
             else_block,
-        } => Expr::If {
-            cond: Box::new((
-                substitute_var_with_literal(&cond.0, var_name, value),
-                cond.1,
-            )),
-            then_block: Block {
-                statements: then_block.statements.iter().map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span)).collect(),
-                trailing_expr: then_block.trailing_expr.as_ref().map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
-            },
-            else_block: else_block.as_ref().map(|block| Block {
-                statements: block.statements.iter().map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span)).collect(),
-                trailing_expr: block.trailing_expr.as_ref().map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
-            }),
-        },
+        } => {
+            Expr::If {
+                cond: Box::new((
+                    substitute_var_with_literal(&cond.0, var_name, value),
+                    cond.1,
+                )),
+                then_block: Block {
+                    statements: then_block
+                        .statements
+                        .iter()
+                        .map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span))
+                        .collect(),
+                    trailing_expr: then_block.trailing_expr.as_ref().map(|e| {
+                        Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))
+                    }),
+                },
+                else_block: else_block.as_ref().map(|block| Block {
+                    statements: block
+                        .statements
+                        .iter()
+                        .map(|(stmt, span)| (substitute_var_in_stmt(stmt, var_name, value), *span))
+                        .collect(),
+                    trailing_expr: block.trailing_expr.as_ref().map(|e| {
+                        Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))
+                    }),
+                }),
+            }
+        }
         Expr::Forall {
             var,
             start,
@@ -1184,8 +1207,15 @@ fn substitute_var_in_stmt<'src>(
                 .as_ref()
                 .map(|(inv, span)| (substitute_var_with_literal(inv, var_name, value), *span)),
             body: Block {
-                statements: body.statements.iter().map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span)).collect(),
-                trailing_expr: body.trailing_expr.as_ref().map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
             },
         },
     }

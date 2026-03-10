@@ -578,14 +578,14 @@ fn lower_block_with_result<'src>(
     }
 
     // No trailing expression - check if last statement is an expression (backward compat)
-    if let Some(last) = block.statements.last() {
-        if let TStmt::Expr(expr) = &last.0 {
-            // The expression was already lowered as a statement above,
-            // but we need its value. Re-lower it to get the register.
-            // TODO: This double-lowers the expression; with proper Block usage
-            // the trailing_expr path should be preferred.
-            return lower_expr(ctx, expr);
-        }
+    if let Some(last) = block.statements.last()
+        && let TStmt::Expr(expr) = &last.0
+    {
+        // The expression was already lowered as a statement above,
+        // but we need its value. Re-lower it to get the register.
+        // TODO: This double-lowers the expression; with proper Block usage
+        // the trailing_expr path should be preferred.
+        return lower_expr(ctx, expr);
     }
 
     // No value - emit default
