@@ -361,23 +361,12 @@ pub fn check_stmt<'src>(
                     if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
 
-                        // Snapshot the RHS: if it's an array index with a known
-                        // value, resolve it now so the proposition doesn't contain
-                        // a live reference that becomes stale after later mutations.
-                        let snapshot_rhs = match &rhs.0 {
-                            crate::common::ast::Expr::Index {
-                                base: rhs_base,
-                                index: rhs_index,
-                            } => {
-                                if let crate::common::ast::Expr::Variable(rhs_arr) = &rhs_base.0 {
-                                    ctx.resolve_array_element_value(rhs_arr, &rhs_index.0)
-                                        .unwrap_or_else(|| rhs.0.clone())
-                                } else {
-                                    rhs.0.clone()
-                                }
-                            }
-                            _ => rhs.0.clone(),
-                        };
+                        // Snapshot array reads in the RHS so the proposition
+                        // doesn't contain live references that become stale
+                        // after later mutations.
+                        let (resolved, any_resolved) =
+                            resolve_array_reads_in_expr(ctx, &rhs.0);
+                        let snapshot_rhs = if any_resolved { resolved } else { rhs.0.clone() };
 
                         // Build: arr[index] == snapshot_rhs
                         let arr_index_expr = crate::common::ast::Expr::Index {
