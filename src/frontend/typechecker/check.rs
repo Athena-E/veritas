@@ -1315,24 +1315,46 @@ fn check_expr_satisfies_refined<'src>(
 }
 
 /// If the value expression is a function call with a postcondition,
-/// produce a proposition with `result` renamed to the binding variable.
+/// produce a proposition with `result` renamed to the binding variable
+/// and parameter names substituted with the actual argument values.
 fn postcondition_for_call<'src>(
     ctx: &TypingContext<'src>,
     binding_name: &str,
     value_expr: &crate::common::ast::Expr<'src>,
 ) -> Option<IProposition<'src>> {
     use crate::frontend::typechecker::helpers::rename_expr_var;
+    use crate::frontend::typechecker::synthesize::substitute_args_in_prop;
 
-    if let crate::common::ast::Expr::Call { func_name, .. } = value_expr
+    if let Expr::Call { func_name, args } = value_expr
         && let Some(sig) = ctx.lookup_function(func_name)
         && let Some(ref postcond) = sig.postcondition
     {
+        // Rename `result` → binding name
         let binding_leaked: &'src str = Box::leak(binding_name.to_string().into_boxed_str());
         let renamed = rename_expr_var(&postcond.predicate.0, "result", binding_leaked);
-        return Some(IProposition {
+        let renamed_prop = IProposition {
             var: binding_name.to_string(),
             predicate: Arc::new((renamed, postcond.predicate.1)),
-        });
+        };
+
+        // Substitute parameter names with actual argument values/variables
+        let arg_exprs: Vec<&Expr> = args.0.iter().map(|a| &a.0).collect();
+        let arg_types: Vec<IType> = args
+            .0
+            .iter()
+            .filter_map(|a| synth_expr(ctx, a).ok().map(|(_, ty)| ty))
+            .collect();
+
+        if arg_types.len() == sig.parameters.len() {
+            return Some(substitute_args_in_prop(
+                &renamed_prop,
+                &sig.parameters,
+                &arg_types,
+                &arg_exprs,
+            ));
+        }
+
+        return Some(renamed_prop);
     }
     None
 }
