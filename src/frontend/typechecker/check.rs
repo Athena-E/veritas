@@ -16,10 +16,10 @@ fn resolve_array_reads_in_expr<'src>(
 ) -> (Expr<'src>, bool) {
     match expr {
         Expr::Index { base, index } => {
-            if let Expr::Variable(arr_name) = &base.0 {
-                if let Some(resolved) = ctx.resolve_array_element_value(arr_name, &index.0) {
-                    return (resolved, true);
-                }
+            if let Expr::Variable(arr_name) = &base.0
+                && let Some(resolved) = ctx.resolve_array_element_value(arr_name, &index.0)
+            {
+                return (resolved, true);
             }
             (expr.clone(), false)
         }
@@ -256,8 +256,7 @@ pub fn check_stmt<'src>(
                             })?;
 
                     // Resolve array reads in the RHS and snapshot their values
-                    let (resolved_rhs, any_resolved) =
-                        resolve_array_reads_in_expr(ctx, &rhs.0);
+                    let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
                     if any_resolved {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
                         let name_leaked: &'src str =
