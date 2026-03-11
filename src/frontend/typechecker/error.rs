@@ -351,11 +351,7 @@ impl<'src> fmt::Display for TypeError<'src> {
             }
 
             TypeError::DivisionByZero { span } => {
-                write!(
-                    f,
-                    "Possible division by zero at {:?}",
-                    span
-                )
+                write!(f, "Possible division by zero at {:?}", span)
             }
 
             TypeError::InvariantNotEstablished { invariant_span } => {

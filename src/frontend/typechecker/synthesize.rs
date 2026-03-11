@@ -6,8 +6,8 @@ use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
-    check_divisor_nonzero,
-    check_stmts, extract_proposition, is_subtype, join_op, negate_proposition,
+    check_divisor_nonzero, check_stmts, extract_proposition, is_subtype, join_op,
+    negate_proposition,
 };
 use std::sync::Arc;
 
