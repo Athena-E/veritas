@@ -364,9 +364,12 @@ pub fn check_stmt<'src>(
                         // Snapshot array reads in the RHS so the proposition
                         // doesn't contain live references that become stale
                         // after later mutations.
-                        let (resolved, any_resolved) =
-                            resolve_array_reads_in_expr(ctx, &rhs.0);
-                        let snapshot_rhs = if any_resolved { resolved } else { rhs.0.clone() };
+                        let (resolved, any_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
+                        let snapshot_rhs = if any_resolved {
+                            resolved
+                        } else {
+                            rhs.0.clone()
+                        };
 
                         // Build: arr[index] == snapshot_rhs
                         let arr_index_expr = crate::common::ast::Expr::Index {
