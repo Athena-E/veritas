@@ -1,12 +1,61 @@
 // Statement and program type checking
 
-use crate::common::ast::{Block, Function, Program, Stmt, Type as AstType};
+use crate::common::ast::{Block, Expr, Function, Program, Stmt, Type as AstType};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_expr};
 use im::HashMap;
 use std::sync::Arc;
+
+/// Recursively walk an expression and replace `arr[i]` subexpressions with their
+/// resolved concrete values from the typing context. Returns `(resolved_expr, any_resolved)`.
+fn resolve_array_reads_in_expr<'src>(
+    ctx: &TypingContext<'src>,
+    expr: &Expr<'src>,
+) -> (Expr<'src>, bool) {
+    match expr {
+        Expr::Index { base, index } => {
+            if let Expr::Variable(arr_name) = &base.0 {
+                if let Some(resolved) = ctx.resolve_array_element_value(arr_name, &index.0) {
+                    return (resolved, true);
+                }
+            }
+            (expr.clone(), false)
+        }
+        Expr::BinOp { op, lhs, rhs } => {
+            let (new_lhs, l_resolved) = resolve_array_reads_in_expr(ctx, &lhs.0);
+            let (new_rhs, r_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
+            if l_resolved || r_resolved {
+                (
+                    Expr::BinOp {
+                        op: *op,
+                        lhs: Box::new((new_lhs, lhs.1)),
+                        rhs: Box::new((new_rhs, rhs.1)),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
+        Expr::UnaryOp { op, cond } => {
+            let (new_cond, resolved) = resolve_array_reads_in_expr(ctx, &cond.0);
+            if resolved {
+                (
+                    Expr::UnaryOp {
+                        op: *op,
+                        cond: Box::new((new_cond, cond.1)),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
+        _ => (expr.clone(), false),
+    }
+}
 
 /// Check a statement and produce a typed statement with updated context
 /// Returns (typed_stmt, new_context)
@@ -42,32 +91,22 @@ pub fn check_stmt<'src>(
             // Add to context with the synthesized type (more precise)
             let mut new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
 
-            // If RHS is an array index, add proposition: name == <snapshot>
-            // We snapshot the array element's current known value so that
-            // subsequent mutations to the array don't drag this binding along.
-            if let crate::common::ast::Expr::Index { base, index } = &value.0
-                && let crate::common::ast::Expr::Variable(arr_name) = &base.0
-            {
-                // Try to resolve the value from existing pointwise propositions
-                let snapshot_rhs = ctx.resolve_array_element_value(arr_name, &index.0);
-
-                if let Some(rhs_expr) = snapshot_rhs {
-                    let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
-                    let name_leaked: &'src str = Box::leak(name.to_string().into_boxed_str());
-                    let eq_expr = crate::common::ast::Expr::BinOp {
-                        op: crate::common::ast::BinOp::Eq,
-                        lhs: Box::new((
-                            crate::common::ast::Expr::Variable(name_leaked),
-                            dummy_span,
-                        )),
-                        rhs: Box::new((rhs_expr, dummy_span)),
-                    };
-                    let prop = IProposition {
-                        var: name.to_string(),
-                        predicate: Arc::new((eq_expr, dummy_span)),
-                    };
-                    new_ctx = new_ctx.with_proposition(prop);
-                }
+            // Resolve array reads in the RHS expression and snapshot their values
+            // so that subsequent mutations to the array don't drag this binding along.
+            let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &value.0);
+            if any_resolved {
+                let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+                let name_leaked: &'src str = Box::leak(name.to_string().into_boxed_str());
+                let eq_expr = Expr::BinOp {
+                    op: crate::common::ast::BinOp::Eq,
+                    lhs: Box::new((Expr::Variable(name_leaked), dummy_span)),
+                    rhs: Box::new((resolved_rhs, dummy_span)),
+                };
+                let prop = IProposition {
+                    var: name.to_string(),
+                    predicate: Arc::new((eq_expr, dummy_span)),
+                };
+                new_ctx = new_ctx.with_proposition(prop);
             }
 
             // Propagate postcondition from function calls to the binding
@@ -208,13 +247,32 @@ pub fn check_stmt<'src>(
                     }
 
                     // Update mutable variable's current type
-                    let new_ctx =
+                    let mut new_ctx =
                         ctx.with_mutable_update(var_name, rhs_ty.clone())
                             .map_err(|e| TypeError::InvalidAssignment {
                                 variable: var_name.to_string(),
                                 reason: e,
                                 span,
                             })?;
+
+                    // Resolve array reads in the RHS and snapshot their values
+                    let (resolved_rhs, any_resolved) =
+                        resolve_array_reads_in_expr(ctx, &rhs.0);
+                    if any_resolved {
+                        let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+                        let name_leaked: &'src str =
+                            Box::leak(var_name.to_string().into_boxed_str());
+                        let eq_expr = Expr::BinOp {
+                            op: crate::common::ast::BinOp::Eq,
+                            lhs: Box::new((Expr::Variable(name_leaked), dummy_span)),
+                            rhs: Box::new((resolved_rhs, dummy_span)),
+                        };
+                        let prop = IProposition {
+                            var: var_name.to_string(),
+                            predicate: Arc::new((eq_expr, dummy_span)),
+                        };
+                        new_ctx = new_ctx.with_proposition(prop);
+                    }
 
                     // Create TExpr for the left-hand side
                     let tlhs_expr = TExpr::Variable {
