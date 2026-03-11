@@ -53,6 +53,40 @@ fn resolve_array_reads_in_expr<'src>(
                 (expr.clone(), false)
             }
         }
+        Expr::Call { func_name, args } => {
+            let mut any_resolved = false;
+            let mut new_args = Vec::new();
+            for (arg, sp) in &args.0 {
+                let (new_arg, resolved) = resolve_array_reads_in_expr(ctx, arg);
+                any_resolved |= resolved;
+                new_args.push((new_arg, *sp));
+            }
+            if any_resolved {
+                (
+                    Expr::Call {
+                        func_name,
+                        args: (new_args, args.1),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
+        Expr::ArrayInit { value, length } => {
+            let (new_value, resolved) = resolve_array_reads_in_expr(ctx, &value.0);
+            if resolved {
+                (
+                    Expr::ArrayInit {
+                        value: Box::new((new_value, value.1)),
+                        length: length.clone(),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
         _ => (expr.clone(), false),
     }
 }
