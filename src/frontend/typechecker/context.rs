@@ -325,9 +325,7 @@ impl<'src> TypingContext<'src> {
                     return Some(rhs.0.clone());
                 }
                 // Fall back to structural equality for non-resolvable expressions
-                if lookup_idx.is_none()
-                    && format!("{:?}", index.0) == format!("{:?}", index_expr)
-                {
+                if lookup_idx.is_none() && format!("{:?}", index.0) == format!("{:?}", index_expr) {
                     return Some(rhs.0.clone());
                 }
             }

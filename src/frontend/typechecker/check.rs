@@ -407,9 +407,8 @@ pub fn check_stmt<'src>(
                         } else {
                             // Symbolic index: selectively invalidate propositions.
                             // Keep pointwise props where SMT can prove the indices differ.
-                            new_ctx = invalidate_array_props_selectively(
-                                &new_ctx, arr_name, &index.0,
-                            );
+                            new_ctx =
+                                invalidate_array_props_selectively(&new_ctx, arr_name, &index.0);
                         }
                         // Always add the new proposition (arr[idx] == rhs)
                         new_ctx = new_ctx.with_proposition(prop);
