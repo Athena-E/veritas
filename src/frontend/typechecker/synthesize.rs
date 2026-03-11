@@ -317,7 +317,7 @@ pub fn synth_expr<'src>(
                 // Substitute argument values into the precondition
                 let arg_exprs: Vec<&Expr> = args.0.iter().map(|a| &a.0).collect();
                 let substituted_precond =
-                    substitute_args_in_precond(precond, &sig.parameters, &arg_types, &arg_exprs);
+                    substitute_args_in_prop(precond, &sig.parameters, &arg_types, &arg_exprs);
 
                 if !crate::frontend::typechecker::check_provable(ctx, &substituted_precond) {
                     return Err(TypeError::PreconditionViolation {
@@ -554,9 +554,9 @@ fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<
     }
 }
 
-/// Substitute argument types/values into a precondition
-/// This replaces parameter names with their actual argument values when possible
-fn substitute_args_in_precond<'src>(
+/// Substitute argument types/values into a proposition (precondition or postcondition).
+/// This replaces parameter names with their actual argument values when possible.
+pub(super) fn substitute_args_in_prop<'src>(
     precond: &crate::common::types::IProposition<'src>,
     params: &[(String, IType<'src>)],
     arg_types: &[IType<'src>],
