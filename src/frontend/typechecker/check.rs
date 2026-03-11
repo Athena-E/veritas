@@ -405,9 +405,11 @@ pub fn check_stmt<'src>(
                             // Known index: remove stale prop for this index, add new one
                             new_ctx = new_ctx.without_array_element_prop(arr_name, idx_val);
                         } else {
-                            // Truly unknown index: any element could be modified,
-                            // invalidate all pointwise propositions for this array
-                            new_ctx = new_ctx.without_all_array_element_props(arr_name);
+                            // Symbolic index: selectively invalidate propositions.
+                            // Keep pointwise props where SMT can prove the indices differ.
+                            new_ctx = invalidate_array_props_selectively(
+                                &new_ctx, arr_name, &index.0,
+                            );
                         }
                         // Always add the new proposition (arr[idx] == rhs)
                         new_ctx = new_ctx.with_proposition(prop);
@@ -1312,6 +1314,63 @@ fn check_expr_satisfies_refined<'src>(
         return crate::frontend::typechecker::smt::SmtOracle::new().is_provable(ctx, &goal);
     }
     false
+}
+
+/// Selectively invalidate array element propositions when the assigned index
+/// is symbolic. For each pointwise proposition `arr[k] == v`, use SMT to check
+/// whether `assigned_index != k` is provable. If so, the proposition is safe to
+/// keep. Quantified propositions over the array are always removed.
+fn invalidate_array_props_selectively<'src>(
+    ctx: &TypingContext<'src>,
+    arr_name: &str,
+    assigned_index: &Expr<'src>,
+) -> TypingContext<'src> {
+    use crate::common::ast::BinOp;
+
+    let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
+    let arr_name_owned = arr_name.to_string();
+    let assigned_index = assigned_index.clone();
+
+    ctx.retain_propositions(|prop| {
+        if prop.var != arr_name_owned {
+            return true;
+        }
+        match &prop.predicate.0 {
+            // Quantified propositions are always invalidated
+            Expr::Forall { .. } | Expr::Exists { .. } => false,
+            // Pointwise: keep if we can prove indices differ
+            Expr::BinOp {
+                op: BinOp::Eq,
+                lhs,
+                ..
+            } => match &lhs.0 {
+                Expr::Index { base, index }
+                    if matches!(&base.0, Expr::Variable(n) if *n == arr_name_owned.as_str()) =>
+                {
+                    // Try concrete comparison first (fast path)
+                    if let Some(prop_idx) = ctx.resolve_expr_to_int(&index.0)
+                        && let Some(assign_idx) = ctx.resolve_expr_to_int(&assigned_index)
+                    {
+                        return prop_idx != assign_idx;
+                    }
+
+                    // Build goal: assigned_index != prop_index
+                    let neq_expr = Expr::BinOp {
+                        op: BinOp::NotEq,
+                        lhs: Box::new((assigned_index.clone(), dummy_span)),
+                        rhs: Box::new((index.0.clone(), dummy_span)),
+                    };
+                    let goal = IProposition {
+                        var: arr_name_owned.clone(),
+                        predicate: Arc::new((neq_expr, dummy_span)),
+                    };
+                    crate::frontend::typechecker::smt::check_provable(ctx, &goal)
+                }
+                _ => true,
+            },
+            _ => true,
+        }
+    })
 }
 
 /// If the value expression is a function call with a postcondition,

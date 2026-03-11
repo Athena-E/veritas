@@ -1,0 +1,61 @@
+// Demonstrates selective invalidation of array propositions.
+// When arr[i] is assigned with a symbolic i that is provably != some index k,
+// the proposition arr[k] == v is preserved.
+
+fn needs_ten(x: int) -> int
+    requires x == 10
+{
+    x
+}
+
+fn needs_twenty(x: int) -> int
+    requires x == 20
+{
+    x
+}
+
+// i >= 1, so assigning arr[i] cannot touch arr[0].
+fn preserve_first(i: int) -> int
+    requires i >= 1 && i < 3
+{
+    let mut arr: [int; 3] = [0; 3];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    arr[i] = 99;
+    let x: int = arr[0];
+    needs_ten(x)
+}
+
+// i < 2, so assigning arr[i] cannot touch arr[2].
+fn preserve_last(i: int) -> int
+    requires i >= 0 && i < 2
+{
+    let mut arr: [int; 3] = [0; 3];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 20;
+    arr[i] = 99;
+    let x: int = arr[2];
+    needs_twenty(x)
+}
+
+// i == 0, so assigning arr[i] cannot touch arr[1].
+fn preserve_middle(i: int) -> int
+    requires i == 0
+{
+    let mut arr: [int; 3] = [0; 3];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[2] = 30;
+    arr[i] = 99;
+    let x: int = arr[1];
+    needs_twenty(x)
+}
+
+fn main() -> int {
+    preserve_first(1);
+    preserve_last(0);
+    preserve_middle(0);
+    0
+}

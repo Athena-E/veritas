@@ -132,6 +132,16 @@ impl<'src> TypingContext<'src> {
         &self.phi
     }
 
+    /// Keep only propositions that satisfy the predicate.
+    pub fn retain_propositions<F>(&self, predicate: F) -> Self
+    where
+        F: Fn(&IProposition<'src>) -> bool,
+    {
+        let mut new_ctx = self.clone();
+        new_ctx.phi = new_ctx.phi.into_iter().filter(|p| predicate(p)).collect();
+        new_ctx
+    }
+
     // Immutable context
 
     pub fn with_immutable(&self, name: String, ty: IType<'src>) -> Self {
