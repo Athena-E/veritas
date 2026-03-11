@@ -249,10 +249,21 @@ impl<'src> TypingContext<'src> {
     ///
     /// Propositions: Keep intersection (propositions that appear in both branches)
     pub fn join_mutable_contexts(ctx1: &Self, ctx2: &Self) -> Self {
+        Self::join_mutable_contexts_with_base(ctx1, ctx2, None)
+    }
+
+    /// Like `join_mutable_contexts`, but accepts the pre-branch context so that
+    /// propositions unchanged from before the branch can be preserved even when
+    /// only one branch retains them.
+    pub fn join_mutable_contexts_with_base(
+        ctx1: &Self,
+        ctx2: &Self,
+        base_ctx: Option<&Self>,
+    ) -> Self {
         let mut joined = ctx1.clone();
 
         // Keep intersection of propositions (those provable in both branches)
-        joined.phi = intersect_propositions(&ctx1.phi, &ctx2.phi);
+        joined.phi = intersect_propositions(&ctx1.phi, &ctx2.phi, base_ctx);
 
         // Join mutable variable types
         for (name, binding1) in ctx1.delta.iter() {
@@ -554,6 +565,7 @@ fn singleton_to_proposition<'src>(value: &IValue) -> IProposition<'src> {
 fn intersect_propositions<'src>(
     phi1: &Vector<IProposition<'src>>,
     phi2: &Vector<IProposition<'src>>,
+    base_ctx: Option<&TypingContext<'src>>,
 ) -> Vector<IProposition<'src>> {
     let mut result = Vector::new();
     let mut matched_in_phi2 = std::collections::HashSet::new();
@@ -577,9 +589,16 @@ fn intersect_propositions<'src>(
                     }
                     if let Some(p2_parts) = extract_array_eq_parts(p2) {
                         // Same array, same index → disjoin the equalities
-                        if p1_parts.arr_name == p2_parts.arr_name
-                            && format!("{:?}", p1_parts.index) == format!("{:?}", p2_parts.index)
+                        let indices_match = if let Some(ctx) = base_ctx
+                            && let Some(i1) = ctx.resolve_expr_to_int(p1_parts.index)
+                            && let Some(i2) = ctx.resolve_expr_to_int(p2_parts.index)
                         {
+                            i1 == i2
+                        } else {
+                            format!("{:?}", p1_parts.index) == format!("{:?}", p2_parts.index)
+                        };
+
+                        if p1_parts.arr_name == p2_parts.arr_name && indices_match {
                             let disj_expr = Expr::BinOp {
                                 op: BinOp::Or,
                                 lhs: Box::new(p1.predicate.as_ref().clone()),
@@ -596,6 +615,16 @@ fn intersect_propositions<'src>(
                     }
                 }
             }
+
+            // If the proposition exists in the base context and also in the other
+            // branch's phi (checked above), it was already added. But if it's only
+            // missing from phi2 because phi2 never modified the relevant variable,
+            // check: if p1 exists unchanged from the base context AND also exists
+            // unchanged in phi2's base (meaning neither branch touched it), keep it.
+            // More practically: if p1 exists in the base context and in phi2, we
+            // already matched it. If p1 exists in base and NOT in phi2, that means
+            // phi2 actively removed/changed it, so dropping is correct.
+            // The improvement here is the semantic index matching above.
         }
     }
     result

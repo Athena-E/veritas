@@ -811,8 +811,10 @@ fn check_if_stmt<'src>(
         (None, ctx.clone())
     };
 
-    // Join the contexts from both branches
-    let joined_ctx = TypingContext::join_mutable_contexts(&then_final_ctx, &else_final_ctx);
+    // Join the contexts from both branches, passing the pre-branch context
+    // so that semantic index matching can be used for array propositions.
+    let joined_ctx =
+        TypingContext::join_mutable_contexts_with_base(&then_final_ctx, &else_final_ctx, Some(ctx));
 
     let texpr = TExpr::If {
         cond: Box::new(tcond),
