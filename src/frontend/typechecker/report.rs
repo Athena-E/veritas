@@ -41,6 +41,7 @@ fn get_span_start(error: &TypeError) -> usize {
         TypeError::UnsupportedFeature { span, .. } => span.start,
         TypeError::NotAConstant { span, .. } => span.start,
         TypeError::InvalidPostconditionVariable { span, .. } => span.start,
+        TypeError::DivisionByZero { span, .. } => span.start,
         TypeError::InvariantNotEstablished { invariant_span, .. } => invariant_span.start,
         TypeError::InvariantNotPreserved { invariant_span, .. } => invariant_span.start,
     }
@@ -418,6 +419,17 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                 )
                 .finish()
         }
+
+        TypeError::DivisionByZero { span } => Report::build(ReportKind::Error, span.start..span.end)
+            .with_code("E022")
+            .with_message("Possible division by zero")
+            .with_label(
+                Label::new(span.start..span.end)
+                    .with_message("divisor may be zero")
+                    .with_color(Color::Red),
+            )
+            .with_help("Ensure the divisor is provably non-zero, e.g. by using a refined type like `{v: int | v != 0}` or guarding with an `if` check.")
+            .finish(),
 
         TypeError::InvariantNotPreserved { invariant_span } => {
             Report::build(ReportKind::Error, invariant_span.start..invariant_span.end)

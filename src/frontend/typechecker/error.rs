@@ -129,6 +129,10 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
+    DivisionByZero {
+        span: Span,
+    },
+
     InvariantNotEstablished {
         invariant_span: Span,
     },
@@ -343,6 +347,14 @@ impl<'src> fmt::Display for TypeError<'src> {
                     f,
                     "Postcondition of `{}` at {:?} references `{}`, which is not `result` or a parameter",
                     function, span, variable
+                )
+            }
+
+            TypeError::DivisionByZero { span } => {
+                write!(
+                    f,
+                    "Possible division by zero at {:?}",
+                    span
                 )
             }
 
