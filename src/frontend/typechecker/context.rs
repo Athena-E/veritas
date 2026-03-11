@@ -267,13 +267,34 @@ impl<'src> TypingContext<'src> {
         joined
     }
 
+    /// Try to resolve an expression to a concrete i64 value.
+    /// Handles literal ints and variables with singleton int types.
+    pub fn resolve_expr_to_int(&self, expr: &Expr<'src>) -> Option<i64> {
+        match expr {
+            Expr::Literal(Literal::Int(n)) => Some(*n),
+            Expr::Variable(name) => match self.lookup_var(name) {
+                Some(VarBinding::Immutable(IType::SingletonInt(IValue::Int(n)))) => Some(n),
+                Some(VarBinding::Mutable(ref b)) => match &b.current_type {
+                    IType::SingletonInt(IValue::Int(n)) => Some(*n),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Look up the RHS of a pointwise proposition `arr_name[index] == <rhs>`.
     /// Returns the RHS expression if found, so it can be snapshotted into a let binding.
+    /// Resolves both the lookup index and proposition indices to concrete values
+    /// when possible, so `arr[i]` with `i: int(5)` matches a proposition about `arr[5]`.
     pub fn resolve_array_element_value<'a>(
         &'a self,
         arr_name: &str,
         index_expr: &Expr<'src>,
     ) -> Option<Expr<'src>> {
+        let lookup_idx = self.resolve_expr_to_int(index_expr);
+
         for prop in self.phi.iter() {
             if prop.var != arr_name {
                 continue;
@@ -284,10 +305,19 @@ impl<'src> TypingContext<'src> {
                 rhs,
             } = &prop.predicate.0
                 && let Expr::Index { base, index } = &lhs.0
+                && matches!(&base.0, Expr::Variable(n) if *n == arr_name)
             {
-                let base_matches = matches!(&base.0, Expr::Variable(n) if *n == arr_name);
-                let idx_matches = format!("{:?}", index.0) == format!("{:?}", index_expr);
-                if base_matches && idx_matches {
+                // Try concrete comparison first (handles cross-representation matches)
+                if let Some(li) = lookup_idx
+                    && let Some(pi) = self.resolve_expr_to_int(&index.0)
+                    && li == pi
+                {
+                    return Some(rhs.0.clone());
+                }
+                // Fall back to structural equality for non-resolvable expressions
+                if lookup_idx.is_none()
+                    && format!("{:?}", index.0) == format!("{:?}", index_expr)
+                {
                     return Some(rhs.0.clone());
                 }
             }
