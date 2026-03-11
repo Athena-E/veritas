@@ -198,6 +198,23 @@ pub fn check_stmt<'src>(
                 }
             }
 
+            // Resolve array reads in the RHS and snapshot their values
+            let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &value.0);
+            if any_resolved {
+                let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+                let name_leaked: &'src str = Box::leak(name.to_string().into_boxed_str());
+                let eq_expr = Expr::BinOp {
+                    op: crate::common::ast::BinOp::Eq,
+                    lhs: Box::new((Expr::Variable(name_leaked), dummy_span)),
+                    rhs: Box::new((resolved_rhs, dummy_span)),
+                };
+                let prop = IProposition {
+                    var: name.to_string(),
+                    predicate: Arc::new((eq_expr, dummy_span)),
+                };
+                new_ctx = new_ctx.with_proposition(prop);
+            }
+
             // Propagate postcondition from function calls to the binding
             if let Some(prop) = postcondition_for_call(ctx, name, &value.0) {
                 new_ctx = new_ctx.with_proposition(prop);
