@@ -53,6 +53,40 @@ fn resolve_array_reads_in_expr<'src>(
                 (expr.clone(), false)
             }
         }
+        Expr::Call { func_name, args } => {
+            let mut any_resolved = false;
+            let mut new_args = Vec::new();
+            for (arg, sp) in &args.0 {
+                let (new_arg, resolved) = resolve_array_reads_in_expr(ctx, arg);
+                any_resolved |= resolved;
+                new_args.push((new_arg, *sp));
+            }
+            if any_resolved {
+                (
+                    Expr::Call {
+                        func_name,
+                        args: (new_args, args.1),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
+        Expr::ArrayInit { value, length } => {
+            let (new_value, resolved) = resolve_array_reads_in_expr(ctx, &value.0);
+            if resolved {
+                (
+                    Expr::ArrayInit {
+                        value: Box::new((new_value, value.1)),
+                        length: length.clone(),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
         _ => (expr.clone(), false),
     }
 }
@@ -604,10 +638,41 @@ pub fn check_stmt<'src>(
                 use crate::frontend::typechecker::helpers::substitute_expr_for_var;
                 let mut post = ctx.clone();
 
-                // Invalidate pointwise props for arrays modified in loop body
-                let modified = collect_modified_arrays(&body.statements);
-                for arr_name in &modified {
-                    post = post.without_all_array_element_props(arr_name);
+                // Invalidate pointwise props for arrays modified in loop body.
+                // Use selective invalidation: only remove propositions for
+                // indices that might overlap with the assigned indices.
+                let modifications = collect_array_modifications(&body.statements);
+                for (arr_name, idx_expr) in &modifications {
+                    if let Some(idx_val) = post.resolve_expr_to_int(idx_expr) {
+                        // Concrete index: only invalidate that specific element
+                        post = post.without_array_element_prop(arr_name, idx_val);
+                    } else {
+                        // Symbolic index (e.g., loop variable): selectively invalidate
+                        // using SMT to check which existing propositions survive.
+                        // Add loop variable bounds to post context for SMT queries.
+                        let mut smt_ctx = post.clone();
+                        let lower_bound = crate::common::ast::Expr::BinOp {
+                            op: crate::common::ast::BinOp::Gte,
+                            lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                            rhs: Box::new((*start.clone()).clone()),
+                        };
+                        smt_ctx = smt_ctx.with_proposition(IProposition {
+                            var: var.to_string(),
+                            predicate: Arc::new((lower_bound, dummy_span)),
+                        });
+                        let upper_bound = crate::common::ast::Expr::BinOp {
+                            op: crate::common::ast::BinOp::Lt,
+                            lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                            rhs: Box::new((*end.clone()).clone()),
+                        };
+                        smt_ctx = smt_ctx.with_proposition(IProposition {
+                            var: var.to_string(),
+                            predicate: Arc::new((upper_bound, dummy_span)),
+                        });
+                        post = invalidate_array_props_selectively(
+                            &smt_ctx, arr_name, idx_expr,
+                        );
+                    }
                 }
 
                 // Substitute end for var in invariant
@@ -646,44 +711,44 @@ pub fn check_stmt<'src>(
     }
 }
 
-/// Collect names of arrays modified by index assignment in a statement list.
-/// Recurses into if-blocks and nested for-loops.
-fn collect_modified_arrays<'src>(
+/// Collect (array_name, index_expr) pairs for arrays modified by index
+/// assignment in a statement list. Recurses into if-blocks and nested for-loops.
+fn collect_array_modifications<'src>(
     stmts: &[Spanned<Stmt<'src>>],
-) -> std::collections::HashSet<String> {
-    let mut modified = std::collections::HashSet::new();
-    collect_modified_arrays_inner(stmts, &mut modified);
-    modified
+) -> Vec<(String, Expr<'src>)> {
+    let mut modifications = Vec::new();
+    collect_array_modifications_inner(stmts, &mut modifications);
+    modifications
 }
 
-fn collect_modified_arrays_inner<'src>(
+fn collect_array_modifications_inner<'src>(
     stmts: &[Spanned<Stmt<'src>>],
-    modified: &mut std::collections::HashSet<String>,
+    modifications: &mut Vec<(String, Expr<'src>)>,
 ) {
     for stmt in stmts {
         match &stmt.0 {
             Stmt::Assignment { lhs, .. } => {
-                if let crate::common::ast::Expr::Index { base, .. } = &lhs.0
-                    && let crate::common::ast::Expr::Variable(name) = &base.0
+                if let Expr::Index { base, index } = &lhs.0
+                    && let Expr::Variable(name) = &base.0
                 {
-                    modified.insert(name.to_string());
+                    modifications.push((name.to_string(), index.0.clone()));
                 }
             }
             Stmt::Expr(expr) => {
-                if let crate::common::ast::Expr::If {
+                if let Expr::If {
                     then_block,
                     else_block,
                     ..
                 } = &expr.0
                 {
-                    collect_modified_arrays_inner(&then_block.statements, modified);
+                    collect_array_modifications_inner(&then_block.statements, modifications);
                     if let Some(else_stmts) = else_block {
-                        collect_modified_arrays_inner(&else_stmts.statements, modified);
+                        collect_array_modifications_inner(&else_stmts.statements, modifications);
                     }
                 }
             }
             Stmt::For { body, .. } => {
-                collect_modified_arrays_inner(&body.statements, modified);
+                collect_array_modifications_inner(&body.statements, modifications);
             }
             _ => {}
         }
@@ -746,8 +811,10 @@ fn check_if_stmt<'src>(
         (None, ctx.clone())
     };
 
-    // Join the contexts from both branches
-    let joined_ctx = TypingContext::join_mutable_contexts(&then_final_ctx, &else_final_ctx);
+    // Join the contexts from both branches, passing the pre-branch context
+    // so that semantic index matching can be used for array propositions.
+    let joined_ctx =
+        TypingContext::join_mutable_contexts_with_base(&then_final_ctx, &else_final_ctx, Some(ctx));
 
     let texpr = TExpr::If {
         cond: Box::new(tcond),
