@@ -669,9 +669,7 @@ pub fn check_stmt<'src>(
                             var: var.to_string(),
                             predicate: Arc::new((upper_bound, dummy_span)),
                         });
-                        post = invalidate_array_props_selectively(
-                            &smt_ctx, arr_name, idx_expr,
-                        );
+                        post = invalidate_array_props_selectively(&smt_ctx, arr_name, idx_expr);
                     }
                 }
 
@@ -713,9 +711,7 @@ pub fn check_stmt<'src>(
 
 /// Collect (array_name, index_expr) pairs for arrays modified by index
 /// assignment in a statement list. Recurses into if-blocks and nested for-loops.
-fn collect_array_modifications<'src>(
-    stmts: &[Spanned<Stmt<'src>>],
-) -> Vec<(String, Expr<'src>)> {
+fn collect_array_modifications<'src>(stmts: &[Spanned<Stmt<'src>>]) -> Vec<(String, Expr<'src>)> {
     let mut modifications = Vec::new();
     collect_array_modifications_inner(stmts, &mut modifications);
     modifications
