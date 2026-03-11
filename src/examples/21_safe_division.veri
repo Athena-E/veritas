@@ -1,0 +1,8 @@
+// Safe division: refined type guarantees non-zero divisor
+fn safe_divide(a: int, b: {v: int | v != 0}) -> int {
+    a / b
+}
+
+fn main() -> int {
+    safe_divide(10, 2)
+}

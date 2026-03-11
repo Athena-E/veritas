@@ -6,6 +6,7 @@ use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
+    check_divisor_nonzero,
     check_stmts, extract_proposition, is_subtype, join_op, negate_proposition,
 };
 use std::sync::Arc;
@@ -88,6 +89,11 @@ pub fn synth_expr<'src>(
                     found: ty2,
                     span: rhs.1,
                 });
+            }
+
+            // Division safety: prove divisor is non-zero
+            if *op == BinOp::Div {
+                check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
 
             // Try constant folding first for precise singleton types

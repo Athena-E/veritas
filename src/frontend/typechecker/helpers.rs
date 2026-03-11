@@ -284,6 +284,35 @@ pub fn check_array_bounds_expr<'src>(
     Ok(())
 }
 
+/// Check that the divisor in a division expression is provably non-zero
+pub fn check_divisor_nonzero<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    divisor_expr: &Expr<'src>,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::{TypeError, check_provable};
+
+    let dummy_span = SimpleSpan::new(0, 0);
+
+    let nonzero = IProposition {
+        var: "div".to_string(),
+        predicate: Arc::new((
+            Expr::BinOp {
+                op: BinOp::NotEq,
+                lhs: Box::new((divisor_expr.clone(), dummy_span)),
+                rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy_span)),
+            },
+            dummy_span,
+        )),
+    };
+
+    if !check_provable(ctx, &nonzero) {
+        return Err(TypeError::DivisionByZero { span });
+    }
+
+    Ok(())
+}
+
 /// Convert IValue to expression for SMT translation
 fn value_to_expr_from_ivalue<'src>(val: &'src IValue) -> Expr<'src> {
     match val {
