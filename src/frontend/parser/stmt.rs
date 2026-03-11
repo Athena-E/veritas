@@ -3,6 +3,36 @@ use crate::common::ast::{Block, Expr, Stmt, Token};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
+/// If a block has no trailing expression but its last statement is a bare
+/// if-else expression (no semicolon), promote it to the trailing expression.
+/// This is needed because the statement parser greedily consumes if-else as
+/// `Stmt::Expr`, but in block-final position it should be the block's value.
+pub fn promote_trailing_if<'src>(
+    mut statements: Vec<Spanned<Stmt<'src>>>,
+    trailing_expr: Option<Spanned<Expr<'src>>>,
+) -> Block<'src> {
+    let trailing_expr = if trailing_expr.is_some() {
+        trailing_expr
+    } else if let Some(last) = statements.last() {
+        if matches!(&last.0, Stmt::Expr((Expr::If { .. }, _))) {
+            let last = statements.pop().unwrap();
+            if let Stmt::Expr(expr) = last.0 {
+                Some(expr)
+            } else {
+                unreachable!()
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Block {
+        statements,
+        trailing_expr: trailing_expr.map(Box::new),
+    }
+}
+
 // Note: Expr is used for constructing if-statements
 
 // Statement parser
@@ -102,10 +132,7 @@ where
                     .then(expr.clone().or_not()),
             )
             .then_ignore(just(Token::Ctrl('}')))
-            .map(|(stmts, trailing)| Block {
-                statements: stmts,
-                trailing_expr: trailing.map(Box::new),
-            });
+            .map(|(stmts, trailing)| promote_trailing_if(stmts, trailing));
 
         // If statement (if expression used as statement, no semicolon needed)
         let if_stmt = just(Token::If)

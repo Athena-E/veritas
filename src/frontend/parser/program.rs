@@ -1,7 +1,7 @@
 use super::expr::expr_parser;
-use super::stmt::stmt_parser;
+use super::stmt::{promote_trailing_if, stmt_parser};
 use super::types::type_parser;
-use crate::common::ast::{Function, FunctionBody, Parameter, Program, Token, Type};
+use crate::common::ast::{Function, Parameter, Program, Token, Type};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -42,10 +42,7 @@ where
     let body = just(Token::Ctrl('{'))
         .ignore_then(stmt.repeated().collect::<Vec<_>>().then(expr.or_not()))
         .then_ignore(just(Token::Ctrl('}')))
-        .map(|(statements, trailing_expr)| FunctionBody {
-            statements,
-            trailing_expr: trailing_expr.map(Box::new),
-        });
+        .map(|(statements, trailing_expr)| promote_trailing_if(statements, trailing_expr));
 
     just(Token::Fn)
         .ignore_then(select! { Token::Ident(name) => name })
