@@ -39,21 +39,32 @@ fn lower_function(func: &DtalFunction) -> X86Function {
 /// Function lowering context
 struct FunctionLowerer<'a, 'src> {
     func: &'a DtalFunction<'src>,
-    allocation: &'a AllocationResult,
+    allocation: AllocationResult,
     instructions: Vec<X86Instr>,
     /// Stack frame size (for locals and spills)
     frame_size: i32,
 }
 
 impl<'a, 'src> FunctionLowerer<'a, 'src> {
-    fn new(func: &'a DtalFunction<'src>, allocation: &'a AllocationResult) -> Self {
+    fn new(func: &'a DtalFunction<'src>, allocation: &AllocationResult) -> Self {
+        // Callee-saved registers are pushed between rbp and the spill
+        // frame, so spill slot offsets must be shifted down to avoid
+        // overlapping with the callee-saved save area.
+        let callee_saved_size = (allocation.callee_saved_used.len() as i32) * 8;
+        let mut adjusted = allocation.clone();
+        for loc in adjusted.allocation.values_mut() {
+            if let Location::Stack(offset) = loc {
+                *offset -= callee_saved_size;
+            }
+        }
+
         // Calculate frame size: 8 bytes per spill slot + padding for alignment
-        let spill_size = (allocation.spill_slots as i32) * 8;
+        let spill_size = (adjusted.spill_slots as i32) * 8;
         let frame_size = (spill_size + 15) & !15; // 16-byte align
 
         Self {
             func,
-            allocation,
+            allocation: adjusted,
             instructions: Vec::new(),
             frame_size,
         }
@@ -93,17 +104,20 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             src: X86Reg::Rsp,
         });
 
-        // Allocate stack frame if needed
+        // Save callee-saved registers BEFORE allocating the spill frame.
+        // This ensures `mov rsp, rbp; pop` in the epilogue correctly
+        // unwinds the saves regardless of any alloca (sub rsp) that
+        // happens later in the function body.
+        for &reg in &self.allocation.callee_saved_used {
+            self.instructions.push(X86Instr::Push { src: reg });
+        }
+
+        // Allocate stack frame for spill slots
         if self.frame_size > 0 {
             self.instructions.push(X86Instr::SubRI {
                 dst: X86Reg::Rsp,
                 imm: self.frame_size,
             });
-        }
-
-        // Save callee-saved registers
-        for &reg in &self.allocation.callee_saved_used {
-            self.instructions.push(X86Instr::Push { src: reg });
         }
 
         // Move arguments from ABI registers to allocated locations
@@ -120,16 +134,35 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 
     /// Emit function epilogue
     fn emit_epilogue(&mut self) {
-        // Restore callee-saved registers (in reverse order)
-        for &reg in self.allocation.callee_saved_used.iter().rev() {
-            self.instructions.push(X86Instr::Pop { dst: reg });
-        }
+        let callee_saved_size = (self.allocation.callee_saved_used.len() as i32) * 8;
 
-        // mov rsp, rbp
+        // Restore rsp to point at the last callee-saved push.
+        // Layout from prologue:
+        //   [rbp]              old rbp
+        //   [rbp-8]            callee-saved #1   (first push)
+        //   [rbp-16]           callee-saved #2   (second push)
+        //   ...
+        //   [rbp-N*8]          callee-saved #N   (last push)
+        //   [rbp-N*8-frame]    spill slots / alloca
+        //
+        // mov rsp, rbp sets rsp to [rbp]. sub rsp, N*8 backs it up
+        // to [rbp-N*8] so pops restore in reverse push order.
         self.instructions.push(X86Instr::MovRR {
             dst: X86Reg::Rsp,
             src: X86Reg::Rbp,
         });
+
+        if callee_saved_size > 0 {
+            self.instructions.push(X86Instr::SubRI {
+                dst: X86Reg::Rsp,
+                imm: callee_saved_size,
+            });
+        }
+
+        // Restore callee-saved registers (in reverse order of push)
+        for &reg in self.allocation.callee_saved_used.iter().rev() {
+            self.instructions.push(X86Instr::Pop { dst: reg });
+        }
 
         // pop rbp
         self.instructions.push(X86Instr::Pop { dst: X86Reg::Rbp });
