@@ -31,9 +31,10 @@ pub enum X86Reg {
 }
 
 impl X86Reg {
-    /// Registers available for allocation (excludes RSP, RBP, RAX, RDX)
+    /// Registers available for allocation (excludes RSP, RBP, RAX, RDX, R11)
     /// Rax: scratch for lowering (binop lhs, setcc, load/store base)
     /// Rdx: implicitly clobbered by cqo/idiv (division)
+    /// R11: scratch for lowering (binop rhs, load/store offset, large immediates)
     pub const ALLOCATABLE: &'static [X86Reg] = &[
         X86Reg::Rcx,
         X86Reg::Rsi,
@@ -41,7 +42,6 @@ impl X86Reg {
         X86Reg::R8,
         X86Reg::R9,
         X86Reg::R10,
-        X86Reg::R11,
         X86Reg::Rbx,
         X86Reg::R12,
         X86Reg::R13,
