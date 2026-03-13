@@ -13,7 +13,7 @@ use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, Dtal
 use crate::backend::dtal::regs::Reg;
 #[cfg(test)]
 use crate::backend::dtal::regs::VirtualReg;
-use crate::backend::regalloc::{AllocationResult, GraphColoringAllocator};
+use crate::backend::regalloc::{AllocationResult, GraphColoringAllocator, LinearScanAllocator};
 use crate::backend::x86_64::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use crate::backend::x86_64::regs::{Location, X86Reg};
 
@@ -30,9 +30,14 @@ pub fn lower_program(program: &DtalProgram) -> X86Program {
 
 /// Lower a DTAL function to x86-64
 fn lower_function(func: &DtalFunction) -> X86Function {
-    // Perform register allocation using graph coloring.
-    let allocator = GraphColoringAllocator::new();
-    let allocation = allocator.allocate(func);
+    // Perform register allocation (graph coloring by default, VERITAS_LS=1 for linear scan).
+    let allocation = if std::env::var("VERITAS_LS").is_ok() {
+        let mut ls_allocator = LinearScanAllocator::new();
+        ls_allocator.allocate(func)
+    } else {
+        let gc_allocator = GraphColoringAllocator::new();
+        gc_allocator.allocate(func)
+    };
 
     // Debug allocation
     if std::env::var("VERITAS_DEBUG_ALLOC").is_ok() {
