@@ -11,7 +11,7 @@
 
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
 use crate::backend::dtal::regs::{Reg, VirtualReg};
-use crate::backend::regalloc::{AllocationResult, LinearScanAllocator};
+use crate::backend::regalloc::{AllocationResult, GraphColoringAllocator};
 use crate::backend::x86_64::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use crate::backend::x86_64::regs::{Location, X86Reg};
 
@@ -28,8 +28,10 @@ pub fn lower_program(program: &DtalProgram) -> X86Program {
 
 /// Lower a DTAL function to x86-64
 fn lower_function(func: &DtalFunction) -> X86Function {
-    // Perform register allocation
-    let mut allocator = LinearScanAllocator::new();
+    // Perform register allocation using graph coloring.
+    // Graph coloring respects the actual interference graph rather than
+    // over-approximating liveness across branches like linear scan does.
+    let allocator = GraphColoringAllocator::new();
     let allocation = allocator.allocate(func);
 
     let lowerer = FunctionLowerer::new(func, &allocation);
@@ -287,13 +289,12 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                         self.instructions.push(X86Instr::Push { src: r });
                     }
                     Location::Stack(offset) => {
-                        // Load to scratch register then push
                         let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
                         self.instructions.push(X86Instr::MovRM {
-                            dst: X86Reg::R11,
+                            dst: X86Reg::Rax,
                             src: mem,
                         });
-                        self.instructions.push(X86Instr::Push { src: X86Reg::R11 });
+                        self.instructions.push(X86Instr::Push { src: X86Reg::Rax });
                     }
                 }
             }
@@ -305,12 +306,11 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                         self.instructions.push(X86Instr::Pop { dst: r });
                     }
                     Location::Stack(offset) => {
-                        // Pop to scratch register then store
-                        self.instructions.push(X86Instr::Pop { dst: X86Reg::R11 });
+                        self.instructions.push(X86Instr::Pop { dst: X86Reg::Rax });
                         let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
                         self.instructions.push(X86Instr::MovMR {
                             dst: mem,
-                            src: X86Reg::R11,
+                            src: X86Reg::Rax,
                         });
                     }
                 }
@@ -400,16 +400,16 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 self.instructions.push(X86Instr::MovRM { dst: d, src: mem });
             }
             (Location::Stack(src_off), Location::Stack(dst_off)) => {
-                // Memory to memory: need scratch register
+                // Memory to memory: use Rax as scratch (never allocatable)
                 let src_mem = MemOperand::base_disp(X86Reg::Rbp, src_off);
                 let dst_mem = MemOperand::base_disp(X86Reg::Rbp, dst_off);
                 self.instructions.push(X86Instr::MovRM {
-                    dst: X86Reg::R11,
+                    dst: X86Reg::Rax,
                     src: src_mem,
                 });
                 self.instructions.push(X86Instr::MovMR {
                     dst: dst_mem,
-                    src: X86Reg::R11,
+                    src: X86Reg::Rax,
                 });
             }
         }
@@ -610,14 +610,15 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 imm: imm as i32,
             });
         } else {
-            // Large immediate
+            // Large immediate: pick scratch that doesn't collide with lhs
+            let scratch = Self::pick_scratch(&[lhs_reg]);
             self.instructions.push(X86Instr::MovRI {
-                dst: X86Reg::R11,
+                dst: scratch,
                 imm,
             });
             self.instructions.push(X86Instr::CmpRR {
                 lhs: lhs_reg,
-                rhs: X86Reg::R11,
+                rhs: scratch,
             });
         }
     }
