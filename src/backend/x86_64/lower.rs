@@ -220,26 +220,17 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                     CmpOp::Ge => Condition::Ge,
                 };
 
+                // Always emit setcc into Rax (encoding 0, safe without
+                // REX in byte context) then move to the destination.
+                // This avoids the entire class of byte-register encoding
+                // bugs where codes 4-7 map to AH/CH/DH/BH without REX.
+                self.instructions.push(X86Instr::SetCC {
+                    dst: X86Reg::Rax,
+                    cond: x86_cond,
+                });
+
                 let dst_loc = self.get_reg_location(*dst);
-                match dst_loc {
-                    Location::Reg(r) => {
-                        self.instructions.push(X86Instr::SetCC {
-                            dst: r,
-                            cond: x86_cond,
-                        });
-                    }
-                    Location::Stack(offset) => {
-                        // Set in scratch register, then store
-                        self.instructions.push(X86Instr::SetCC {
-                            dst: X86Reg::Rax,
-                            cond: x86_cond,
-                        });
-                        self.instructions.push(X86Instr::MovMR {
-                            dst: MemOperand::base_disp(X86Reg::Rbp, offset),
-                            src: X86Reg::Rax,
-                        });
-                    }
-                }
+                self.store_from_reg(X86Reg::Rax, dst_loc);
             }
 
             DtalInstr::Not { dst, src, .. } => {
