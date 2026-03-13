@@ -421,60 +421,64 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let rhs_loc = self.get_reg_location(rhs);
         let dst_loc = self.get_vreg_location(dst);
 
-        // Load operands into registers
-        let lhs_reg = self.load_to_reg(lhs_loc, X86Reg::Rax);
-        let rhs_reg = self.load_to_reg(rhs_loc, X86Reg::R11);
-
-        // Perform operation
         match op {
-            BinaryOp::Add => {
-                self.instructions.push(X86Instr::AddRR {
-                    dst: lhs_reg,
-                    src: rhs_reg,
-                });
-            }
-            BinaryOp::Sub => {
-                self.instructions.push(X86Instr::SubRR {
-                    dst: lhs_reg,
-                    src: rhs_reg,
-                });
-            }
-            BinaryOp::Mul => {
-                self.instructions.push(X86Instr::ImulRR {
-                    dst: lhs_reg,
-                    src: rhs_reg,
-                });
-            }
             BinaryOp::Div => {
                 // x86 idiv: dividend in rdx:rax, divisor in src reg
                 // quotient -> rax, remainder -> rdx
-                self.instructions.push(X86Instr::MovRR {
-                    dst: X86Reg::Rax,
-                    src: lhs_reg,
-                });
+                // Must load rhs first — if rhs is in Rax, loading lhs
+                // into Rax second would clobber it.
+                let rhs_reg = self.load_to_reg(rhs_loc, X86Reg::R11);
+                self.load_to_fixed_reg(lhs_loc, X86Reg::Rax);
+                // If rhs was loaded into Rax (because it was allocated
+                // there before we reclaim it — not currently possible,
+                // but defensive), we need rhs in a different register.
+                let divisor = if rhs_reg == X86Reg::Rax { X86Reg::R11 } else { rhs_reg };
+                if divisor == X86Reg::Rax {
+                    self.instructions.push(X86Instr::MovRR {
+                        dst: X86Reg::R11,
+                        src: X86Reg::Rax,
+                    });
+                }
                 self.instructions.push(X86Instr::Cqo);
-                self.instructions.push(X86Instr::IdivR { src: rhs_reg });
-                self.instructions.push(X86Instr::MovRR {
-                    dst: lhs_reg,
-                    src: X86Reg::Rax,
-                });
+                self.instructions.push(X86Instr::IdivR { src: divisor });
+                // Result is in Rax
+                self.store_from_reg(X86Reg::Rax, dst_loc);
             }
-            BinaryOp::And => {
-                self.instructions.push(X86Instr::AndRR {
-                    dst: lhs_reg,
-                    src: rhs_reg,
-                });
-            }
-            BinaryOp::Or => {
-                self.instructions.push(X86Instr::OrRR {
-                    dst: lhs_reg,
-                    src: rhs_reg,
-                });
+            _ => {
+                // For non-division: copy lhs into Rax (scratch), operate
+                // with rhs in-place, store result from Rax.
+                // This avoids clobbering the lhs register which may still
+                // be live after this instruction.
+                self.load_to_fixed_reg(lhs_loc, X86Reg::Rax);
+                let rhs_reg = self.load_to_reg(rhs_loc, X86Reg::R11);
+
+                let instr = match op {
+                    BinaryOp::Add => X86Instr::AddRR {
+                        dst: X86Reg::Rax,
+                        src: rhs_reg,
+                    },
+                    BinaryOp::Sub => X86Instr::SubRR {
+                        dst: X86Reg::Rax,
+                        src: rhs_reg,
+                    },
+                    BinaryOp::Mul => X86Instr::ImulRR {
+                        dst: X86Reg::Rax,
+                        src: rhs_reg,
+                    },
+                    BinaryOp::And => X86Instr::AndRR {
+                        dst: X86Reg::Rax,
+                        src: rhs_reg,
+                    },
+                    BinaryOp::Or => X86Instr::OrRR {
+                        dst: X86Reg::Rax,
+                        src: rhs_reg,
+                    },
+                    BinaryOp::Div => unreachable!(),
+                };
+                self.instructions.push(instr);
+                self.store_from_reg(X86Reg::Rax, dst_loc);
             }
         }
-
-        // Store result
-        self.store_from_reg(lhs_reg, dst_loc);
     }
 
     /// Lower add immediate
@@ -482,26 +486,37 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let src_loc = self.get_reg_location(src);
         let dst_loc = self.get_vreg_location(dst);
 
-        let src_reg = self.load_to_reg(src_loc, X86Reg::Rax);
+        // Copy source to Rax to avoid clobbering the source register
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
 
         if imm >= i32::MIN as i64 && imm <= i32::MAX as i64 {
             self.instructions.push(X86Instr::AddRI {
-                dst: src_reg,
+                dst: X86Reg::Rax,
                 imm: imm as i32,
             });
         } else {
-            // Large immediate: load to scratch and add
             self.instructions.push(X86Instr::MovRI {
                 dst: X86Reg::R11,
                 imm,
             });
             self.instructions.push(X86Instr::AddRR {
-                dst: src_reg,
+                dst: X86Reg::Rax,
                 src: X86Reg::R11,
             });
         }
 
-        self.store_from_reg(src_reg, dst_loc);
+        self.store_from_reg(X86Reg::Rax, dst_loc);
+    }
+
+    /// Pick a scratch register that doesn't conflict with `avoid`.
+    /// Returns one of Rax, Rdx, R11 that isn't in `avoid`.
+    fn pick_scratch(avoid: &[X86Reg]) -> X86Reg {
+        for &candidate in &[X86Reg::Rax, X86Reg::Rdx, X86Reg::R11] {
+            if !avoid.contains(&candidate) {
+                return candidate;
+            }
+        }
+        unreachable!("ran out of scratch registers")
     }
 
     /// Lower load instruction
@@ -510,14 +525,19 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let offset_loc = self.get_reg_location(offset);
         let dst_loc = self.get_vreg_location(dst);
 
+        // Load base, picking a scratch that won't conflict
         let base_reg = self.load_to_reg(base_loc, X86Reg::Rax);
-        let offset_reg = self.load_to_reg(offset_loc, X86Reg::R10);
+        // Load offset, picking a scratch that avoids base_reg
+        let offset_scratch = Self::pick_scratch(&[base_reg]);
+        let offset_reg = self.load_to_reg(offset_loc, offset_scratch);
 
         // Load from [base + offset * 8]
         let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
         let result_reg = match dst_loc {
             Location::Reg(r) => r,
-            Location::Stack(_) => X86Reg::R11,
+            Location::Stack(_) => {
+                Self::pick_scratch(&[base_reg, offset_reg])
+            }
         };
 
         self.instructions.push(X86Instr::MovRM {
@@ -540,9 +560,12 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let offset_loc = self.get_reg_location(offset);
         let src_loc = self.get_reg_location(src);
 
+        // Load all three operands, picking scratches to avoid conflicts
         let base_reg = self.load_to_reg(base_loc, X86Reg::Rax);
-        let offset_reg = self.load_to_reg(offset_loc, X86Reg::R10);
-        let src_reg = self.load_to_reg(src_loc, X86Reg::R11);
+        let offset_scratch = Self::pick_scratch(&[base_reg]);
+        let offset_reg = self.load_to_reg(offset_loc, offset_scratch);
+        let src_scratch = Self::pick_scratch(&[base_reg, offset_reg]);
+        let src_reg = self.load_to_reg(src_loc, src_scratch);
 
         // Store to [base + offset * 8]
         let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
@@ -604,9 +627,9 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let src_loc = self.get_reg_location(src);
         let dst_loc = self.get_vreg_location(dst);
 
-        let src_reg = self.load_to_reg(src_loc, X86Reg::Rax);
-        self.instructions.push(X86Instr::Not { dst: src_reg });
-        self.store_from_reg(src_reg, dst_loc);
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
+        self.instructions.push(X86Instr::Not { dst: X86Reg::Rax });
+        self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 
     /// Get location of a register (handles both virtual and physical)
@@ -653,31 +676,46 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         }
     }
 
-    /// Load a value from a location into a register
-    fn load_to_reg(&mut self, loc: Location, preferred: X86Reg) -> X86Reg {
+    /// Load a value from a location into a register.
+    ///
+    /// If the value is already in a physical register, returns that register
+    /// directly (no copy). If spilled to the stack, loads into `scratch`.
+    ///
+    /// Safety: callers using multiple `load_to_reg` calls in sequence must
+    /// ensure that returning existing registers won't cause conflicts. The
+    /// register allocator guarantees distinct virtual registers map to
+    /// distinct physical registers, so this is safe for loading different
+    /// DTAL operands.
+    fn load_to_reg(&mut self, loc: Location, scratch: X86Reg) -> X86Reg {
         match loc {
-            Location::Reg(r) => {
-                if r != preferred {
-                    // Copy to preferred register to preserve the source value.
-                    // This is critical when the same register is used multiple times
-                    // in an expression (e.g., x + x + x) - without this copy, the
-                    // source register would be corrupted by intermediate operations.
-                    self.instructions.push(X86Instr::MovRR {
-                        dst: preferred,
-                        src: r,
-                    });
-                }
-                preferred
-            }
+            Location::Reg(r) => r,
             Location::Stack(offset) => {
                 let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
                 self.instructions.push(X86Instr::MovRM {
-                    dst: preferred,
+                    dst: scratch,
                     src: mem,
                 });
-                preferred
+                scratch
             }
         }
+    }
+
+    /// Load a value into a specific register (always copies).
+    /// Used when the instruction requires the value in a fixed register
+    /// (e.g., idiv requires dividend in rax).
+    fn load_to_fixed_reg(&mut self, loc: Location, dst: X86Reg) -> X86Reg {
+        match loc {
+            Location::Reg(r) => {
+                if r != dst {
+                    self.instructions.push(X86Instr::MovRR { dst, src: r });
+                }
+            }
+            Location::Stack(offset) => {
+                let mem = MemOperand::base_disp(X86Reg::Rbp, offset);
+                self.instructions.push(X86Instr::MovRM { dst, src: mem });
+            }
+        }
+        dst
     }
 
     /// Store a value from a register to a location
