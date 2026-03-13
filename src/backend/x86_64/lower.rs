@@ -31,10 +31,45 @@ pub fn lower_program(program: &DtalProgram) -> X86Program {
 /// Lower a DTAL function to x86-64
 fn lower_function(func: &DtalFunction) -> X86Function {
     // Perform register allocation using graph coloring.
-    // Graph coloring respects the actual interference graph rather than
-    // over-approximating liveness across branches like linear scan does.
     let allocator = GraphColoringAllocator::new();
     let allocation = allocator.allocate(func);
+
+    // Debug allocation
+    if std::env::var("VERITAS_DEBUG_ALLOC").is_ok() {
+        use crate::backend::regalloc::liveness::{InterferenceGraph, LivenessAnalysis};
+        let liveness = LivenessAnalysis::analyze(func);
+        let graph = InterferenceGraph::build(func, &liveness);
+
+        eprintln!("=== {} ===", func.name);
+
+        // Dump DTAL
+        for block in &func.blocks {
+            eprintln!("  {}:", block.label);
+            for (i, instr) in block.instructions.iter().enumerate() {
+                eprintln!("    {}: {:?}", i, instr);
+            }
+        }
+
+        // Show allocation
+        let mut vregs: Vec<_> = allocation.allocation.keys().copied().collect();
+        vregs.sort_by_key(|v| v.0);
+        for vreg in &vregs {
+            eprintln!("  v{}: {:?}", vreg.0, allocation.allocation.get(vreg));
+        }
+
+        // Validate
+        for &node in &graph.nodes {
+            if let Some(Location::Reg(r1)) = allocation.allocation.get(&node) {
+                for neighbor in graph.neighbors(node) {
+                    if let Some(Location::Reg(r2)) = allocation.allocation.get(&neighbor) {
+                        if r1 == r2 && node.0 < neighbor.0 {
+                            eprintln!("  CONFLICT: v{} and v{} both in {:?}", node.0, neighbor.0, r1);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let lowerer = FunctionLowerer::new(func, &allocation);
     lowerer.lower()
