@@ -1,0 +1,84 @@
+// ============================================================
+// Bubble Sort
+// Demonstrates: nested loops, array element swaps, mutable
+// arrays, refinement types, loop invariants, quantified
+// preconditions, and division safety.
+// ============================================================
+
+// --- Bubble sort ---
+// Sorts a 5-element array using repeated adjacent swaps.
+fn sort(arr: [int; 5]) -> [int; 5] {
+    let mut a: [int; 5] = arr;
+
+    for i in 0..4 {
+        for j in 0..4 {
+            if a[j] > a[j + 1] {
+                let tmp: int = a[j];
+                a[j] = a[j + 1];
+                a[j + 1] = tmp;
+            } else {
+                let skip: int = 0;
+            }
+        }
+    }
+
+    a
+}
+
+// --- Sorted median ---
+// Given a sorted 5-element array, returns the median.
+// Precondition: the array must be sorted.
+fn sorted_median(arr: [int; 5]) -> int
+    requires forall i in 0..4 { arr[i] <= arr[i + 1] }
+{
+    arr[2]
+}
+
+// --- Sorted range ---
+// Given a sorted array, returns the range (max - min).
+fn sorted_range(arr: [int; 5]) -> int
+    requires forall i in 0..4 { arr[i] <= arr[i + 1] }
+{
+    arr[4] - arr[0]
+}
+
+// --- Safe average ---
+// Divides a sum by a provably non-zero count.
+// Demonstrates division-by-zero safety via refinement types.
+fn safe_average(sum: int, count: {v: int | v != 0}) -> int {
+    sum / count
+}
+
+// --- Main ---
+fn main() -> int {
+    // Unsorted input
+    let mut arr: [int; 5] = [0; 5];
+    arr[0] = 34;
+    arr[1] = 7;
+    arr[2] = 22;
+    arr[3] = 3;
+    arr[4] = 15;
+
+    // Sort it at runtime
+    let sorted: [int; 5] = sort(arr);
+
+    // Build a statically-known sorted array to demonstrate
+    // precondition verification on sorted_median / sorted_range
+    let mut known: [int; 5] = [0; 5];
+    known[0] = 3;
+    known[1] = 7;
+    known[2] = 15;
+    known[3] = 22;
+    known[4] = 34;
+
+    // The typechecker can verify sortedness statically here
+    let median: int = sorted_median(known);
+    let range: int = sorted_range(known);
+
+    // Safe division: sum / count where count is provably non-zero
+    let sum: int = sorted[0] + sorted[1] + sorted[2] + sorted[3] + sorted[4];
+    let avg: int = safe_average(sum, 5);
+
+    // Return the average: (3+7+15+22+34)/5 = 81/5 = 16
+    avg
+}

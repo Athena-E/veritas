@@ -577,15 +577,16 @@ fn lower_block_with_result<'src>(
         return lower_expr(ctx, trailing);
     }
 
-    // No trailing expression - check if last statement is an expression (backward compat)
-    if let Some(last) = block.statements.last()
-        && let TStmt::Expr(expr) = &last.0
-    {
-        // The expression was already lowered as a statement above,
-        // but we need its value. Re-lower it to get the register.
-        // TODO: This double-lowers the expression; with proper Block usage
-        // the trailing_expr path should be preferred.
-        return lower_expr(ctx, expr);
+    // No trailing expression - check if last statement is an expression whose
+    // value we need (backward compat for blocks that use the last statement as
+    // their value). Skip for Unit-typed blocks to avoid double-lowering
+    // if-else statements that are used purely for side effects.
+    if !matches!(ty, IType::Unit) {
+        if let Some(last) = block.statements.last()
+            && let TStmt::Expr(expr) = &last.0
+        {
+            return lower_expr(ctx, expr);
+        }
     }
 
     // No value - emit default

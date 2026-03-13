@@ -124,6 +124,13 @@ impl X86Reg {
         self.encoding() >= 8
     }
 
+    /// Check if register requires a REX prefix to access the low byte.
+    /// In x86-64, registers RSP/RBP/RSI/RDI (encoding 4-7) need a REX
+    /// prefix for byte access; without it, codes 4-7 refer to AH/CH/DH/BH.
+    pub fn needs_rex_for_byte(self) -> bool {
+        self.encoding() >= 4
+    }
+
     /// Get the 3-bit encoding (lower 3 bits of register number)
     pub fn reg3(self) -> u8 {
         self.encoding() & 0x7
