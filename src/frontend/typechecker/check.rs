@@ -779,29 +779,19 @@ fn check_if_stmt<'src>(
         then_ctx = then_ctx.with_proposition(prop);
     }
 
-    // Check then block and get final context
-    let (tthen_stmts, then_final_ctx) = check_stmts(&then_ctx, &then_block.statements)?;
-    let tthen_block = TBlock {
-        statements: tthen_stmts,
-        trailing_expr: None,
-    };
+    // Check then block (statements + trailing_expr) and get final context
+    let (tthen_block, then_final_ctx) = check_block_as_stmt(&then_ctx, then_block)?;
 
     // Check else block (if present) and get final context
-    let (telse_block, else_final_ctx) = if let Some(else_stmts) = else_block {
+    let (telse_block, else_final_ctx) = if let Some(else_blk) = else_block {
         let mut else_ctx = ctx.clone();
         if let Some(prop) = extract_proposition(&cond.0) {
             let neg_prop = negate_proposition(&prop);
             else_ctx = else_ctx.with_proposition(neg_prop);
         }
 
-        let (typed_else, else_ctx_final) = check_stmts(&else_ctx, &else_stmts.statements)?;
-        (
-            Some(TBlock {
-                statements: typed_else,
-                trailing_expr: None,
-            }),
-            else_ctx_final,
-        )
+        let (typed_else, else_ctx_final) = check_block_as_stmt(&else_ctx, else_blk)?;
+        (Some(typed_else), else_ctx_final)
     } else {
         // No else branch - context unchanged from original
         (None, ctx.clone())
@@ -822,6 +812,61 @@ fn check_if_stmt<'src>(
     let tstmt = TStmt::Expr((texpr, span));
 
     Ok(((tstmt, span), joined_ctx))
+}
+
+/// Check a block used as a statement body (e.g., then/else block of an if-statement).
+/// Processes both the block's statements and its trailing_expr (if any).
+/// When the trailing_expr is an if-else, it's checked as a nested if-statement
+/// so that context joining works correctly for mutable variable updates.
+fn check_block_as_stmt<'src>(
+    ctx: &TypingContext<'src>,
+    block: &Block<'src>,
+) -> Result<(TBlock<'src>, TypingContext<'src>), TypeError<'src>> {
+    let (typed_stmts, stmts_ctx) = check_stmts(ctx, &block.statements)?;
+
+    // If there's a trailing expression, check it and thread context
+    if let Some(trailing) = &block.trailing_expr {
+        match &trailing.0 {
+            // Trailing if-else: check as a statement for context joining
+            crate::common::ast::Expr::If {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                let (if_tstmt, final_ctx) =
+                    check_if_stmt(&stmts_ctx, cond, then_block, else_block.as_ref(), trailing.1)?;
+                // Wrap the if-statement result back into the block's statements
+                let mut all_stmts = typed_stmts;
+                all_stmts.push(if_tstmt);
+                Ok((
+                    TBlock {
+                        statements: all_stmts,
+                        trailing_expr: None,
+                    },
+                    final_ctx,
+                ))
+            }
+            // Other trailing expressions: synthesize and include
+            _ => {
+                let (texpr, _ty) = synth_expr(&stmts_ctx, trailing)?;
+                Ok((
+                    TBlock {
+                        statements: typed_stmts,
+                        trailing_expr: Some(Box::new(texpr)),
+                    },
+                    stmts_ctx,
+                ))
+            }
+        }
+    } else {
+        Ok((
+            TBlock {
+                statements: typed_stmts,
+                trailing_expr: None,
+            },
+            stmts_ctx,
+        ))
+    }
 }
 
 /// Check a sequence of statements

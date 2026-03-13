@@ -196,13 +196,9 @@ impl Encoder {
 
             X86Instr::SetCC { dst, .. } => {
                 // setcc r8 (3-4 bytes) + movzx r32, r8 (3-4 bytes)
-                // Using movzx instead of xor to avoid clobbering flags
-                let setcc_size = if dst.needs_rex_b() { 4 } else { 3 };
-                let movzx_size = if dst.needs_rex_r() || dst.needs_rex_b() {
-                    4
-                } else {
-                    3
-                };
+                // REX prefix needed for registers with encoding >= 4
+                let setcc_size = if dst.needs_rex_for_byte() { 4 } else { 3 };
+                let movzx_size = if dst.needs_rex_for_byte() { 4 } else { 3 };
                 setcc_size + movzx_size
             }
 
@@ -408,18 +404,22 @@ impl Encoder {
 
             X86Instr::SetCC { dst, cond } => {
                 // setcc r8 - sets low byte based on condition
-                // Encoding: [REX.B if needed] 0x0F 0x9x ModR/M
-                if dst.needs_rex_b() {
-                    self.emit_byte(0x41);
+                // Encoding: [REX] 0x0F 0x9x ModR/M
+                // A REX prefix is needed for registers with encoding >= 4
+                // (RSP/RBP/RSI/RDI) to access the low byte (spl/bpl/sil/dil)
+                // instead of the legacy high bytes (ah/ch/dh/bh).
+                if dst.needs_rex_for_byte() {
+                    let rex = 0x40 | if dst.needs_rex_b() { 0x01 } else { 0 };
+                    self.emit_byte(rex);
                 }
                 self.emit_byte(0x0F);
                 self.emit_byte(cond.setcc_byte());
                 self.emit_modrm(0b11, 0, dst.reg3());
 
                 // movzx r32, r8 - zero-extend to 32-bit (implicitly zeros upper 32 bits)
-                // This preserves the flags from the prior cmp instruction
                 // Encoding: [REX if needed] 0x0F 0xB6 ModR/M
-                if dst.needs_rex_r() || dst.needs_rex_b() {
+                // Same REX requirement for the source byte register
+                if dst.needs_rex_for_byte() {
                     let rex = 0x40
                         | if dst.needs_rex_r() { 0x04 } else { 0 }
                         | if dst.needs_rex_b() { 0x01 } else { 0 };
