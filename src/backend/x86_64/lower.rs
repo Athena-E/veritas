@@ -45,6 +45,9 @@ struct FunctionLowerer<'a, 'src> {
     instructions: Vec<X86Instr>,
     /// Stack frame size (for locals and spills)
     frame_size: i32,
+    /// Set after a Call instruction; the next read of Physical(R0) should
+    /// read from Rax (where x86 puts return values) instead of Rdi.
+    return_value_in_rax: bool,
 }
 
 impl<'a, 'src> FunctionLowerer<'a, 'src> {
@@ -69,6 +72,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             allocation: adjusted,
             instructions: Vec::new(),
             frame_size,
+            return_value_in_rax: false,
         }
     }
 
@@ -310,11 +314,11 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                     self.instructions.push(X86Instr::Pop { dst: reg });
                 }
 
-                // x86-64 ABI: return value is in RAX, but DTAL expects it in R0 (mapped to RDI)
-                self.instructions.push(X86Instr::MovRR {
-                    dst: X86Reg::Rdi,
-                    src: X86Reg::Rax,
-                });
+                // x86-64 ABI: return value is in RAX. We no longer move it
+                // to RDI here because that would clobber any vreg allocated
+                // to RDI that is live across the call. Instead, we set a flag
+                // so the next read of Physical(R0) reads from RAX directly.
+                self.return_value_in_rax = true;
             }
 
             DtalInstr::Ret => {
@@ -427,7 +431,24 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 
     /// Lower mov register
     fn lower_mov_reg(&mut self, dst: Reg, src: Reg) {
-        let src_loc = self.get_reg_location(src);
+        // After a Call, the return value is in RAX. The DTAL reads it via
+        // Physical(R0) which normally maps to RDI, but we must read RAX
+        // instead to avoid clobbering a live vreg in RDI.
+        let src_loc = if self.return_value_in_rax {
+            if let Reg::Physical(preg) = src {
+                use crate::backend::dtal::regs::PhysicalReg;
+                if preg == PhysicalReg::R0 {
+                    self.return_value_in_rax = false;
+                    Location::Reg(X86Reg::Rax)
+                } else {
+                    self.get_reg_location(src)
+                }
+            } else {
+                self.get_reg_location(src)
+            }
+        } else {
+            self.get_reg_location(src)
+        };
         let dst_loc = self.get_vreg_location(dst);
 
         match (src_loc, dst_loc) {
