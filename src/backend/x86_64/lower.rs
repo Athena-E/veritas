@@ -261,11 +261,56 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             }
 
             DtalInstr::Call { target, .. } => {
+                // Save caller-saved registers that are in use.
+                // The callee may clobber any caller-saved register.
+                let caller_saved_in_use: Vec<X86Reg> = self
+                    .allocation
+                    .allocation
+                    .values()
+                    .filter_map(|loc| match loc {
+                        Location::Reg(r) if r.is_caller_saved() => Some(*r),
+                        _ => None,
+                    })
+                    .collect::<std::collections::HashSet<_>>()
+                    .into_iter()
+                    .collect();
+
+                // Push caller-saved registers
+                for &reg in &caller_saved_in_use {
+                    self.instructions.push(X86Instr::Push { src: reg });
+                }
+
+                // Align stack to 16 bytes before call if needed
+                // After pushes, rsp may be misaligned. We need rsp % 16 == 0
+                // before the call instruction (which pushes the 8-byte return
+                // address, so the callee sees rsp % 16 == 8 — the ABI norm).
+                let push_bytes = (caller_saved_in_use.len() as i32) * 8;
+                let needs_padding = push_bytes % 16 != 0;
+                if needs_padding {
+                    self.instructions.push(X86Instr::SubRI {
+                        dst: X86Reg::Rsp,
+                        imm: 8,
+                    });
+                }
+
                 self.instructions.push(X86Instr::Call {
                     target: target.clone(),
                 });
+
+                // Remove alignment padding
+                if needs_padding {
+                    self.instructions.push(X86Instr::AddRI {
+                        dst: X86Reg::Rsp,
+                        imm: 8,
+                    });
+                }
+
+                // Restore caller-saved registers (reverse order)
+                for &reg in caller_saved_in_use.iter().rev() {
+                    self.instructions.push(X86Instr::Pop { dst: reg });
+                }
+
                 // x86-64 ABI: return value is in RAX, but DTAL expects it in R0 (mapped to RDI)
-                // Copy return value from RAX to RDI so subsequent reads from R0 work correctly
                 self.instructions.push(X86Instr::MovRR {
                     dst: X86Reg::Rdi,
                     src: X86Reg::Rax,
