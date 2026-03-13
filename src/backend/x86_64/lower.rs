@@ -65,9 +65,20 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             }
         }
 
-        // Calculate frame size: 8 bytes per spill slot + padding for alignment
+        // Calculate frame size for spill slots, ensuring 16-byte stack
+        // alignment. After the prologue sequence:
+        //   push rbp           (rsp -= 8, now rsp % 16 == 8)
+        //   N callee-saved     (rsp -= N*8)
+        //   sub rsp, frame     (rsp -= frame)
+        // We need (8 + N*8 + frame) % 16 == 0 so alloca and calls see
+        // a 16-byte-aligned rsp.
         let spill_size = (adjusted.spill_slots as i32) * 8;
-        let frame_size = (spill_size + 15) & !15; // 16-byte align
+        let total_before_frame = 8 + callee_saved_size; // push rbp + callee-saved
+        let frame_size = if (total_before_frame + spill_size) % 16 != 0 {
+            spill_size + 8 // add 8 bytes padding
+        } else {
+            spill_size
+        };
 
         Self {
             func,
