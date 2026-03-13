@@ -336,7 +336,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             DtalInstr::Call { target, .. } => {
                 // Save caller-saved registers that are in use.
                 // The callee may clobber any caller-saved register.
-                let caller_saved_in_use: Vec<X86Reg> = self
+                let mut caller_saved_in_use: Vec<X86Reg> = self
                     .allocation
                     .allocation
                     .values()
@@ -347,6 +347,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                     .collect::<std::collections::HashSet<_>>()
                     .into_iter()
                     .collect();
+                caller_saved_in_use.sort();
 
                 // Push caller-saved registers
                 for &reg in &caller_saved_in_use {
