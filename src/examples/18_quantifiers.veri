@@ -50,7 +50,7 @@ fn main() -> int {
     arr[0] = 0;
     arr[1] = 1;
     arr[2] = 2;
-    // list_arg_sorted(arr)
+    list_arg_sorted(arr)
     // sum_first_two(arr)
     // implies_example(1, -1)
     // has_positive(0)
