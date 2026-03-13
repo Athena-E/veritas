@@ -310,6 +310,19 @@ impl InterferenceGraph {
         for block in &func.blocks {
             let block_info = &liveness.blocks[&block.label];
 
+            // Add interference edges for registers live at block entry.
+            // compute_instruction_liveness returns live-AFTER sets for each
+            // instruction, so the live-BEFORE set of the first instruction
+            // (= block live_in) is not included. Without this, registers
+            // that are simultaneously live at block entry but killed by the
+            // first instruction would miss interference edges.
+            let live_in_regs: Vec<_> = block_info.live_in.iter().copied().collect();
+            for i in 0..live_in_regs.len() {
+                for j in (i + 1)..live_in_regs.len() {
+                    graph.add_edge(live_in_regs[i], live_in_regs[j]);
+                }
+            }
+
             // Get per-instruction liveness
             let live_sets =
                 LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);

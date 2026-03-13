@@ -5,7 +5,7 @@
 use std::fmt;
 
 /// x86-64 General Purpose Registers (64-bit)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum X86Reg {
     // Caller-saved registers (volatile)
     Rax, // Return value, accumulator
@@ -31,18 +31,17 @@ pub enum X86Reg {
 }
 
 impl X86Reg {
-    /// Registers available for allocation (excludes RSP, RBP, R11)
-    /// Note: R11 is reserved as a scratch register for x86 lowering
+    /// Registers available for allocation (excludes RSP, RBP, RAX, RDX, R11)
+    /// Rax: scratch for lowering (binop lhs, setcc, load/store base)
+    /// Rdx: implicitly clobbered by cqo/idiv (division)
+    /// R11: scratch for lowering (binop rhs, load/store offset, large immediates)
     pub const ALLOCATABLE: &'static [X86Reg] = &[
-        // Rax reserved: used as scratch by lowering (binop lhs) and return value
-        // Rdx reserved: implicitly clobbered by cqo/idiv (division)
         X86Reg::Rcx,
         X86Reg::Rsi,
         X86Reg::Rdi,
         X86Reg::R8,
         X86Reg::R9,
-        // R10 reserved: used as scratch for array index in load/store
-        // R11 reserved: used as scratch for binop RHS and store value
+        X86Reg::R10,
         X86Reg::Rbx,
         X86Reg::R12,
         X86Reg::R13,
