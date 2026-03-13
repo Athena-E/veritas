@@ -10,7 +10,9 @@
 //! ```
 
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
+use crate::backend::dtal::regs::Reg;
+#[cfg(test)]
+use crate::backend::dtal::regs::VirtualReg;
 use crate::backend::regalloc::{AllocationResult, GraphColoringAllocator};
 use crate::backend::x86_64::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use crate::backend::x86_64::regs::{Location, X86Reg};
@@ -126,16 +128,12 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             });
         }
 
-        // Move arguments from ABI registers to allocated locations
-        for (i, (param_reg, _ty)) in self.func.params.iter().enumerate() {
-            if let Reg::Virtual(vreg) = param_reg {
-                let arg_reg = X86Reg::ARG_REGS.get(i).copied();
-                if let Some(src_reg) = arg_reg {
-                    self.move_to_vreg(*vreg, src_reg);
-                }
-                // TODO: Handle stack-passed arguments (> 6 args)
-            }
-        }
+        // Move arguments from ABI registers to allocated locations.
+        // This is a parallel assignment: we must handle the case where
+        // a destination register is the source of a later move.
+        // e.g. param 0 in Rdi → Rsi, param 1 in Rsi → Rcx would
+        // clobber Rsi if done sequentially in order.
+        self.emit_param_moves();
     }
 
     /// Emit function epilogue
@@ -175,6 +173,66 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 
         // ret
         self.instructions.push(X86Instr::Ret);
+    }
+
+    /// Emit parameter moves as a parallel assignment.
+    ///
+    /// When graph coloring assigns param registers to each other's locations
+    /// (e.g., param 0 in Rdi allocated to Rsi, param 1 in Rsi allocated to Rcx),
+    /// naive sequential moves would clobber values. We resolve this by:
+    /// 1. Processing moves whose destination is NOT a source of another move first
+    /// 2. Breaking cycles using R11 as a temporary
+    fn emit_param_moves(&mut self) {
+        // Collect (src_reg, dst_location) pairs for each parameter
+        let mut pending: Vec<(X86Reg, Location)> = Vec::new();
+
+        for (i, (param_reg, _ty)) in self.func.params.iter().enumerate() {
+            if let Reg::Virtual(vreg) = param_reg {
+                if let Some(&src_reg) = X86Reg::ARG_REGS.get(i) {
+                    if let Some(&dst_loc) = self.allocation.allocation.get(vreg) {
+                        // Skip no-op moves (src == dst)
+                        if dst_loc != Location::Reg(src_reg) {
+                            pending.push((src_reg, dst_loc));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Resolve parallel moves: emit in an order that avoids clobbering.
+        let max_iterations = pending.len() * pending.len() + 1;
+        let mut iterations = 0;
+
+        while !pending.is_empty() && iterations < max_iterations {
+            iterations += 1;
+
+            // Find a move whose destination register is NOT the source of any OTHER pending move
+            let ready_idx = pending.iter().enumerate().position(|(i, (_, dst))| {
+                if let Location::Reg(dst_reg) = dst {
+                    !pending
+                        .iter()
+                        .enumerate()
+                        .any(|(j, (src, _))| j != i && *src == *dst_reg)
+                } else {
+                    true // Stack destinations never conflict with sources
+                }
+            });
+
+            if let Some(idx) = ready_idx {
+                let (src, dst) = pending.remove(idx);
+                self.store_from_reg(src, dst);
+            } else {
+                // All remaining moves form cycles. Break with R11 as temp.
+                let (first_src, first_dst) = pending.remove(0);
+                self.instructions.push(X86Instr::MovRR {
+                    dst: X86Reg::R11,
+                    src: first_src,
+                });
+                // Replace first_src with R11 in remaining moves' source
+                // so the cycle can continue to resolve
+                pending.push((X86Reg::R11, first_dst));
+            }
+        }
     }
 
     /// Lower a single DTAL instruction
@@ -801,13 +859,6 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         }
     }
 
-    /// Move from a physical register to a virtual register location
-    fn move_to_vreg(&mut self, vreg: VirtualReg, src: X86Reg) {
-        let dst_loc = self.allocation.allocation.get(&vreg).copied();
-        if let Some(loc) = dst_loc {
-            self.store_from_reg(src, loc);
-        }
-    }
 }
 
 #[cfg(test)]
