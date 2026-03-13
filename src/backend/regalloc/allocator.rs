@@ -320,11 +320,11 @@ impl GraphColoringAllocator {
 
         // Simplify phase
         while removed.len() < all_vregs.len() {
-            // Find a node with degree < k
+            // Find a node with degree < k (pick smallest vreg for determinism)
             let candidate = current_degree
                 .iter()
-                .filter(|(node, _)| !removed.contains(node))
-                .find(|&(_, deg)| *deg < self.num_regs)
+                .filter(|(node, deg)| !removed.contains(node) && **deg < self.num_regs)
+                .min_by_key(|(node, _)| node.0)
                 .map(|(node, _)| *node);
 
             if let Some(node) = candidate {
@@ -340,11 +340,11 @@ impl GraphColoringAllocator {
                 }
             } else {
                 // No low-degree node found - need to spill
-                // Choose node with highest degree
+                // Choose node with highest degree (break ties by smallest vreg)
                 let spill_candidate = current_degree
                     .iter()
                     .filter(|(node, _)| !removed.contains(node))
-                    .max_by_key(|&(_, deg)| *deg)
+                    .max_by(|(n1, d1), (n2, d2)| d1.cmp(d2).then(n2.0.cmp(&n1.0)))
                     .map(|(node, _)| *node);
 
                 if let Some(node) = spill_candidate {
