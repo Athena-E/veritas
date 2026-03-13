@@ -5,7 +5,7 @@
 use std::fmt;
 
 /// x86-64 General Purpose Registers (64-bit)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum X86Reg {
     // Caller-saved registers (volatile)
     Rax, // Return value, accumulator

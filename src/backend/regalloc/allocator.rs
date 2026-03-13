@@ -110,10 +110,13 @@ impl LinearScanAllocator {
             }
         }
 
+        let mut callee_saved: Vec<_> = self.callee_saved_used.iter().copied().collect();
+        callee_saved.sort();
+
         AllocationResult {
             allocation: self.allocation.clone(),
             spill_slots: ((-self.next_spill_slot - 8) / 8) as usize,
-            callee_saved_used: self.callee_saved_used.iter().copied().collect(),
+            callee_saved_used: callee_saved,
         }
     }
 
@@ -394,10 +397,13 @@ impl GraphColoringAllocator {
             }
         }
 
+        let mut callee_saved: Vec<_> = callee_saved_used.into_iter().collect();
+        callee_saved.sort();
+
         AllocationResult {
             allocation,
             spill_slots: ((-next_spill_slot - 8) / 8) as usize,
-            callee_saved_used: callee_saved_used.into_iter().collect(),
+            callee_saved_used: callee_saved,
         }
     }
 
