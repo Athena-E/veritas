@@ -24,6 +24,7 @@ fn main() {
         eprintln!("  --tir            Show TIR (SSA form)");
         eprintln!("  --verify         Verify DTAL output");
         eprintln!("  --verify-only    Verify DTAL and exit (no output)");
+        eprintln!("  --verify-dtal    Verify a standalone .dtal file");
         eprintln!("  -o <file>        Output native executable (ELF)");
         eprintln!("  --native         Generate native x86-64 code (to stdout)");
         eprintln!();
@@ -41,6 +42,29 @@ fn main() {
     }
 
     let file_path = &args[1];
+
+    // Handle --verify-dtal mode: standalone DTAL verification
+    if args.iter().any(|a| a == "--verify-dtal") {
+        let src = match fs::read_to_string(file_path) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        };
+
+        match veritas::verifier::verify_dtal_text(&src) {
+            Ok(()) => {
+                println!("Verification passed!");
+            }
+            Err(e) => {
+                eprintln!("Verification FAILED: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
     let show_tokens = args.iter().any(|a| a == "--tokens");
     let show_ast = args.iter().any(|a| a == "--ast");

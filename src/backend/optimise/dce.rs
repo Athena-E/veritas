@@ -151,7 +151,7 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
 mod tests {
     use super::*;
     use crate::backend::dtal::instr::{BinaryOp, DtalBlock, TypeState};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
     #[test]
     fn test_remove_unused_mov() {
@@ -165,7 +165,7 @@ mod tests {
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -175,16 +175,16 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 42,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v1,
                         imm: 100,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Push {
                         src: v0,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -221,7 +221,7 @@ mod tests {
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -231,18 +231,18 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 42,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v1,
                         lhs: v0,
                         rhs: v0,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Push {
                         src: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -265,7 +265,7 @@ mod tests {
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -275,17 +275,17 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 0,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v1,
                         imm: 0,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v2,
                         imm: 42,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Store {
                         base: v0,
@@ -316,7 +316,7 @@ mod tests {
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -326,21 +326,21 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 42,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v1,
                         lhs: v0,
                         rhs: v0,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v2,
                         lhs: v1,
                         rhs: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],

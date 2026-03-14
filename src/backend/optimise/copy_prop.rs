@@ -191,7 +191,7 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
 mod tests {
     use super::*;
     use crate::backend::dtal::instr::{BinaryOp, TypeState};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
     #[test]
     fn test_simple_copy_propagation() {
@@ -209,19 +209,19 @@ mod tests {
                 DtalInstr::MovImm {
                     dst: v0,
                     imm: 42,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::MovReg {
                     dst: v1,
                     src: v0,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::BinOp {
                     op: BinaryOp::Add,
                     dst: v2,
                     lhs: v1,
                     rhs: v1,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
             ],
         };
@@ -256,24 +256,24 @@ mod tests {
                 DtalInstr::MovImm {
                     dst: v0,
                     imm: 42,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::MovReg {
                     dst: v1,
                     src: v0,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::MovReg {
                     dst: v2,
                     src: v1,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::BinOp {
                     op: BinaryOp::Add,
                     dst: v3,
                     lhs: v2,
                     rhs: v2,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
             ],
         };
@@ -307,24 +307,24 @@ mod tests {
                 DtalInstr::MovImm {
                     dst: v0,
                     imm: 42,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::MovReg {
                     dst: v1,
                     src: v0,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::MovImm {
                     dst: v0,
                     imm: 100,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::BinOp {
                     op: BinaryOp::Add,
                     dst: v2,
                     lhs: v1,
                     rhs: v1,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
             ],
         };
@@ -359,14 +359,14 @@ mod tests {
                 DtalInstr::MovReg {
                     dst: v0,
                     src: r0,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
                 DtalInstr::BinOp {
                     op: BinaryOp::Add,
                     dst: v1,
                     lhs: v0,
                     rhs: v0,
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 },
             ],
         };

@@ -9,11 +9,11 @@ use crate::backend::dtal::instr::{
     BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram,
 };
 use crate::backend::dtal::regs::Reg;
-use crate::common::types::IType;
+use crate::backend::dtal::types::DtalType;
 use std::fmt::Write;
 
 /// Emit a DTAL program as text
-pub fn emit_program<'src>(program: &DtalProgram<'src>) -> String {
+pub fn emit_program(program: &DtalProgram) -> String {
     let mut output = String::new();
 
     writeln!(output, "; DTAL Program").unwrap();
@@ -29,7 +29,7 @@ pub fn emit_program<'src>(program: &DtalProgram<'src>) -> String {
 }
 
 /// Emit a DTAL function
-fn emit_function<'src>(output: &mut String, func: &DtalFunction<'src>) {
+fn emit_function(output: &mut String, func: &DtalFunction) {
     // Function header
     writeln!(output, ".function {}", func.name).unwrap();
 
@@ -70,7 +70,7 @@ fn emit_function<'src>(output: &mut String, func: &DtalFunction<'src>) {
 }
 
 /// Emit a basic block
-fn emit_block<'src>(output: &mut String, block: &DtalBlock<'src>) {
+fn emit_block(output: &mut String, block: &DtalBlock) {
     // Block label
     writeln!(output, "{}:", block.label).unwrap();
 
@@ -92,7 +92,7 @@ fn emit_block<'src>(output: &mut String, block: &DtalBlock<'src>) {
 }
 
 /// Emit a single instruction
-fn emit_instruction<'src>(output: &mut String, instr: &DtalInstr<'src>) {
+fn emit_instruction(output: &mut String, instr: &DtalInstr) {
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
             writeln!(
@@ -292,80 +292,15 @@ fn emit_cmpop(op: &CmpOp) -> &'static str {
 }
 
 /// Emit a type
-fn emit_type<'src>(ty: &IType<'src>) -> String {
-    match ty {
-        IType::Unit => "unit".to_string(),
-        IType::Int => "int".to_string(),
-        IType::Bool => "bool".to_string(),
-        IType::Array { element_type, size } => {
-            format!("[{}; {}]", emit_type(element_type), size)
-        }
-        IType::Ref(inner) => format!("&{}", emit_type(inner)),
-        IType::RefMut(inner) => format!("&mut {}", emit_type(inner)),
-        IType::SingletonInt(val) => format!("int({})", val),
-        IType::RefinedInt { base: _, prop } => {
-            format!("{{{}: int | {} }}", prop.var, prop)
-        }
-        IType::Master(inner) => format!("master({})", emit_type(inner)),
-    }
+fn emit_type(ty: &DtalType) -> String {
+    // DtalType's Display impl already produces the correct format
+    ty.to_string()
 }
 
 /// Emit a constraint
 fn emit_constraint(constraint: &Constraint) -> String {
-    use crate::backend::dtal::IndexExpr;
-
-    fn emit_index_expr(e: &IndexExpr) -> String {
-        match e {
-            IndexExpr::Const(n) => n.to_string(),
-            IndexExpr::Var(name) => name.clone(),
-            IndexExpr::Add(l, r) => format!("({} + {})", emit_index_expr(l), emit_index_expr(r)),
-            IndexExpr::Sub(l, r) => format!("({} - {})", emit_index_expr(l), emit_index_expr(r)),
-            IndexExpr::Mul(l, r) => format!("({} * {})", emit_index_expr(l), emit_index_expr(r)),
-            IndexExpr::Div(l, r) => format!("({} / {})", emit_index_expr(l), emit_index_expr(r)),
-            IndexExpr::Select(name, idx) => format!("{}[{}]", name, emit_index_expr(idx)),
-        }
-    }
-
-    match constraint {
-        Constraint::True => "true".to_string(),
-        Constraint::False => "false".to_string(),
-        Constraint::Eq(l, r) => format!("{} == {}", emit_index_expr(l), emit_index_expr(r)),
-        Constraint::Lt(l, r) => format!("{} < {}", emit_index_expr(l), emit_index_expr(r)),
-        Constraint::Le(l, r) => format!("{} <= {}", emit_index_expr(l), emit_index_expr(r)),
-        Constraint::Gt(l, r) => format!("{} > {}", emit_index_expr(l), emit_index_expr(r)),
-        Constraint::Ge(l, r) => format!("{} >= {}", emit_index_expr(l), emit_index_expr(r)),
-        Constraint::Ne(l, r) => format!("{} != {}", emit_index_expr(l), emit_index_expr(r)),
-        Constraint::And(l, r) => format!("({} && {})", emit_constraint(l), emit_constraint(r)),
-        Constraint::Or(l, r) => format!("({} || {})", emit_constraint(l), emit_constraint(r)),
-        Constraint::Not(c) => format!("!{}", emit_constraint(c)),
-        Constraint::Implies(l, r) => {
-            format!("({} ==> {})", emit_constraint(l), emit_constraint(r))
-        }
-        Constraint::Forall {
-            var,
-            lower,
-            upper,
-            body,
-        } => format!(
-            "(forall {} in {}..{} {{ {} }})",
-            var,
-            emit_index_expr(lower),
-            emit_index_expr(upper),
-            emit_constraint(body)
-        ),
-        Constraint::Exists {
-            var,
-            lower,
-            upper,
-            body,
-        } => format!(
-            "(exists {} in {}..{} {{ {} }})",
-            var,
-            emit_index_expr(lower),
-            emit_index_expr(upper),
-            emit_constraint(body)
-        ),
-    }
+    // Constraint's Display impl already produces the correct format
+    constraint.to_string()
 }
 
 #[cfg(test)]
@@ -378,8 +313,8 @@ mod tests {
     fn test_emit_simple_function() {
         let func = DtalFunction {
             name: "test".to_string(),
-            params: vec![(Reg::Virtual(VirtualReg(0)), IType::Int)],
-            return_type: IType::Int,
+            params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -389,7 +324,7 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: Reg::Virtual(VirtualReg(1)),
                         imm: 42,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],

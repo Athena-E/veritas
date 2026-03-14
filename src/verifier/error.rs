@@ -5,18 +5,18 @@
 
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
-use crate::common::types::IType;
+use crate::backend::dtal::types::DtalType;
 use std::fmt;
 
 /// Verification error
 #[derive(Debug)]
-pub enum VerifyError<'src> {
+pub enum VerifyError {
     /// Type annotation doesn't match actual value
     TypeMismatch {
         block: String,
         instr_desc: String,
-        expected: IType<'src>,
-        actual: IType<'src>,
+        expected: DtalType,
+        actual: DtalType,
     },
 
     /// Register used before definition
@@ -33,8 +33,8 @@ pub enum VerifyError<'src> {
     JoinMismatch {
         block: String,
         reg: Reg,
-        expected: IType<'src>,
-        actual: IType<'src>,
+        expected: DtalType,
+        actual: DtalType,
         from_block: String,
     },
 
@@ -49,15 +49,15 @@ pub enum VerifyError<'src> {
     BinOpTypeMismatch {
         block: String,
         op: String,
-        lhs_type: IType<'src>,
-        rhs_type: IType<'src>,
+        lhs_type: DtalType,
+        rhs_type: DtalType,
     },
 
     /// Return type doesn't match function signature
     ReturnTypeMismatch {
         function: String,
-        expected: IType<'src>,
-        actual: IType<'src>,
+        expected: DtalType,
+        actual: DtalType,
     },
 
     /// Function not found
@@ -93,7 +93,7 @@ pub enum VerifyError<'src> {
     InternalError { msg: String },
 }
 
-impl<'src> fmt::Display for VerifyError<'src> {
+impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VerifyError::TypeMismatch {
@@ -221,4 +221,4 @@ impl<'src> fmt::Display for VerifyError<'src> {
     }
 }
 
-impl<'src> std::error::Error for VerifyError<'src> {}
+impl std::error::Error for VerifyError {}
