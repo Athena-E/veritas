@@ -581,12 +581,11 @@ fn lower_block_with_result<'src>(
     // value we need (backward compat for blocks that use the last statement as
     // their value). Skip for Unit-typed blocks to avoid double-lowering
     // if-else statements that are used purely for side effects.
-    if !matches!(ty, IType::Unit) {
-        if let Some(last) = block.statements.last()
-            && let TStmt::Expr(expr) = &last.0
-        {
-            return lower_expr(ctx, expr);
-        }
+    if !matches!(ty, IType::Unit)
+        && let Some(last) = block.statements.last()
+        && let TStmt::Expr(expr) = &last.0
+    {
+        return lower_expr(ctx, expr);
     }
 
     // No value - emit default

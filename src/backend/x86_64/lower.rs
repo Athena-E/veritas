@@ -66,10 +66,14 @@ fn lower_function(func: &DtalFunction) -> X86Function {
         for &node in &graph.nodes {
             if let Some(Location::Reg(r1)) = allocation.allocation.get(&node) {
                 for neighbor in graph.neighbors(node) {
-                    if let Some(Location::Reg(r2)) = allocation.allocation.get(&neighbor) {
-                        if r1 == r2 && node.0 < neighbor.0 {
-                            eprintln!("  CONFLICT: v{} and v{} both in {:?}", node.0, neighbor.0, r1);
-                        }
+                    if let Some(Location::Reg(r2)) = allocation.allocation.get(&neighbor)
+                        && r1 == r2
+                        && node.0 < neighbor.0
+                    {
+                        eprintln!(
+                            "  CONFLICT: v{} and v{} both in {:?}",
+                            node.0, neighbor.0, r1
+                        );
                     }
                 }
             }
@@ -238,14 +242,13 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let mut pending: Vec<(X86Reg, Location)> = Vec::new();
 
         for (i, (param_reg, _ty)) in self.func.params.iter().enumerate() {
-            if let Reg::Virtual(vreg) = param_reg {
-                if let Some(&src_reg) = X86Reg::ARG_REGS.get(i) {
-                    if let Some(&dst_loc) = self.allocation.allocation.get(vreg) {
-                        // Skip no-op moves (src == dst)
-                        if dst_loc != Location::Reg(src_reg) {
-                            pending.push((src_reg, dst_loc));
-                        }
-                    }
+            if let Reg::Virtual(vreg) = param_reg
+                && let Some(&src_reg) = X86Reg::ARG_REGS.get(i)
+                && let Some(&dst_loc) = self.allocation.allocation.get(vreg)
+            {
+                // Skip no-op moves (src == dst)
+                if dst_loc != Location::Reg(src_reg) {
+                    pending.push((src_reg, dst_loc));
                 }
             }
         }
@@ -608,7 +611,11 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 // If rhs was loaded into Rax (because it was allocated
                 // there before we reclaim it — not currently possible,
                 // but defensive), we need rhs in a different register.
-                let divisor = if rhs_reg == X86Reg::Rax { X86Reg::R11 } else { rhs_reg };
+                let divisor = if rhs_reg == X86Reg::Rax {
+                    X86Reg::R11
+                } else {
+                    rhs_reg
+                };
                 if divisor == X86Reg::Rax {
                     self.instructions.push(X86Instr::MovRR {
                         dst: X86Reg::R11,
@@ -711,9 +718,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
         let result_reg = match dst_loc {
             Location::Reg(r) => r,
-            Location::Stack(_) => {
-                Self::pick_scratch(&[base_reg, offset_reg])
-            }
+            Location::Stack(_) => Self::pick_scratch(&[base_reg, offset_reg]),
         };
 
         self.instructions.push(X86Instr::MovRM {
@@ -788,10 +793,8 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         } else {
             // Large immediate: pick scratch that doesn't collide with lhs
             let scratch = Self::pick_scratch(&[lhs_reg]);
-            self.instructions.push(X86Instr::MovRI {
-                dst: scratch,
-                imm,
-            });
+            self.instructions
+                .push(X86Instr::MovRI { dst: scratch, imm });
             self.instructions.push(X86Instr::CmpRR {
                 lhs: lhs_reg,
                 rhs: scratch,
@@ -910,7 +913,6 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             }
         }
     }
-
 }
 
 #[cfg(test)]

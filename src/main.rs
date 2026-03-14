@@ -33,7 +33,9 @@ fn main() {
         eprintln!("  --dce            Enable dead code elimination only");
         eprintln!();
         eprintln!("Environment variables:");
-        eprintln!("  VERITAS_LS=1           Use linear scan register allocator (default: graph coloring)");
+        eprintln!(
+            "  VERITAS_LS=1           Use linear scan register allocator (default: graph coloring)"
+        );
         eprintln!("  VERITAS_DEBUG_ALLOC=1  Dump register allocation details to stderr");
         std::process::exit(if show_help { 0 } else { 1 });
     }

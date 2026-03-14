@@ -833,8 +833,13 @@ fn check_block_as_stmt<'src>(
                 then_block,
                 else_block,
             } => {
-                let (if_tstmt, final_ctx) =
-                    check_if_stmt(&stmts_ctx, cond, then_block, else_block.as_ref(), trailing.1)?;
+                let (if_tstmt, final_ctx) = check_if_stmt(
+                    &stmts_ctx,
+                    cond,
+                    then_block,
+                    else_block.as_ref(),
+                    trailing.1,
+                )?;
                 // Wrap the if-statement result back into the block's statements
                 let mut all_stmts = typed_stmts;
                 all_stmts.push(if_tstmt);
