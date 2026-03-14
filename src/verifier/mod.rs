@@ -39,7 +39,7 @@
 pub(crate) mod checker;
 mod dataflow;
 mod error;
-pub(crate) mod smt;
+pub mod smt;
 
 pub use error::VerifyError;
 
