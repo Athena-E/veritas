@@ -178,10 +178,7 @@ pub enum DtalInstr {
     /// branch if condition
     Branch { cond: CmpOp, target: String },
     /// call function
-    Call {
-        target: String,
-        return_ty: DtalType,
-    },
+    Call { target: String, return_ty: DtalType },
     /// ret
     Ret,
 
@@ -191,11 +188,7 @@ pub enum DtalInstr {
     /// pop rd
     Pop { dst: Reg, ty: DtalType },
     /// alloca rd, size
-    Alloca {
-        dst: Reg,
-        size: u32,
-        ty: DtalType,
-    },
+    Alloca { dst: Reg, size: u32, ty: DtalType },
 
     // Annotations (for verification)
     /// Type annotation for a register

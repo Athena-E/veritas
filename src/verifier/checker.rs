@@ -221,8 +221,10 @@ fn verify_binop(
             }
 
             // For singleton types, verify the result
-            if let (DtalType::SingletonInt(DtalValue::Int(l)), DtalType::SingletonInt(DtalValue::Int(r))) =
-                (&lhs_ty, &rhs_ty)
+            if let (
+                DtalType::SingletonInt(DtalValue::Int(l)),
+                DtalType::SingletonInt(DtalValue::Int(r)),
+            ) = (&lhs_ty, &rhs_ty)
             {
                 let expected_result = match op {
                     BinaryOp::Add => l + r,

@@ -125,7 +125,9 @@ impl<'a> DtalParser<'a> {
 
     fn parse_function(&mut self) -> Result<DtalFunction, DtalParseError> {
         // .function <name>
-        let line = self.current_line().ok_or_else(|| self.err("expected .function"))?;
+        let line = self
+            .current_line()
+            .ok_or_else(|| self.err("expected .function"))?;
         let trimmed = line.trim();
         if !trimmed.starts_with(".function ") {
             return Err(self.err(format!("expected .function, got '{}'", trimmed)));
@@ -200,9 +202,7 @@ impl<'a> DtalParser<'a> {
 
     fn parse_params(&self, line: &str) -> Result<Vec<(Reg, DtalType)>, DtalParseError> {
         // .params {v0: int, v1: bool}
-        let inner = line
-            .trim_start_matches(".params {")
-            .trim_end_matches('}');
+        let inner = line.trim_start_matches(".params {").trim_end_matches('}');
         if inner.is_empty() {
             return Ok(Vec::new());
         }
@@ -228,23 +228,26 @@ impl<'a> DtalParser<'a> {
 
     fn parse_block(&mut self) -> Result<DtalBlock, DtalParseError> {
         // label:
-        let line = self.current_line().ok_or_else(|| self.err("expected block label"))?;
+        let line = self
+            .current_line()
+            .ok_or_else(|| self.err("expected block label"))?;
         let label = line.trim().trim_end_matches(':').to_string();
         self.advance();
 
         // Skip entry state comments
         if let Some(line) = self.current_line()
-            && line.trim() == "; Entry state:" {
-                self.advance();
-                while let Some(line) = self.current_line() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with(";   ") {
-                        self.advance();
-                    } else {
-                        break;
-                    }
+            && line.trim() == "; Entry state:"
+        {
+            self.advance();
+            while let Some(line) = self.current_line() {
+                let trimmed = line.trim();
+                if trimmed.starts_with(";   ") {
+                    self.advance();
+                } else {
+                    break;
                 }
             }
+        }
 
         // Parse instructions
         let mut instructions = Vec::new();
@@ -306,9 +309,7 @@ impl<'a> DtalParser<'a> {
             "mov" => self.parse_mov(&tokens, ty_comment),
             "load" => self.parse_load(&tokens, ty_comment),
             "store" => self.parse_store(&tokens),
-            "add" | "sub" | "mul" | "div" | "and" | "or" => {
-                self.parse_binop(&tokens, ty_comment)
-            }
+            "add" | "sub" | "mul" | "div" | "and" | "or" => self.parse_binop(&tokens, ty_comment),
             "addi" => self.parse_addi(&tokens, ty_comment),
             "cmp" => self.parse_cmp(&tokens),
             "not" => self.parse_not(&tokens, ty_comment),
@@ -332,8 +333,8 @@ impl<'a> DtalParser<'a> {
             .ok_or_else(|| self.err("expected ':' in type annotation"))?;
         let reg_str = rest[..colon].trim();
         let ty_str = rest[colon + 1..].trim();
-        let reg =
-            parse_reg(reg_str).ok_or_else(|| self.err(format!("invalid register '{}'", reg_str)))?;
+        let reg = parse_reg(reg_str)
+            .ok_or_else(|| self.err(format!("invalid register '{}'", reg_str)))?;
         let ty = parse_type_str(ty_str)?;
         Ok(Some(DtalInstr::TypeAnnotation { reg, ty }))
     }
@@ -393,7 +394,9 @@ impl<'a> DtalParser<'a> {
     ) -> Result<Option<DtalInstr>, DtalParseError> {
         // load v0, [v1 + v2]    ; int
         let full = tokens[1..].join(" ");
-        let dst_end = full.find(',').ok_or_else(|| self.err("expected ',' in load"))?;
+        let dst_end = full
+            .find(',')
+            .ok_or_else(|| self.err("expected ',' in load"))?;
         let dst_str = full[..dst_end].trim();
         let rest = full[dst_end + 1..].trim();
 
@@ -401,18 +404,15 @@ impl<'a> DtalParser<'a> {
             parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
 
         // Parse [base + offset]
-        let inner = rest
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .trim();
+        let inner = rest.trim_start_matches('[').trim_end_matches(']').trim();
         let plus_pos = inner
             .find('+')
             .ok_or_else(|| self.err("expected '+' in load address"))?;
         let base_str = inner[..plus_pos].trim();
         let offset_str = inner[plus_pos + 1..].trim();
 
-        let base = parse_reg(base_str)
-            .ok_or_else(|| self.err(format!("invalid base '{}'", base_str)))?;
+        let base =
+            parse_reg(base_str).ok_or_else(|| self.err(format!("invalid base '{}'", base_str)))?;
         let offset = parse_reg(offset_str)
             .ok_or_else(|| self.err(format!("invalid offset '{}'", offset_str)))?;
 
@@ -435,12 +435,8 @@ impl<'a> DtalParser<'a> {
         let bracket_end = full
             .find(']')
             .ok_or_else(|| self.err("expected ']' in store"))?;
-        let addr = full[..bracket_end]
-            .trim_start_matches('[')
-            .trim();
-        let src_str = full[bracket_end + 1..]
-            .trim_start_matches(',')
-            .trim();
+        let addr = full[..bracket_end].trim_start_matches('[').trim();
+        let src_str = full[bracket_end + 1..].trim_start_matches(',').trim();
 
         let plus_pos = addr
             .find('+')
@@ -448,12 +444,12 @@ impl<'a> DtalParser<'a> {
         let base_str = addr[..plus_pos].trim();
         let offset_str = addr[plus_pos + 1..].trim();
 
-        let base = parse_reg(base_str)
-            .ok_or_else(|| self.err(format!("invalid base '{}'", base_str)))?;
+        let base =
+            parse_reg(base_str).ok_or_else(|| self.err(format!("invalid base '{}'", base_str)))?;
         let offset = parse_reg(offset_str)
             .ok_or_else(|| self.err(format!("invalid offset '{}'", offset_str)))?;
-        let src = parse_reg(src_str)
-            .ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
 
         Ok(Some(DtalInstr::Store { base, offset, src }))
     }
@@ -542,10 +538,7 @@ impl<'a> DtalParser<'a> {
             parse_reg(lhs_str).ok_or_else(|| self.err(format!("invalid lhs '{}'", lhs_str)))?;
 
         if let Some(rhs_reg) = parse_reg(rhs_str) {
-            Ok(Some(DtalInstr::Cmp {
-                lhs,
-                rhs: rhs_reg,
-            }))
+            Ok(Some(DtalInstr::Cmp { lhs, rhs: rhs_reg }))
         } else if let Ok(imm) = rhs_str.parse::<i64>() {
             Ok(Some(DtalInstr::CmpImm { lhs, imm }))
         } else {
@@ -759,7 +752,14 @@ fn split_instruction_comment(line: &str) -> (&str, Option<&str>) {
     if let Some(pos) = line.find("    ;") {
         let instr = line[..pos].trim();
         let comment = line[pos + 5..].trim(); // skip "    ;"
-        (instr, if comment.is_empty() { None } else { Some(comment) })
+        (
+            instr,
+            if comment.is_empty() {
+                None
+            } else {
+                Some(comment)
+            },
+        )
     } else {
         (line.trim(), None)
     }
@@ -892,12 +892,30 @@ fn parse_constraint_str(s: &str) -> Result<Constraint, DtalParseError> {
 
     // Binary comparison operators (look for top-level)
     for (op_str, make) in &[
-        ("==", Constraint::Eq as fn(IndexExpr, IndexExpr) -> Constraint),
-        ("!=", Constraint::Ne as fn(IndexExpr, IndexExpr) -> Constraint),
-        ("<=", Constraint::Le as fn(IndexExpr, IndexExpr) -> Constraint),
-        (">=", Constraint::Ge as fn(IndexExpr, IndexExpr) -> Constraint),
-        ("<", Constraint::Lt as fn(IndexExpr, IndexExpr) -> Constraint),
-        (">", Constraint::Gt as fn(IndexExpr, IndexExpr) -> Constraint),
+        (
+            "==",
+            Constraint::Eq as fn(IndexExpr, IndexExpr) -> Constraint,
+        ),
+        (
+            "!=",
+            Constraint::Ne as fn(IndexExpr, IndexExpr) -> Constraint,
+        ),
+        (
+            "<=",
+            Constraint::Le as fn(IndexExpr, IndexExpr) -> Constraint,
+        ),
+        (
+            ">=",
+            Constraint::Ge as fn(IndexExpr, IndexExpr) -> Constraint,
+        ),
+        (
+            "<",
+            Constraint::Lt as fn(IndexExpr, IndexExpr) -> Constraint,
+        ),
+        (
+            ">",
+            Constraint::Gt as fn(IndexExpr, IndexExpr) -> Constraint,
+        ),
     ] {
         if let Some(pos) = find_top_level_cmp(s, op_str) {
             let left = parse_index_expr(s[..pos].trim())?;
@@ -978,10 +996,22 @@ fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
         let inner = &s[1..s.len() - 1];
         // Look for top-level +, -, *, /
         for (op_str, make) in &[
-            ("+", IndexExpr::Add as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr),
-            ("-", IndexExpr::Sub as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr),
-            ("*", IndexExpr::Mul as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr),
-            ("/", IndexExpr::Div as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr),
+            (
+                "+",
+                IndexExpr::Add as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr,
+            ),
+            (
+                "-",
+                IndexExpr::Sub as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr,
+            ),
+            (
+                "*",
+                IndexExpr::Mul as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr,
+            ),
+            (
+                "/",
+                IndexExpr::Div as fn(Box<IndexExpr>, Box<IndexExpr>) -> IndexExpr,
+            ),
         ] {
             if let Some(pos) = find_top_level_arith(inner, op_str) {
                 let left = parse_index_expr(inner[..pos].trim())?;
@@ -994,12 +1024,13 @@ fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
 
     // Array access: name[idx]
     if let Some(bracket) = s.find('[')
-        && s.ends_with(']') {
-            let name = s[..bracket].to_string();
-            let idx_str = &s[bracket + 1..s.len() - 1];
-            let idx = parse_index_expr(idx_str)?;
-            return Ok(IndexExpr::Select(name, Box::new(idx)));
-        }
+        && s.ends_with(']')
+    {
+        let name = s[..bracket].to_string();
+        let idx_str = &s[bracket + 1..s.len() - 1];
+        let idx = parse_index_expr(idx_str)?;
+        return Ok(IndexExpr::Select(name, Box::new(idx)));
+    }
 
     // Integer constant
     if let Ok(n) = s.parse::<i64>() {
@@ -1008,9 +1039,10 @@ fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
 
     // Negative integer
     if s.starts_with('-')
-        && let Ok(n) = s[1..].parse::<i64>() {
-            return Ok(IndexExpr::Const(-n));
-        }
+        && let Ok(n) = s[1..].parse::<i64>()
+    {
+        return Ok(IndexExpr::Const(-n));
+    }
 
     // Variable
     if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
@@ -1078,7 +1110,10 @@ fn find_top_level_op(s: &str, op: &str) -> Option<usize> {
             b')' | b']' | b'}' => depth -= 1,
             _ => {}
         }
-        if depth == 0 && i + op_bytes.len() <= bytes.len() && &bytes[i..i + op_bytes.len()] == op_bytes {
+        if depth == 0
+            && i + op_bytes.len() <= bytes.len()
+            && &bytes[i..i + op_bytes.len()] == op_bytes
+        {
             return Some(i);
         }
     }

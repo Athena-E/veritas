@@ -77,8 +77,8 @@ impl std::error::Error for VerifyTextError {}
 ///
 /// Parses the text into a `DtalProgram` and then runs the verifier.
 pub fn verify_dtal_text(input: &str) -> Result<(), VerifyTextError> {
-    let program = crate::backend::dtal::parser::parse_dtal(input)
-        .map_err(VerifyTextError::ParseErrors)?;
+    let program =
+        crate::backend::dtal::parser::parse_dtal(input).map_err(VerifyTextError::ParseErrors)?;
     verify_dtal(&program).map_err(|e| VerifyTextError::VerifyError(Box::new(e)))
 }
 
@@ -91,10 +91,7 @@ pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
 }
 
 /// Verify a single DTAL function
-fn verify_function(
-    func: &DtalFunction,
-    program: &DtalProgram,
-) -> Result<(), VerifyError> {
+fn verify_function(func: &DtalFunction, program: &DtalProgram) -> Result<(), VerifyError> {
     // Run dataflow analysis to compute entry/exit states
     let dataflow = analyze_function(func)?;
 
@@ -503,7 +500,7 @@ mod tests {
                     },
                     DtalInstr::MovReg {
                         dst: v(3),
-                        src: v(2),        // v2 is Bool
+                        src: v(2),         // v2 is Bool
                         ty: DtalType::Int, // annotated as Int
                     },
                 ],
