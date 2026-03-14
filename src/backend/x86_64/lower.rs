@@ -85,8 +85,8 @@ fn lower_function(func: &DtalFunction) -> X86Function {
 }
 
 /// Function lowering context
-struct FunctionLowerer<'a, 'src> {
-    func: &'a DtalFunction<'src>,
+struct FunctionLowerer<'a> {
+    func: &'a DtalFunction,
     allocation: AllocationResult,
     instructions: Vec<X86Instr>,
     /// Stack frame size (for locals and spills)
@@ -96,8 +96,8 @@ struct FunctionLowerer<'a, 'src> {
     return_value_in_rax: bool,
 }
 
-impl<'a, 'src> FunctionLowerer<'a, 'src> {
-    fn new(func: &'a DtalFunction<'src>, allocation: &AllocationResult) -> Self {
+impl<'a> FunctionLowerer<'a> {
+    fn new(func: &'a DtalFunction, allocation: &AllocationResult) -> Self {
         // Callee-saved registers are pushed between rbp and the spill
         // frame, so spill slot offsets must be shifted down to avoid
         // overlapping with the callee-saved save area.
@@ -290,7 +290,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
     }
 
     /// Lower a single DTAL instruction
-    fn lower_instruction(&mut self, instr: &DtalInstr<'src>) {
+    fn lower_instruction(&mut self, instr: &DtalInstr) {
         match instr {
             DtalInstr::MovImm { dst, imm, .. } => {
                 self.lower_mov_imm(*dst, *imm);
@@ -919,7 +919,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
 mod tests {
     use super::*;
     use crate::backend::dtal::instr::{DtalBlock, TypeState};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
     #[test]
     fn test_lower_simple_function() {
@@ -930,7 +930,7 @@ mod tests {
         let func = DtalFunction {
             name: "add".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -940,19 +940,19 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 10,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v1,
                         imm: 20,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v2,
                         lhs: v0,
                         rhs: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -987,7 +987,7 @@ mod tests {
         let func = DtalFunction {
             name: "branch_test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![
@@ -998,7 +998,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 5,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::CmpImm { lhs: v0, imm: 10 },
                         DtalInstr::Branch {
@@ -1014,7 +1014,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 1,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Jmp {
                             target: "exit".to_string(),
@@ -1028,7 +1028,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 0,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Jmp {
                             target: "exit".to_string(),

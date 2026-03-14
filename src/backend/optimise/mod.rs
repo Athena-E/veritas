@@ -90,9 +90,9 @@ mod tests {
     use super::*;
     use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
     use crate::backend::dtal::regs::{Reg, VirtualReg};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
-    fn make_copy_chain_function() -> DtalFunction<'static> {
+    fn make_copy_chain_function() -> DtalFunction {
         // v0 = 42
         // v1 = v0
         // v2 = v1
@@ -104,7 +104,7 @@ mod tests {
         DtalFunction {
             name: "copy_chain".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -114,22 +114,22 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 42,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovReg {
                         dst: v1,
                         src: v0,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovReg {
                         dst: v2,
                         src: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     // Push v2 to use it (simulating return value setup)
                     DtalInstr::Push {
                         src: v2,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],

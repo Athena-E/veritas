@@ -4,7 +4,7 @@
 
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
-use crate::common::types::IType;
+use crate::backend::dtal::types::DtalType;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -19,16 +19,16 @@ pub enum CmpOperands {
 
 /// Type state at a program point
 #[derive(Clone, Debug)]
-pub struct TypeState<'src> {
+pub struct TypeState {
     /// Type of each register
-    pub register_types: HashMap<Reg, IType<'src>>,
+    pub register_types: HashMap<Reg, DtalType>,
     /// Active constraints
     pub constraints: Vec<Constraint>,
     /// Operands of the most recent comparison (for deriving branch constraints)
     pub last_cmp: Option<CmpOperands>,
 }
 
-impl<'src> TypeState<'src> {
+impl TypeState {
     pub fn new() -> Self {
         Self {
             register_types: HashMap::new(),
@@ -38,7 +38,7 @@ impl<'src> TypeState<'src> {
     }
 }
 
-impl<'src> Default for TypeState<'src> {
+impl Default for TypeState {
     fn default() -> Self {
         Self::new()
     }
@@ -46,35 +46,35 @@ impl<'src> Default for TypeState<'src> {
 
 /// A DTAL program
 #[derive(Clone, Debug)]
-pub struct DtalProgram<'src> {
-    pub functions: Vec<DtalFunction<'src>>,
+pub struct DtalProgram {
+    pub functions: Vec<DtalFunction>,
 }
 
 /// A DTAL function
 #[derive(Clone, Debug)]
-pub struct DtalFunction<'src> {
+pub struct DtalFunction {
     pub name: String,
     /// Parameter registers with their types
-    pub params: Vec<(Reg, IType<'src>)>,
+    pub params: Vec<(Reg, DtalType)>,
     /// Return type
-    pub return_type: IType<'src>,
+    pub return_type: DtalType,
     /// Precondition (if any)
     pub precondition: Option<Constraint>,
     /// Postcondition (if any)
     pub postcondition: Option<Constraint>,
     /// Basic blocks
-    pub blocks: Vec<DtalBlock<'src>>,
+    pub blocks: Vec<DtalBlock>,
 }
 
 /// A basic block in DTAL
 #[derive(Clone, Debug)]
-pub struct DtalBlock<'src> {
+pub struct DtalBlock {
     /// Block label
     pub label: String,
     /// Type state at block entry (for verification)
-    pub entry_state: TypeState<'src>,
+    pub entry_state: TypeState,
     /// Instructions in this block
-    pub instructions: Vec<DtalInstr<'src>>,
+    pub instructions: Vec<DtalInstr>,
 }
 
 /// Binary operations
@@ -127,18 +127,18 @@ impl fmt::Display for CmpOp {
 
 /// A DTAL instruction
 #[derive(Clone, Debug)]
-pub enum DtalInstr<'src> {
+pub enum DtalInstr {
     // Data movement
     /// mov rd, imm
-    MovImm { dst: Reg, imm: i64, ty: IType<'src> },
+    MovImm { dst: Reg, imm: i64, ty: DtalType },
     /// mov rd, rs
-    MovReg { dst: Reg, src: Reg, ty: IType<'src> },
+    MovReg { dst: Reg, src: Reg, ty: DtalType },
     /// load rd, [base + offset]
     Load {
         dst: Reg,
         base: Reg,
         offset: Reg,
-        ty: IType<'src>,
+        ty: DtalType,
     },
     /// store [base + offset], src
     Store { base: Reg, offset: Reg, src: Reg },
@@ -150,14 +150,14 @@ pub enum DtalInstr<'src> {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
-        ty: IType<'src>,
+        ty: DtalType,
     },
     /// rd = rs + imm
     AddImm {
         dst: Reg,
         src: Reg,
         imm: i64,
-        ty: IType<'src>,
+        ty: DtalType,
     },
 
     // Comparison
@@ -170,7 +170,7 @@ pub enum DtalInstr<'src> {
 
     // Logical
     /// not rd, rs
-    Not { dst: Reg, src: Reg, ty: IType<'src> },
+    Not { dst: Reg, src: Reg, ty: DtalType },
 
     // Control flow
     /// jmp label
@@ -180,26 +180,26 @@ pub enum DtalInstr<'src> {
     /// call function
     Call {
         target: String,
-        return_ty: IType<'src>,
+        return_ty: DtalType,
     },
     /// ret
     Ret,
 
     // Stack operations
     /// push rs
-    Push { src: Reg, ty: IType<'src> },
+    Push { src: Reg, ty: DtalType },
     /// pop rd
-    Pop { dst: Reg, ty: IType<'src> },
+    Pop { dst: Reg, ty: DtalType },
     /// alloca rd, size
     Alloca {
         dst: Reg,
         size: u32,
-        ty: IType<'src>,
+        ty: DtalType,
     },
 
     // Annotations (for verification)
     /// Type annotation for a register
-    TypeAnnotation { reg: Reg, ty: IType<'src> },
+    TypeAnnotation { reg: Reg, ty: DtalType },
     /// Assume a constraint
     ConstraintAssume { constraint: Constraint },
     /// Assert a constraint (for bounds checks)

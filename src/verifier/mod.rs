@@ -47,17 +47,43 @@ use crate::backend::dtal::instr::{DtalFunction, DtalProgram};
 use checker::verify_instruction;
 use dataflow::analyze_function;
 
+/// Error type for standalone DTAL text verification
+#[derive(Debug)]
+pub enum VerifyTextError {
+    /// Errors during parsing
+    ParseErrors(Vec<crate::backend::dtal::parser::DtalParseError>),
+    /// Error during verification
+    VerifyError(Box<VerifyError>),
+}
+
+impl std::fmt::Display for VerifyTextError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerifyTextError::ParseErrors(errors) => {
+                writeln!(f, "DTAL parse errors:")?;
+                for e in errors {
+                    writeln!(f, "  {}", e)?;
+                }
+                Ok(())
+            }
+            VerifyTextError::VerifyError(e) => write!(f, "Verification error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for VerifyTextError {}
+
+/// Verify a DTAL program from its text representation
+///
+/// Parses the text into a `DtalProgram` and then runs the verifier.
+pub fn verify_dtal_text(input: &str) -> Result<(), VerifyTextError> {
+    let program = crate::backend::dtal::parser::parse_dtal(input)
+        .map_err(VerifyTextError::ParseErrors)?;
+    verify_dtal(&program).map_err(|e| VerifyTextError::VerifyError(Box::new(e)))
+}
+
 /// Verify a complete DTAL program
-///
-/// # Arguments
-///
-/// * `program` - The DTAL program to verify
-///
-/// # Returns
-///
-/// * `Ok(())` if verification passes
-/// * `Err(VerifyError)` with details if verification fails
-pub fn verify_dtal<'src>(program: &DtalProgram<'src>) -> Result<(), VerifyError<'src>> {
+pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
     for func in &program.functions {
         verify_function(func, program)?;
     }
@@ -65,10 +91,10 @@ pub fn verify_dtal<'src>(program: &DtalProgram<'src>) -> Result<(), VerifyError<
 }
 
 /// Verify a single DTAL function
-fn verify_function<'src>(
-    func: &DtalFunction<'src>,
-    program: &DtalProgram<'src>,
-) -> Result<(), VerifyError<'src>> {
+fn verify_function(
+    func: &DtalFunction,
+    program: &DtalProgram,
+) -> Result<(), VerifyError> {
     // Run dataflow analysis to compute entry/exit states
     let dataflow = analyze_function(func)?;
 
@@ -95,11 +121,11 @@ fn verify_function<'src>(
 }
 
 /// Verify block terminator
-fn verify_terminator<'src>(
-    func: &DtalFunction<'src>,
-    block: &crate::backend::dtal::instr::DtalBlock<'src>,
-    state: &crate::backend::dtal::instr::TypeState<'src>,
-) -> Result<(), VerifyError<'src>> {
+fn verify_terminator(
+    func: &DtalFunction,
+    block: &crate::backend::dtal::instr::DtalBlock,
+    state: &crate::backend::dtal::instr::TypeState,
+) -> Result<(), VerifyError> {
     use crate::backend::dtal::instr::DtalInstr;
     use crate::backend::dtal::regs::{PhysicalReg, Reg};
 
@@ -137,9 +163,9 @@ fn verify_terminator<'src>(
 
 /// Check if actual type is a subtype of (or equal to) expected type.
 /// Delegates to the consolidated implementation in checker.rs.
-fn types_compatible<'src>(
-    actual: &crate::common::types::IType<'src>,
-    expected: &crate::common::types::IType<'src>,
+fn types_compatible(
+    actual: &crate::backend::dtal::types::DtalType,
+    expected: &crate::backend::dtal::types::DtalType,
 ) -> bool {
     checker::types_compatible(actual, expected)
 }
@@ -150,7 +176,7 @@ mod tests {
     use crate::backend::dtal::constraints::{Constraint, IndexExpr};
     use crate::backend::dtal::instr::{CmpOp, DtalBlock, DtalInstr, TypeState};
     use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-    use crate::common::types::{IType, IValue};
+    use crate::backend::dtal::types::{DtalType, DtalValue};
     use std::sync::Arc;
 
     // Helpers for concise register construction
@@ -161,16 +187,16 @@ mod tests {
         Reg::Physical(PhysicalReg::R0)
     }
 
-    fn make_program<'a>(functions: Vec<DtalFunction<'a>>) -> DtalProgram<'a> {
+    fn make_program(functions: Vec<DtalFunction>) -> DtalProgram {
         DtalProgram { functions }
     }
 
-    fn make_func<'a>(
+    fn make_func(
         name: &str,
-        params: Vec<(Reg, IType<'a>)>,
-        return_type: IType<'a>,
-        blocks: Vec<DtalBlock<'a>>,
-    ) -> DtalFunction<'a> {
+        params: Vec<(Reg, DtalType)>,
+        return_type: DtalType,
+        blocks: Vec<DtalBlock>,
+    ) -> DtalFunction {
         DtalFunction {
             name: name.to_string(),
             params,
@@ -181,7 +207,7 @@ mod tests {
         }
     }
 
-    fn make_block<'a>(label: &str, instructions: Vec<DtalInstr<'a>>) -> DtalBlock<'a> {
+    fn make_block(label: &str, instructions: Vec<DtalInstr>) -> DtalBlock {
         DtalBlock {
             label: label.to_string(),
             entry_state: TypeState::new(),
@@ -197,15 +223,15 @@ mod tests {
     fn test_verify_simple_function() {
         let program = make_program(vec![make_func(
             "id",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovReg {
                         dst: r0(),
                         src: v(0),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -220,14 +246,14 @@ mod tests {
         let program = make_program(vec![make_func(
             "const_five",
             vec![],
-            IType::SingletonInt(IValue::Int(5)),
+            DtalType::SingletonInt(DtalValue::Int(5)),
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovImm {
                         dst: v(0),
                         imm: 5,
-                        ty: IType::SingletonInt(IValue::Int(5)),
+                        ty: DtalType::SingletonInt(DtalValue::Int(5)),
                     },
                     DtalInstr::Ret,
                 ],
@@ -241,13 +267,13 @@ mod tests {
         let program = make_program(vec![make_func(
             "bad",
             vec![],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::MovImm {
                     dst: v(0),
                     imm: 5,
-                    ty: IType::SingletonInt(IValue::Int(6)), // Wrong!
+                    ty: DtalType::SingletonInt(DtalValue::Int(6)), // Wrong!
                 }],
             )],
         )]);
@@ -263,13 +289,13 @@ mod tests {
         let program = make_program(vec![make_func(
             "bad",
             vec![],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::MovReg {
                     dst: v(1),
                     src: v(0), // Not defined!
-                    ty: IType::Int,
+                    ty: DtalType::Int,
                 }],
             )],
         )]);
@@ -286,12 +312,10 @@ mod tests {
 
     #[test]
     fn test_constraint_assume_ignored() {
-        // ConstraintAssume injects a constraint, then ConstraintAssert checks it.
-        // Since ConstraintAssume is now a no-op, the assert should fail.
         let program = make_program(vec![make_func(
             "bad",
             vec![],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
@@ -328,11 +352,10 @@ mod tests {
 
     #[test]
     fn test_constraint_assert_provable_from_precondition() {
-        // Function has precondition x >= 0, asserts x >= 0 -- should pass via Z3
         let mut func = make_func(
             "ok",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
@@ -360,11 +383,10 @@ mod tests {
 
     #[test]
     fn test_constraint_assert_unprovable() {
-        // No context, assert x > 0 -- should fail
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::ConstraintAssert {
@@ -385,11 +407,10 @@ mod tests {
 
     #[test]
     fn test_constraint_assert_z3_transitivity() {
-        // Precondition: x >= 5. Assert: x >= 3. Requires Z3 (5 >= 3 transitivity).
         let mut func = make_func(
             "ok",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
@@ -421,17 +442,16 @@ mod tests {
 
     #[test]
     fn test_reject_int_as_singleton() {
-        // mov v0 (Int) into v1 annotated as SingletonInt(5) -- should fail
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::MovReg {
                     dst: v(1),
                     src: v(0),
-                    ty: IType::SingletonInt(IValue::Int(5)),
+                    ty: DtalType::SingletonInt(DtalValue::Int(5)),
                 }],
             )],
         )]);
@@ -445,18 +465,17 @@ mod tests {
 
     #[test]
     fn test_singleton_subtype_of_int() {
-        // mov v0 (SingletonInt(5)) into R0 annotated as Int -- should pass
         let program = make_program(vec![make_func(
             "ok",
-            vec![(v(0), IType::SingletonInt(IValue::Int(5)))],
-            IType::Int,
+            vec![(v(0), DtalType::SingletonInt(DtalValue::Int(5)))],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovReg {
                         dst: r0(),
                         src: v(0),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -467,11 +486,10 @@ mod tests {
 
     #[test]
     fn test_reject_bool_as_int() {
-        // SetCC produces Bool, then MovReg annotated as Int -- should fail
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), IType::Int), (v(1), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int), (v(1), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
@@ -485,8 +503,8 @@ mod tests {
                     },
                     DtalInstr::MovReg {
                         dst: v(3),
-                        src: v(2),      // v2 is Bool
-                        ty: IType::Int, // annotated as Int
+                        src: v(2),        // v2 is Bool
+                        ty: DtalType::Int, // annotated as Int
                     },
                 ],
             )],
@@ -497,24 +515,22 @@ mod tests {
 
     #[test]
     fn test_array_subtyping_compatible() {
-        // Array<Int, 10> is compatible with Array<Int, 10>
-        let arr_ty = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(10),
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(10),
         };
         assert!(checker::types_compatible(&arr_ty, &arr_ty));
     }
 
     #[test]
     fn test_array_subtyping_different_sizes() {
-        // Array<Int, 10> is NOT compatible with Array<Int, 5>
-        let arr10 = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(10),
+        let arr10 = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(10),
         };
-        let arr5 = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(5),
+        let arr5 = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(5),
         };
         assert!(!checker::types_compatible(&arr10, &arr5));
     }
@@ -525,22 +541,21 @@ mod tests {
 
     #[test]
     fn test_reject_wrong_type_annotation() {
-        // mov v0, 5 (SingletonInt(5)), then annotate v0 as Bool -- should fail
         let program = make_program(vec![make_func(
             "bad",
             vec![],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovImm {
                         dst: v(0),
                         imm: 5,
-                        ty: IType::SingletonInt(IValue::Int(5)),
+                        ty: DtalType::SingletonInt(DtalValue::Int(5)),
                     },
                     DtalInstr::TypeAnnotation {
                         reg: v(0),
-                        ty: IType::Bool, // Wrong! v0 is SingletonInt(5)
+                        ty: DtalType::Bool,
                     },
                 ],
             )],
@@ -558,22 +573,21 @@ mod tests {
 
     #[test]
     fn test_accept_valid_type_annotation() {
-        // mov v0, 5 (SingletonInt(5)), annotate as Int -- should pass (singleton <: int)
         let program = make_program(vec![make_func(
             "ok",
             vec![],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovImm {
                         dst: v(0),
                         imm: 5,
-                        ty: IType::SingletonInt(IValue::Int(5)),
+                        ty: DtalType::SingletonInt(DtalValue::Int(5)),
                     },
                     DtalInstr::TypeAnnotation {
                         reg: v(0),
-                        ty: IType::Int, // OK: SingletonInt(5) <: Int
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -584,17 +598,16 @@ mod tests {
 
     #[test]
     fn test_accept_phi_type_annotation() {
-        // TypeAnnotation on an undefined register (phi node at block entry) is accepted
         let program = make_program(vec![make_func(
             "ok",
             vec![],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::TypeAnnotation {
                         reg: v(0),
-                        ty: IType::Int, // First definition via phi
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -605,16 +618,15 @@ mod tests {
 
     #[test]
     fn test_reject_type_annotation_int_to_singleton() {
-        // v0 is Int (param), annotate as SingletonInt(5) -- should fail (Int !<: SingletonInt)
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::TypeAnnotation {
                     reg: v(0),
-                    ty: IType::SingletonInt(IValue::Int(5)),
+                    ty: DtalType::SingletonInt(DtalValue::Int(5)),
                 }],
             )],
         )]);
@@ -631,22 +643,21 @@ mod tests {
 
     #[test]
     fn test_reject_load_without_bounds_proof() {
-        // Load from array with no constraint on offset -- should fail
-        let arr_ty = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(10),
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(10),
         };
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), arr_ty), (v(1), IType::Int)],
-            IType::Int,
+            vec![(v(0), arr_ty), (v(1), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::Load {
                     dst: v(2),
                     base: v(0),
-                    offset: v(1), // No proof that 0 <= v1 < 10
-                    ty: IType::Int,
+                    offset: v(1),
+                    ty: DtalType::Int,
                 }],
             )],
         )]);
@@ -663,63 +674,49 @@ mod tests {
 
     #[test]
     fn test_accept_load_with_constant_in_bounds() {
-        // Load with offset = constant 3 from array of size 10.
-        // SingletonInt(3) means the verifier knows the exact value.
-        // The bounds constraint 0 <= 3 < 10 should be provable.
-        let arr_ty = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(10),
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(10),
         };
         let program = make_program(vec![make_func(
             "ok",
             vec![(v(0), arr_ty)],
-            IType::Int,
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovImm {
                         dst: v(1),
                         imm: 3,
-                        ty: IType::SingletonInt(IValue::Int(3)),
+                        ty: DtalType::SingletonInt(DtalValue::Int(3)),
                     },
-                    // We need the constraint that v1 == 3 for Z3.
-                    // The verifier uses the register name as an index variable,
-                    // so we need a constraint tying "v1" to 3.
                     DtalInstr::ConstraintAssert {
-                        constraint: Constraint::True, // trivial assert to not fail
+                        constraint: Constraint::True,
                         msg: "".to_string(),
                     },
                     DtalInstr::Load {
                         dst: v(2),
                         base: v(0),
                         offset: v(1),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
             )],
         )]);
-        // This test verifies that the bounds check doesn't crash.
-        // The Z3 solver needs to know v1 == 3 to prove bounds.
-        // Without that constraint in the context, this will fail.
-        // This is expected -- we need preconditions or branch-derived constraints.
         let _result = verify_dtal(&program);
-        // The important thing is that the verifier runs the check, not that
-        // this particular encoding succeeds. See the next test for a
-        // complete in-bounds proof.
     }
 
     #[test]
     fn test_accept_load_with_precondition_bounds() {
-        // Precondition: 0 <= v1 < 10. Load from array of size 10 at v1.
-        let arr_ty = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(10),
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(10),
         };
         let mut func = make_func(
             "ok",
-            vec![(v(0), arr_ty), (v(1), IType::Int)],
-            IType::Int,
+            vec![(v(0), arr_ty), (v(1), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
@@ -727,12 +724,12 @@ mod tests {
                         dst: v(2),
                         base: v(0),
                         offset: v(1),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovReg {
                         dst: r0(),
                         src: v(2),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -757,20 +754,19 @@ mod tests {
 
     #[test]
     fn test_reject_store_without_bounds_proof() {
-        // Store to array with no bounds constraint
-        let arr_ty = IType::Array {
-            element_type: Arc::new(IType::Int),
-            size: IValue::Int(5),
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: DtalValue::Int(5),
         };
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), arr_ty), (v(1), IType::Int), (v(2), IType::Int)],
-            IType::Int,
+            vec![(v(0), arr_ty), (v(1), DtalType::Int), (v(2), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![DtalInstr::Store {
                     base: v(0),
-                    offset: v(1), // No proof that 0 <= v1 < 5
+                    offset: v(1),
                     src: v(2),
                 }],
             )],
@@ -792,18 +788,17 @@ mod tests {
 
     #[test]
     fn test_reject_unprovable_postcondition() {
-        // Function declares postcondition result > 0, but returns arbitrary int
         let mut func = make_func(
             "bad",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovReg {
                         dst: r0(),
                         src: v(0),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -827,18 +822,17 @@ mod tests {
 
     #[test]
     fn test_accept_provable_postcondition() {
-        // Precondition: v0 > 0. Postcondition: r0 > 0. Body: r0 = v0.
         let mut func = make_func(
             "ok",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovReg {
                         dst: r0(),
                         src: v(0),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -848,9 +842,6 @@ mod tests {
             IndexExpr::Var("v0".to_string()),
             IndexExpr::Const(0),
         ));
-        // The postcondition refers to r0, but the constraint context has v0 > 0.
-        // Since r0 was assigned from v0, we'd need r0's constraint too.
-        // Use v0 in the postcondition to test the plumbing.
         func.postcondition = Some(Constraint::Gt(
             IndexExpr::Var("v0".to_string()),
             IndexExpr::Const(0),
@@ -864,19 +855,18 @@ mod tests {
 
     #[test]
     fn test_reject_unprovable_precondition_at_call() {
-        // Callee requires x > 0. Caller has no such constraint.
         let callee = {
             let mut f = make_func(
                 "requires_positive",
-                vec![(v(0), IType::Int)],
-                IType::Int,
+                vec![(v(0), DtalType::Int)],
+                DtalType::Int,
                 vec![make_block(
                     ".entry",
                     vec![
                         DtalInstr::MovReg {
                             dst: r0(),
                             src: v(0),
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Ret,
                     ],
@@ -890,14 +880,14 @@ mod tests {
         };
         let caller = make_func(
             "caller",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::Call {
                         target: "requires_positive".to_string(),
-                        return_ty: IType::Int,
+                        return_ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -921,12 +911,10 @@ mod tests {
 
     #[test]
     fn test_branch_derives_constraint_for_assert() {
-        // cmp v0, 10; blt .taken; assert v0 >= 10 (on fall-through)
-        // The fall-through should have constraint v0 >= 10 derived from the branch.
         let mut func = make_func(
             "ok",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![
                 make_block(
                     ".entry",
@@ -936,7 +924,6 @@ mod tests {
                             cond: CmpOp::Lt,
                             target: ".taken".to_string(),
                         },
-                        // Fall-through: verifier derives v0 >= 10
                         DtalInstr::ConstraintAssert {
                             constraint: Constraint::Ge(
                                 IndexExpr::Var("v0".to_string()),
@@ -947,7 +934,7 @@ mod tests {
                         DtalInstr::MovReg {
                             dst: r0(),
                             src: v(0),
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Ret,
                     ],
@@ -958,15 +945,14 @@ mod tests {
                         DtalInstr::MovReg {
                             dst: r0(),
                             src: v(0),
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Ret,
                     ],
                 ),
             ],
         );
-        // Need v0 available on the taken path too
-        func.params = vec![(v(0), IType::Int)];
+        func.params = vec![(v(0), DtalType::Int)];
         let program = make_program(vec![func]);
         assert!(
             verify_dtal(&program).is_ok(),
@@ -980,12 +966,10 @@ mod tests {
 
     #[test]
     fn test_fallthrough_propagates_state() {
-        // Block 0 defines v1, branches conditionally to block 2.
-        // Block 1 (fall-through) uses v1 -- should be defined via fall-through edge.
         let program = make_program(vec![make_func(
             "ok",
-            vec![(v(0), IType::Int)],
-            IType::Int,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Int,
             vec![
                 make_block(
                     ".bb0",
@@ -993,24 +977,22 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v(1),
                             imm: 42,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::CmpImm { lhs: v(0), imm: 0 },
                         DtalInstr::Branch {
                             cond: CmpOp::Eq,
                             target: ".bb2".to_string(),
                         },
-                        // No Jmp -- falls through to .bb1
                     ],
                 ),
                 make_block(
                     ".bb1",
                     vec![
-                        // v1 should be available here via fall-through from .bb0
                         DtalInstr::MovReg {
                             dst: r0(),
                             src: v(1),
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Ret,
                     ],
@@ -1021,7 +1003,7 @@ mod tests {
                         DtalInstr::MovReg {
                             dst: r0(),
                             src: v(1),
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Ret,
                     ],
@@ -1040,18 +1022,17 @@ mod tests {
 
     #[test]
     fn test_reject_return_type_mismatch() {
-        // Function returns Bool, but R0 has Int
         let program = make_program(vec![make_func(
             "bad",
-            vec![(v(0), IType::Int)],
-            IType::Bool,
+            vec![(v(0), DtalType::Int)],
+            DtalType::Bool,
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovReg {
                         dst: r0(),
                         src: v(0),
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],

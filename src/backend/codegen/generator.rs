@@ -15,22 +15,23 @@
 
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use crate::backend::dtal::regs::Reg;
+use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::{BasicBlock, BlockId, PhiNode, Terminator, TirFunction, TirProgram};
 use std::collections::HashMap;
 
 use super::isel;
 
 /// Code generation context
-pub struct CodegenContext<'src> {
+pub struct CodegenContext {
     /// Generated DTAL blocks
-    blocks: Vec<DtalBlock<'src>>,
+    blocks: Vec<DtalBlock>,
     /// Map from TIR BlockId to DTAL label
     block_labels: HashMap<BlockId, String>,
     /// Current function name (for label generation)
     func_name: String,
 }
 
-impl<'src> CodegenContext<'src> {
+impl CodegenContext {
     pub fn new(func_name: &str) -> Self {
         Self {
             blocks: Vec::new(),
@@ -50,18 +51,18 @@ impl<'src> CodegenContext<'src> {
     }
 
     /// Add a generated DTAL block
-    pub fn add_block(&mut self, block: DtalBlock<'src>) {
+    pub fn add_block(&mut self, block: DtalBlock) {
         self.blocks.push(block);
     }
 
     /// Take all generated blocks
-    pub fn take_blocks(self) -> Vec<DtalBlock<'src>> {
+    pub fn take_blocks(self) -> Vec<DtalBlock> {
         self.blocks
     }
 }
 
 /// Generate DTAL code for a TIR program
-pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram<'src> {
+pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram {
     DtalProgram {
         functions: program
             .functions
@@ -72,7 +73,7 @@ pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram<'src> {
 }
 
 /// Generate DTAL code for a TIR function
-pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction<'src> {
+pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction {
     let mut ctx = CodegenContext::new(&func.name);
 
     // Pre-generate labels for all blocks
@@ -100,16 +101,16 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction<'src> {
     }
 
     // Convert TIR params (VirtualReg) to DTAL params (Reg)
-    let params: Vec<(Reg, _)> = func
+    let params: Vec<(Reg, DtalType)> = func
         .params
         .iter()
-        .map(|(vreg, ty)| (Reg::Virtual(*vreg), ty.clone()))
+        .map(|(vreg, ty)| (Reg::Virtual(*vreg), DtalType::from_itype(ty)))
         .collect();
 
     DtalFunction {
         name: func.name.clone(),
         params,
-        return_type: func.return_type.clone(),
+        return_type: DtalType::from_itype(&func.return_type),
         precondition: func.precondition.clone(),
         postcondition: func.postcondition.clone(),
         blocks: ctx.take_blocks(),
@@ -118,17 +119,14 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction<'src> {
 
 /// Generate DTAL code for a basic block
 fn codegen_block<'src>(
-    ctx: &mut CodegenContext<'src>,
+    ctx: &mut CodegenContext,
     block: &BasicBlock<'src>,
     func: &TirFunction<'src>,
-) -> DtalBlock<'src> {
+) -> DtalBlock {
     let label = ctx.label_for_block(block.id);
-    let mut instructions: Vec<DtalInstr<'src>> = Vec::new();
+    let mut instructions: Vec<DtalInstr> = Vec::new();
 
     // 1. Lower phi nodes to mov instructions
-    // In SSA deconstruction, phi nodes become parallel copies at predecessor ends.
-    // For simplicity in this phase, we emit them as sequential movs at block entry.
-    // A more sophisticated implementation would place copies at predecessor block ends.
     for phi in &block.phi_nodes {
         lower_phi_node(&mut instructions, phi, block, ctx);
     }
@@ -149,41 +147,24 @@ fn codegen_block<'src>(
 }
 
 /// Lower a phi node to mov instructions
-///
-/// For proper SSA deconstruction, copies should go at predecessor block ends.
-/// This simplified version places a comment noting the phi node.
 fn lower_phi_node<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+    instrs: &mut Vec<DtalInstr>,
     phi: &PhiNode<'src>,
     _block: &BasicBlock<'src>,
-    _ctx: &CodegenContext<'src>,
+    _ctx: &CodegenContext,
 ) {
-    // Phi nodes in SSA represent merging values from different predecessors.
-    // At this stage, we note that the destination register receives a value
-    // from one of the incoming edges. The actual value selection happens
-    // at runtime based on control flow.
-    //
-    // For a simple code generator, we can:
-    // 1. Emit parallel copies at each predecessor block end (proper SSA deconstruction)
-    // 2. Or rely on the fact that we're using virtual registers and the
-    //    semantics are "the value from whichever predecessor we came from"
-    //
-    // For now, we emit a type annotation for the phi result
     instrs.push(DtalInstr::TypeAnnotation {
         reg: Reg::Virtual(phi.dst),
-        ty: phi.ty.clone(),
+        ty: DtalType::from_itype(&phi.ty),
     });
 }
 
 /// Lower a TIR terminator to DTAL instructions
-///
-/// This includes SSA deconstruction: before jumping to a block with phi nodes,
-/// we emit mov instructions for the phi incoming values from this block.
 fn lower_terminator<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+    instrs: &mut Vec<DtalInstr>,
     terminator: &Terminator,
     current_block: BlockId,
-    ctx: &mut CodegenContext<'src>,
+    ctx: &mut CodegenContext,
     func: &TirFunction<'src>,
 ) {
     use crate::backend::dtal::instr::CmpOp;
@@ -204,14 +185,6 @@ fn lower_terminator<'src>(
             true_constraint,
             false_constraint: _,
         } => {
-            // For branches, we need to emit phi moves before each branch.
-            // However, since we're emitting two different destinations, we need
-            // to emit the phi moves conditionally. The simplest approach is to
-            // split into two separate paths, each with its own phi moves.
-            //
-            // For now, we emit both sets of phi moves. The register allocator
-            // will handle the parallel copies correctly.
-
             // Compare the condition register with 0
             instrs.push(DtalInstr::CmpImm {
                 lhs: Reg::Virtual(*cond),
@@ -239,11 +212,6 @@ fn lower_terminator<'src>(
             instrs.push(DtalInstr::Jmp {
                 target: false_label,
             });
-
-            // Note: phi moves for true_target should ideally be placed after
-            // the branch lands at true_target. For simplicity in this implementation,
-            // we rely on the phi nodes at block entry to handle this.
-            // A more sophisticated implementation would use critical edge splitting.
         }
 
         Terminator::Return { value } => {
@@ -252,26 +220,21 @@ fn lower_terminator<'src>(
                 instrs.push(DtalInstr::MovReg {
                     dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
                     src: Reg::Virtual(*val_reg),
-                    ty: func.return_type.clone(),
+                    ty: DtalType::from_itype(&func.return_type),
                 });
             }
             instrs.push(DtalInstr::Ret);
         }
 
         Terminator::Unreachable => {
-            // Emit a comment or trap instruction
-            // For now, just emit ret (should never be reached)
             instrs.push(DtalInstr::Ret);
         }
     }
 }
 
 /// Emit mov instructions for phi nodes in the target block
-///
-/// For each phi node in target_block, emit a mov from the incoming value
-/// for current_block to the phi destination.
 fn emit_phi_moves<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+    instrs: &mut Vec<DtalInstr>,
     target_block: BlockId,
     current_block: BlockId,
     func: &TirFunction<'src>,
@@ -285,7 +248,7 @@ fn emit_phi_moves<'src>(
                     instrs.push(DtalInstr::MovReg {
                         dst: Reg::Virtual(phi.dst),
                         src: Reg::Virtual(*incoming_reg),
-                        ty: phi.ty.clone(),
+                        ty: DtalType::from_itype(&phi.ty),
                     });
                     break;
                 }

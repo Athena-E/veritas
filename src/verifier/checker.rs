@@ -7,16 +7,16 @@
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
-use crate::common::types::{IType, IValue};
+use crate::backend::dtal::types::{DtalType, DtalValue};
 use crate::verifier::error::VerifyError;
 
 /// Verify a single instruction updates the type state correctly
-pub fn verify_instruction<'src>(
-    instr: &DtalInstr<'src>,
-    state: &mut TypeState<'src>,
+pub fn verify_instruction(
+    instr: &DtalInstr,
+    state: &mut TypeState,
     block_label: &str,
-    program: &crate::backend::dtal::instr::DtalProgram<'src>,
-) -> Result<(), VerifyError<'src>> {
+    program: &crate::backend::dtal::instr::DtalProgram,
+) -> Result<(), VerifyError> {
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
             verify_mov_imm(*dst, *imm, ty, state, block_label)?;
@@ -63,7 +63,7 @@ pub fn verify_instruction<'src>(
 
         DtalInstr::SetCC { dst, cond: _ } => {
             // SetCC defines dst as Bool (0 or 1)
-            state.register_types.insert(*dst, IType::Bool);
+            state.register_types.insert(*dst, DtalType::Bool);
         }
 
         DtalInstr::Not { dst, src, ty } => {
@@ -119,13 +119,11 @@ pub fn verify_instruction<'src>(
 
         DtalInstr::Branch { cond, .. } => {
             // On the fall-through path, add the negated branch constraint.
-            // The taken path gets the positive constraint (handled by dataflow).
             if let Some(constraint) = constraint_from_cmp_op(*cond, &state.last_cmp) {
                 let negated = negate_cmp_op_constraint(*cond, &state.last_cmp);
                 if let Some(neg) = negated {
                     state.constraints.push(neg);
                 }
-                // Don't push the positive constraint here -- it goes to the taken path
                 let _ = constraint;
             }
         }
@@ -138,15 +136,15 @@ pub fn verify_instruction<'src>(
 }
 
 /// Verify mov immediate instruction
-fn verify_mov_imm<'src>(
+fn verify_mov_imm(
     dst: Reg,
     imm: i64,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     // For singleton types, check the value matches
-    if let IType::SingletonInt(IValue::Int(expected)) = ty
+    if let DtalType::SingletonInt(DtalValue::Int(expected)) = ty
         && imm != *expected
     {
         return Err(VerifyError::SingletonMismatch {
@@ -156,21 +154,18 @@ fn verify_mov_imm<'src>(
         });
     }
 
-    // TODO: For refined types like {x: int | P(x)}, check P(imm) is provable.
-    // Requires translating IProposition (AST Expr) into the Constraint domain.
-
     state.register_types.insert(dst, ty.clone());
     Ok(())
 }
 
 /// Verify mov register instruction
-fn verify_mov_reg<'src>(
+fn verify_mov_reg(
     dst: Reg,
     src: Reg,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     // Check source register is defined
     let src_ty = get_register_type(src, state, block_label)?;
 
@@ -189,15 +184,15 @@ fn verify_mov_reg<'src>(
 }
 
 /// Verify binary operation
-fn verify_binop<'src>(
+fn verify_binop(
     op: BinaryOp,
     dst: Reg,
     lhs: Reg,
     rhs: Reg,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     let lhs_ty = get_register_type(lhs, state, block_label)?;
     let rhs_ty = get_register_type(rhs, state, block_label)?;
 
@@ -205,7 +200,7 @@ fn verify_binop<'src>(
     match op {
         // Logical operations require boolean operands
         BinaryOp::And | BinaryOp::Or => {
-            if !matches!(lhs_ty, IType::Bool) || !matches!(rhs_ty, IType::Bool) {
+            if !matches!(lhs_ty, DtalType::Bool) || !matches!(rhs_ty, DtalType::Bool) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
                     op: format!("{}", op),
@@ -226,7 +221,7 @@ fn verify_binop<'src>(
             }
 
             // For singleton types, verify the result
-            if let (IType::SingletonInt(IValue::Int(l)), IType::SingletonInt(IValue::Int(r))) =
+            if let (DtalType::SingletonInt(DtalValue::Int(l)), DtalType::SingletonInt(DtalValue::Int(r))) =
                 (&lhs_ty, &rhs_ty)
             {
                 let expected_result = match op {
@@ -243,7 +238,7 @@ fn verify_binop<'src>(
                     _ => unreachable!(),
                 };
 
-                if let IType::SingletonInt(IValue::Int(declared)) = ty
+                if let DtalType::SingletonInt(DtalValue::Int(declared)) = ty
                     && *declared != expected_result
                 {
                     return Err(VerifyError::SingletonMismatch {
@@ -261,14 +256,14 @@ fn verify_binop<'src>(
 }
 
 /// Verify add immediate instruction
-fn verify_add_imm<'src>(
+fn verify_add_imm(
     dst: Reg,
     src: Reg,
     imm: i64,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     let src_ty = get_register_type(src, state, block_label)?;
 
     if !is_numeric_type(&src_ty) {
@@ -276,15 +271,15 @@ fn verify_add_imm<'src>(
             block: block_label.to_string(),
             op: "addi".to_string(),
             lhs_type: src_ty,
-            rhs_type: IType::SingletonInt(IValue::Int(imm)),
+            rhs_type: DtalType::SingletonInt(DtalValue::Int(imm)),
         });
     }
 
     // For singleton types, verify the result
-    if let IType::SingletonInt(IValue::Int(src_val)) = &src_ty {
+    if let DtalType::SingletonInt(DtalValue::Int(src_val)) = &src_ty {
         let expected_result = src_val + imm;
 
-        if let IType::SingletonInt(IValue::Int(declared)) = ty
+        if let DtalType::SingletonInt(DtalValue::Int(declared)) = ty
             && *declared != expected_result
         {
             return Err(VerifyError::SingletonMismatch {
@@ -300,21 +295,21 @@ fn verify_add_imm<'src>(
 }
 
 /// Verify load instruction
-fn verify_load<'src>(
+fn verify_load(
     dst: Reg,
     base: Reg,
     offset: Reg,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
     // If base has an array type, perform bounds checking
-    if let IType::Array {
+    if let DtalType::Array {
         element_type,
-        size: IValue::Int(array_size),
+        size: DtalValue::Int(array_size),
     } = &base_ty
     {
         // Construct bounds constraint: 0 <= offset < size
@@ -350,21 +345,21 @@ fn verify_load<'src>(
 }
 
 /// Verify store instruction
-fn verify_store<'src>(
+fn verify_store(
     base: Reg,
     offset: Reg,
     src: Reg,
-    state: &mut TypeState<'src>,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
     let src_ty = get_register_type(src, state, block_label)?;
 
     // If base has an array type, perform bounds checking
-    if let IType::Array {
+    if let DtalType::Array {
         element_type,
-        size: IValue::Int(array_size),
+        size: DtalValue::Int(array_size),
     } = &base_ty
     {
         // Construct bounds constraint: 0 <= offset < size
@@ -398,12 +393,12 @@ fn verify_store<'src>(
 }
 
 /// Verify cmp instruction
-fn verify_cmp<'src>(
+fn verify_cmp(
     lhs: Reg,
     rhs: Reg,
-    state: &mut TypeState<'src>,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     check_register_defined(lhs, state, block_label)?;
     check_register_defined(rhs, state, block_label)?;
     state.last_cmp = Some(CmpOperands::RegReg(lhs, rhs));
@@ -411,45 +406,39 @@ fn verify_cmp<'src>(
 }
 
 /// Verify cmp immediate instruction
-fn verify_cmp_imm<'src>(
+fn verify_cmp_imm(
     lhs: Reg,
     imm: i64,
-    state: &mut TypeState<'src>,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     check_register_defined(lhs, state, block_label)?;
     state.last_cmp = Some(CmpOperands::RegImm(lhs, imm));
     Ok(())
 }
 
 /// Verify not instruction
-fn verify_not<'src>(
+fn verify_not(
     dst: Reg,
     src: Reg,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     check_register_defined(src, state, block_label)?;
     state.register_types.insert(dst, ty.clone());
     Ok(())
 }
 
 /// Verify a type annotation
-///
-/// If the register already has a type, check that the existing type is compatible
-/// with the annotation (the annotation must be a supertype of the existing type,
-/// or equal to it). If the register has no existing type (e.g., phi node at block
-/// entry), accept the annotation as a join-point invariant.
-fn verify_type_annotation<'src>(
+fn verify_type_annotation(
     reg: Reg,
-    ty: &IType<'src>,
-    state: &mut TypeState<'src>,
+    ty: &DtalType,
+    state: &mut TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     if let Some(existing_ty) = state.register_types.get(&reg) {
         // Register already has a type -- verify compatibility
-        // The existing type must be a subtype of the annotation
         if !types_compatible(existing_ty, ty) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
@@ -465,11 +454,11 @@ fn verify_type_annotation<'src>(
 }
 
 /// Verify a constraint assertion
-fn verify_constraint_assert<'src>(
+fn verify_constraint_assert(
     constraint: &Constraint,
-    state: &TypeState<'src>,
+    state: &TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     // Check if constraint is provable from current context (syntactic fast-path + Z3)
     if !is_constraint_provable(constraint, &state.constraints) {
         return Err(VerifyError::UnprovableConstraint {
@@ -483,11 +472,11 @@ fn verify_constraint_assert<'src>(
 
 // Helper functions
 
-fn get_register_type<'src>(
+fn get_register_type(
     reg: Reg,
-    state: &TypeState<'src>,
+    state: &TypeState,
     block_label: &str,
-) -> Result<IType<'src>, VerifyError<'src>> {
+) -> Result<DtalType, VerifyError> {
     state
         .register_types
         .get(&reg)
@@ -498,11 +487,11 @@ fn get_register_type<'src>(
         })
 }
 
-fn check_register_defined<'src>(
+fn check_register_defined(
     reg: Reg,
-    state: &TypeState<'src>,
+    state: &TypeState,
     block_label: &str,
-) -> Result<(), VerifyError<'src>> {
+) -> Result<(), VerifyError> {
     if state.register_types.contains_key(&reg) {
         Ok(())
     } else {
@@ -513,48 +502,41 @@ fn check_register_defined<'src>(
     }
 }
 
-fn is_numeric_type(ty: &IType) -> bool {
+fn is_numeric_type(ty: &DtalType) -> bool {
     matches!(
         ty,
-        IType::Int | IType::SingletonInt(_) | IType::RefinedInt { .. }
+        DtalType::Int | DtalType::SingletonInt(_) | DtalType::RefinedInt { .. }
     )
 }
 
 /// Check if actual type is a subtype of (or equal to) expected type.
-///
-/// Subtyping rules:
-/// - SingletonInt(n) <: Int
-/// - RefinedInt { .. } <: Int
-/// - Array { e1, s1 } <: Array { e2, s2 } iff e1 <: e2 && s1 == s2
-/// - Ref(a) <: Ref(b) iff a == b (invariant)
-/// - RefMut(a) <: RefMut(b) iff a == b (invariant)
-pub fn types_compatible<'src>(actual: &IType<'src>, expected: &IType<'src>) -> bool {
+pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
     match (actual, expected) {
-        (IType::Int, IType::Int) => true,
-        (IType::Bool, IType::Bool) => true,
-        (IType::Unit, IType::Unit) => true,
-        (IType::SingletonInt(a), IType::SingletonInt(b)) => a == b,
-        (IType::SingletonInt(_), IType::Int) => true,
-        (IType::RefinedInt { .. }, IType::Int) => true,
-        (IType::Int, IType::SingletonInt(_)) => false,
-        (IType::Int, IType::RefinedInt { .. }) => false,
+        (DtalType::Int, DtalType::Int) => true,
+        (DtalType::Bool, DtalType::Bool) => true,
+        (DtalType::Unit, DtalType::Unit) => true,
+        (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => a == b,
+        (DtalType::SingletonInt(_), DtalType::Int) => true,
+        (DtalType::RefinedInt { .. }, DtalType::Int) => true,
+        (DtalType::Int, DtalType::SingletonInt(_)) => false,
+        (DtalType::Int, DtalType::RefinedInt { .. }) => false,
         (
-            IType::Array {
+            DtalType::Array {
                 element_type: e1,
                 size: s1,
             },
-            IType::Array {
+            DtalType::Array {
                 element_type: e2,
                 size: s2,
             },
         ) => types_compatible(e1.as_ref(), e2.as_ref()) && s1 == s2,
-        (IType::Ref(a), IType::Ref(b)) => {
+        (DtalType::Ref(a), DtalType::Ref(b)) => {
             types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
         }
-        (IType::RefMut(a), IType::RefMut(b)) => {
+        (DtalType::RefMut(a), DtalType::RefMut(b)) => {
             types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
         }
-        (IType::Master(a), IType::Master(b)) => {
+        (DtalType::Master(a), DtalType::Master(b)) => {
             types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
         }
         _ => false,
@@ -563,7 +545,6 @@ pub fn types_compatible<'src>(actual: &IType<'src>, expected: &IType<'src>) -> b
 
 /// Check if a constraint is provable from context
 pub fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool {
-    // Trivial cases
     if matches!(goal, Constraint::True) {
         return true;
     }
@@ -572,12 +553,10 @@ pub fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool
         return false;
     }
 
-    // Check if goal is directly in context
     if context.contains(goal) {
         return true;
     }
 
-    // Check for simple entailments (fast path before Z3)
     for ctx in context {
         if constraint_entails(ctx, goal) {
             return true;
@@ -590,20 +569,16 @@ pub fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool
 
 /// Check if one constraint entails another (simple cases)
 fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
-    // Direct equality
     if premise == conclusion {
         return true;
     }
 
-    // Le implies Lt for smaller bound
     match (premise, conclusion) {
         (Constraint::Eq(a1, b1), Constraint::Eq(a2, b2)) => a1 == a2 && b1 == b2,
         (Constraint::Le(a1, b1), Constraint::Lt(a2, b2)) => {
-            // a <= b doesn't imply a < b directly, but a <= b-1 does
             a1 == a2 && matches!((b1, b2), (IndexExpr::Const(x), IndexExpr::Const(y)) if *x < *y)
         }
         (Constraint::Ge(a1, b1), Constraint::Ge(a2, b2)) => {
-            // a >= c1 implies a >= c2 if c1 >= c2
             a1 == a2 && matches!((b1, b2), (IndexExpr::Const(x), IndexExpr::Const(y)) if *x >= *y)
         }
         _ => false,

@@ -482,9 +482,9 @@ impl Default for GraphColoringAllocator {
 mod tests {
     use super::*;
     use crate::backend::dtal::instr::{BinaryOp, DtalBlock, TypeState};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
-    fn make_test_function() -> DtalFunction<'static> {
+    fn make_test_function() -> DtalFunction {
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -492,7 +492,7 @@ mod tests {
         DtalFunction {
             name: "test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -502,19 +502,19 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 10,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v1,
                         imm: 20,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v2,
                         lhs: v0,
                         rhs: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -573,7 +573,7 @@ mod tests {
         }
     }
 
-    fn make_high_pressure_function() -> DtalFunction<'static> {
+    fn make_high_pressure_function() -> DtalFunction {
         // Create a function that needs more registers than available
         // to test spilling
         let mut instructions = Vec::new();
@@ -583,7 +583,7 @@ mod tests {
             instructions.push(DtalInstr::MovImm {
                 dst: Reg::Virtual(VirtualReg(i)),
                 imm: i as i64,
-                ty: IType::Int,
+                ty: DtalType::Int,
             });
         }
 
@@ -594,7 +594,7 @@ mod tests {
                 dst: Reg::Virtual(VirtualReg(20 + i)),
                 lhs: Reg::Virtual(VirtualReg(i)),
                 rhs: Reg::Virtual(VirtualReg(i + 1)),
-                ty: IType::Int,
+                ty: DtalType::Int,
             });
         }
 
@@ -603,7 +603,7 @@ mod tests {
         DtalFunction {
             name: "high_pressure".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {

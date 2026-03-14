@@ -72,7 +72,7 @@ pub struct VerboseOutput<'src> {
     /// The TIR (SSA form)
     pub tir: crate::backend::TirProgram<'src>,
     /// The DTAL program (for verification)
-    pub dtal_program: crate::backend::dtal::instr::DtalProgram<'src>,
+    pub dtal_program: crate::backend::dtal::instr::DtalProgram,
     /// The generated DTAL assembly as text
     pub dtal: String,
 }

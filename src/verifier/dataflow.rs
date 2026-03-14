@@ -6,36 +6,34 @@
 
 use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
-use crate::common::types::IType;
+use crate::backend::dtal::types::DtalType;
 use crate::verifier::checker::{constraint_from_cmp_op, negate_cmp_op};
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
 /// Result of dataflow analysis
 #[allow(dead_code)]
-pub struct DataflowResult<'src> {
+pub struct DataflowResult {
     /// Type state at entry of each block
-    pub entry_states: HashMap<String, TypeState<'src>>,
+    pub entry_states: HashMap<String, TypeState>,
     /// Type state at exit of each block
-    pub exit_states: HashMap<String, TypeState<'src>>,
+    pub exit_states: HashMap<String, TypeState>,
     /// Per-edge exit states (source_label, target_label) -> state
     /// Used for branch-refined constraints on specific edges
-    pub edge_states: HashMap<(String, String), TypeState<'src>>,
+    pub edge_states: HashMap<(String, String), TypeState>,
     /// Predecessor blocks for each block
     pub predecessors: HashMap<String, Vec<String>>,
 }
 
 /// Compute type states for all blocks in a function
-pub fn analyze_function<'src>(
-    func: &DtalFunction<'src>,
-) -> Result<DataflowResult<'src>, VerifyError<'src>> {
+pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyError> {
     // Build CFG structure
     let predecessors = compute_predecessors(func);
 
     // Initialize entry states
-    let mut entry_states: HashMap<String, TypeState<'src>> = HashMap::new();
-    let mut exit_states: HashMap<String, TypeState<'src>> = HashMap::new();
-    let mut edge_states: HashMap<(String, String), TypeState<'src>> = HashMap::new();
+    let mut entry_states: HashMap<String, TypeState> = HashMap::new();
+    let mut exit_states: HashMap<String, TypeState> = HashMap::new();
+    let mut edge_states: HashMap<(String, String), TypeState> = HashMap::new();
 
     // Set entry state for first block (function parameters)
     if let Some(entry_block) = func.blocks.first() {
@@ -121,7 +119,7 @@ pub fn analyze_function<'src>(
 }
 
 /// Compute predecessor blocks for each block
-fn compute_predecessors<'src>(func: &DtalFunction<'src>) -> HashMap<String, Vec<String>> {
+fn compute_predecessors(func: &DtalFunction) -> HashMap<String, Vec<String>> {
     let mut predecessors: HashMap<String, Vec<String>> = HashMap::new();
 
     // Initialize all blocks with empty predecessor lists
@@ -187,11 +185,11 @@ fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> 
 ///
 /// When a block ends with a conditional Branch, the taken edge gets the positive
 /// constraint and the fall-through edge gets the negated constraint.
-fn compute_edge_states<'src>(
-    func: &DtalFunction<'src>,
+fn compute_edge_states(
+    func: &DtalFunction,
     block_index: usize,
-    exit_state: &TypeState<'src>,
-    edge_states: &mut HashMap<(String, String), TypeState<'src>>,
+    exit_state: &TypeState,
+    edge_states: &mut HashMap<(String, String), TypeState>,
 ) {
     let block = &func.blocks[block_index];
     let mut has_jmp = false;
@@ -240,16 +238,16 @@ fn compute_edge_states<'src>(
 ///
 /// Uses per-edge states when available (for branch-refined constraints),
 /// otherwise falls back to the block's exit state.
-fn join_states<'src>(
+fn join_states(
     pred_labels: &[String],
     target_label: &str,
-    exit_states: &HashMap<String, TypeState<'src>>,
-    edge_states: &HashMap<(String, String), TypeState<'src>>,
-) -> Result<TypeState<'src>, VerifyError<'src>> {
+    exit_states: &HashMap<String, TypeState>,
+    edge_states: &HashMap<(String, String), TypeState>,
+) -> Result<TypeState, VerifyError> {
     let mut result = TypeState::new();
 
     // Helper: get the state for a predecessor edge
-    let get_pred_state = |pred_label: &String| -> Option<&TypeState<'src>> {
+    let get_pred_state = |pred_label: &String| -> Option<&TypeState> {
         // Prefer per-edge state if available
         let edge_key = (pred_label.clone(), target_label.to_string());
         edge_states
@@ -269,7 +267,7 @@ fn join_states<'src>(
 
     // For each register, compute join of types
     for reg in all_regs {
-        let mut types: Vec<IType<'src>> = Vec::new();
+        let mut types: Vec<DtalType> = Vec::new();
 
         for label in pred_labels {
             if let Some(state) = get_pred_state(label)
@@ -309,9 +307,9 @@ fn join_states<'src>(
 }
 
 /// Join multiple types into their least upper bound
-fn join_types<'src>(types: &[IType<'src>]) -> IType<'src> {
+fn join_types(types: &[DtalType]) -> DtalType {
     if types.is_empty() {
-        return IType::Int; // Default
+        return DtalType::Int; // Default
     }
 
     if types.len() == 1 {
@@ -320,27 +318,27 @@ fn join_types<'src>(types: &[IType<'src>]) -> IType<'src> {
 
     // Check if all types are the same
     let first = &types[0];
-    if types.iter().all(|t| types_structurally_equal(t, first)) {
+    if types.iter().all(|t| t == first) {
         return first.clone();
     }
 
     // If different singleton ints, generalize to int
     let all_singleton_ints = types
         .iter()
-        .all(|t| matches!(t, IType::SingletonInt(_) | IType::Int));
+        .all(|t| matches!(t, DtalType::SingletonInt(_) | DtalType::Int));
     if all_singleton_ints {
-        return IType::Int;
+        return DtalType::Int;
     }
 
     // If different refined ints, generalize to int
     let all_numeric = types.iter().all(|t| {
         matches!(
             t,
-            IType::Int | IType::SingletonInt(_) | IType::RefinedInt { .. }
+            DtalType::Int | DtalType::SingletonInt(_) | DtalType::RefinedInt { .. }
         )
     });
     if all_numeric {
-        return IType::Int;
+        return DtalType::Int;
     }
 
     // Default: return first type (conservative)
@@ -348,28 +346,8 @@ fn join_types<'src>(types: &[IType<'src>]) -> IType<'src> {
 }
 
 /// Check structural equality of types
-fn types_structurally_equal<'src>(a: &IType<'src>, b: &IType<'src>) -> bool {
-    match (a, b) {
-        (IType::Unit, IType::Unit) => true,
-        (IType::Int, IType::Int) => true,
-        (IType::Bool, IType::Bool) => true,
-        (IType::SingletonInt(va), IType::SingletonInt(vb)) => va == vb,
-        (
-            IType::Array {
-                element_type: ea,
-                size: sa,
-            },
-            IType::Array {
-                element_type: eb,
-                size: sb,
-            },
-        ) => types_structurally_equal(ea, eb) && sa == sb,
-        (IType::Ref(a), IType::Ref(b)) => types_structurally_equal(a, b),
-        (IType::RefMut(a), IType::RefMut(b)) => types_structurally_equal(a, b),
-        (IType::Master(a), IType::Master(b)) => types_structurally_equal(a, b),
-        // Refined types need more sophisticated comparison
-        _ => false,
-    }
+fn types_structurally_equal(a: &DtalType, b: &DtalType) -> bool {
+    a == b
 }
 
 /// Compute exit state by processing all instructions (non-verifying)
@@ -377,10 +355,10 @@ fn types_structurally_equal<'src>(a: &IType<'src>, b: &IType<'src>) -> bool {
 /// This function only updates the type state based on instruction definitions.
 /// It does NOT verify that operands are defined - that's done separately after
 /// the dataflow analysis reaches a fixed point.
-fn compute_exit_state<'src>(
-    block: &DtalBlock<'src>,
-    entry_state: &TypeState<'src>,
-) -> Result<TypeState<'src>, VerifyError<'src>> {
+fn compute_exit_state(
+    block: &DtalBlock,
+    entry_state: &TypeState,
+) -> Result<TypeState, VerifyError> {
     let mut state = entry_state.clone();
 
     for instr in &block.instructions {
@@ -391,14 +369,14 @@ fn compute_exit_state<'src>(
 }
 
 /// Update type state based on instruction definitions (non-verifying)
-fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeState<'src>) {
+fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
     match instr {
         DtalInstr::MovImm { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
         }
         DtalInstr::MovReg { dst, src, ty } => {
             // Use explicit type if provided, otherwise inherit from source
-            let ty = if matches!(ty, IType::Int) {
+            let ty = if matches!(ty, DtalType::Int) {
                 state.register_types.get(src).cloned().unwrap_or(ty.clone())
             } else {
                 ty.clone()
@@ -415,7 +393,7 @@ fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeS
             state.register_types.insert(*dst, ty.clone());
         }
         DtalInstr::SetCC { dst, .. } => {
-            state.register_types.insert(*dst, IType::Bool);
+            state.register_types.insert(*dst, DtalType::Bool);
         }
         DtalInstr::Not { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
@@ -460,7 +438,7 @@ fn update_state_for_instruction<'src>(instr: &DtalInstr<'src>, state: &mut TypeS
 }
 
 /// Check if two type states are equal
-fn states_equal<'src>(a: &TypeState<'src>, b: &TypeState<'src>) -> bool {
+fn states_equal(a: &TypeState, b: &TypeState) -> bool {
     if a.register_types.len() != b.register_types.len() {
         return false;
     }
