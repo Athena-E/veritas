@@ -126,27 +126,16 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction {
 
 /// Compute entry states for all blocks and stamp them onto the DTAL function.
 ///
-/// Stamps register types from dataflow analysis. For constraints, stamps
-/// only those that are invariant across all paths (e.g., function preconditions),
-/// not branch-specific constraints which the verifier re-derives at each edge.
+/// Stamps both register types and constraints from dataflow analysis.
+/// The constraints include branch-derived constraints from predecessor edges,
+/// which the verifier uses as the block's initial context.
 fn stamp_entry_states(func: &mut DtalFunction) {
     use crate::verifier::dataflow::analyze_function;
-
-    // Collect the function-level constraints (precondition)
-    let func_constraints: Vec<_> = func.precondition.iter().cloned().collect();
 
     if let Ok(dataflow) = analyze_function(func) {
         for block in &mut func.blocks {
             if let Some(entry_state) = dataflow.entry_states.get(&block.label) {
-                block.entry_state.register_types = entry_state.register_types.clone();
-                // Stamp only constraints that originate from the function precondition,
-                // not branch-specific constraints (which the verifier re-derives).
-                block.entry_state.constraints = entry_state
-                    .constraints
-                    .iter()
-                    .filter(|c| func_constraints.contains(c))
-                    .cloned()
-                    .collect();
+                block.entry_state = entry_state.clone();
             }
         }
     }

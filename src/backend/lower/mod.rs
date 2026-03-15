@@ -37,6 +37,7 @@ pub use function::lower_function;
 
 use crate::backend::tir::TirProgram;
 use crate::common::tast::TProgram;
+use crate::common::types::IType;
 
 /// Lower a typed program to TIR
 pub fn lower_program<'src>(program: &TProgram<'src>) -> TirProgram<'src> {
@@ -46,5 +47,22 @@ pub fn lower_program<'src>(program: &TProgram<'src>) -> TirProgram<'src> {
             .iter()
             .map(|f| lower_function(f))
             .collect(),
+    }
+}
+
+/// Widen an IType to its base form for phi nodes at join points.
+///
+/// Mutable variables change across iterations/branches, so phi nodes
+/// should use the widened base type rather than a narrow singleton.
+/// - `SingletonInt(n)` → `Int`
+/// - `RefinedInt { base, .. }` → `*base`
+/// - `Unit` → `Int` (unit variables reassigned to int in branches)
+/// - Other types pass through unchanged
+pub fn widen_itype(ty: IType<'_>) -> IType<'_> {
+    match ty {
+        IType::SingletonInt(_) => IType::Int,
+        IType::RefinedInt { base, .. } => base.as_ref().clone(),
+        IType::Unit => IType::Int,
+        other => other,
     }
 }

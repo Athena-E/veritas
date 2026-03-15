@@ -59,6 +59,7 @@ macro_rules! expect_compile_error {
 
 // --- Core language features ---
 verify_example!(e2e_01_simple, "01_simple.veri");
+verify_example!(e2e_02_conditionals, "02_conditionals.veri");
 verify_example!(e2e_05_comparisons, "05_comparisons.veri");
 verify_example!(e2e_06_logical, "06_logical.veri");
 verify_example!(e2e_07_function_calls, "07_function_calls.veri");
@@ -71,6 +72,7 @@ verify_example!(e2e_add, "add.veri");
 
 // --- Arrays ---
 verify_example!(e2e_03_arrays, "03_arrays.veri");
+verify_example!(e2e_15_array_init, "15_array_init.veri");
 
 // --- References ---
 verify_example!(e2e_04_references, "04_references.veri");
@@ -97,81 +99,70 @@ verify_roundtrip!(e2e_roundtrip_07_function_calls, "07_function_calls.veri");
 // Known failures: pre-existing codegen/lowering issues
 // ============================================================================
 
-// Phi node type annotations: loop-carried singleton types (int(0)) conflict with
-// derived types after arithmetic (int). Requires phi type widening at join points.
+// Loop bounds: the for-loop lowering emits `cmp v_cond, 0; bne body` instead
+// of `cmp v_counter, v_end; blt body`. The branch constraint is `v_cond != 0`
+// which doesn't directly establish counter bounds (v_counter < v_end).
+// Fix requires changing the terminator lowering to emit direct comparisons.
 #[test]
-#[ignore = "lowering: phi node singleton type int(0) conflicts with derived int after add"]
-fn e2e_02_conditionals() {
-    let source = include_str!("../src/examples/02_conditionals.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "lowering: phi node singleton type int(0) conflicts with derived int after add"]
+#[ignore = "lowering: for-loop branch constraint doesn't establish counter bounds"]
 fn e2e_14_for_loops() {
     let source = include_str!("../src/examples/14_for_loops.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Loop invariant constraints not provable: loop counter bounds not in context
 #[test]
-#[ignore = "verifier: loop invariant constraint i >= 0 not provable"]
-fn e2e_19_loop_invariant() {
-    let source = include_str!("../src/examples/19_loop_invariant.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "verifier: loop invariant constraint not provable"]
-fn e2e_20_array_loop_invariant() {
-    let source = include_str!("../src/examples/20_array_loop_invariant.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Array store type mismatches: derived singletons or int(1) for bool
-#[test]
-#[ignore = "codegen: array store bool element vs derived int(1)"]
-fn e2e_15_array_init() {
-    let source = include_str!("../src/examples/15_array_init.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "verifier: array bounds not provable after phi type widening"]
+#[ignore = "lowering: loop counter bounds not provable (same root cause as 14)"]
 fn e2e_16_array_assignment() {
     let source = include_str!("../src/examples/16_array_assignment.veri");
     compile_and_verify(source).unwrap();
 }
 
 #[test]
-#[ignore = "verifier: array bounds not provable (precondition constraint mismatch)"]
-fn e2e_selective_invalidation() {
-    let source = include_str!("../src/examples/selective_invalidation.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Complex programs with multiple interacting issues
-#[test]
-#[ignore = "verifier: bounds check not provable (empty constraint context in loop body)"]
+#[ignore = "lowering: loop counter bounds not provable (same root cause as 14)"]
 fn e2e_22_bubble_sort() {
     let source = include_str!("../src/examples/22_bubble_sort.veri");
     compile_and_verify(source).unwrap();
 }
 
 #[test]
-#[ignore = "lowering: phi node singleton type int(-1) conflicts with derived int"]
+#[ignore = "lowering: loop counter bounds not provable (same root cause as 14)"]
 fn e2e_linear_search() {
     let source = include_str!("../src/examples/linear_search.veri");
     compile_and_verify(source).unwrap();
 }
 
+// Loop invariant constraints not provable (depends on counter bounds fix)
 #[test]
-#[ignore = "codegen: refined array return type mismatch"]
+#[ignore = "verifier: loop invariant constraint i >= 0 not provable (needs counter bounds)"]
+fn e2e_19_loop_invariant() {
+    let source = include_str!("../src/examples/19_loop_invariant.veri");
+    compile_and_verify(source).unwrap();
+}
+
+#[test]
+#[ignore = "verifier: loop invariant + quantifier not provable (needs counter bounds)"]
+fn e2e_20_array_loop_invariant() {
+    let source = include_str!("../src/examples/20_array_loop_invariant.veri");
+    compile_and_verify(source).unwrap();
+}
+
+// Precondition constraint uses parameter names that don't match register names
+#[test]
+#[ignore = "verifier: precondition bounds not provable (parameter name mismatch)"]
+fn e2e_selective_invalidation() {
+    let source = include_str!("../src/examples/selective_invalidation.veri");
+    compile_and_verify(source).unwrap();
+}
+
+// Refined array return type lost during element type widening
+#[test]
+#[ignore = "codegen: refined array return type lost by widen_to_base"]
 fn e2e_smt_synthesis() {
     let source = include_str!("../src/examples/smt_synthesis_tests.veri");
     compile_and_verify(source).unwrap();
 }
 
+// Complex postcondition with quantifiers over array contents
 #[test]
 #[ignore = "verifier: postcondition with quantifiers over sorted array"]
 fn e2e_sortedness() {
@@ -179,8 +170,9 @@ fn e2e_sortedness() {
     compile_and_verify(source).unwrap();
 }
 
+// Parser limitation: refined type parsing in round-trip
 #[test]
-#[ignore = "depends on e2e_add roundtrip fix"]
+#[ignore = "parser: refined type parsing fails in round-trip"]
 fn e2e_roundtrip_add() {
     let source = include_str!("../src/examples/add.veri");
     compile_and_verify_roundtrip(source).unwrap();

@@ -556,6 +556,9 @@ pub fn types_compatible_with_constraints(
             a == b || is_constraint_provable(&Constraint::Eq(a.clone(), b.clone()), constraints)
         }
         (DtalType::SingletonInt(_), DtalType::Int) => true,
+        // At the DTAL level, booleans are integers 0/1
+        (DtalType::SingletonInt(IndexExpr::Const(0 | 1)), DtalType::Bool) => true,
+        (DtalType::Bool, DtalType::SingletonInt(IndexExpr::Const(0 | 1))) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
         (DtalType::SingletonInt(_), DtalType::RefinedInt { base, .. }) => {
             // A singleton is compatible with a refined type if it's compatible with the base

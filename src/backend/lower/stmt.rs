@@ -6,6 +6,7 @@
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
+use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::negate_constraint;
 use crate::backend::tir::{
     BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
@@ -215,9 +216,11 @@ fn lower_for_loop<'src>(
     let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
     for (name, &before_reg) in &vars_before_loop {
         if name != var {
-            // Create phi node for this variable
+            // Create phi node for this variable.
+            // Widen the type to its base since the variable may change
+            // across iterations (e.g., int(0) after init → int after add).
             let phi_reg = ctx.fresh_reg();
-            let var_ty = ctx.lookup_var_type(name);
+            let var_ty = widen_itype(ctx.lookup_var_type(name));
             let mut phi = PhiNode::new(phi_reg, var_ty);
             phi.add_incoming(entry_block, before_reg);
             ctx.emit_phi(phi);

@@ -5,6 +5,7 @@
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
+use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::backend::tir::{
     BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
@@ -534,9 +535,11 @@ pub fn lower_if_expr<'src>(
     // 6. Create merge block with phi nodes
     ctx.start_block(merge_block);
 
-    // Create phi node for the result value
+    // Create phi node for the result value.
+    // Widen the type for join points (e.g., Unit → Int when branches
+    // produce different value types).
     let result_reg = ctx.fresh_reg();
-    let mut result_phi = PhiNode::new(result_reg, ty.clone());
+    let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
     result_phi.add_incoming(then_end_block, then_result);
     result_phi.add_incoming(else_end_block, else_result);
     ctx.emit_phi(result_phi);
@@ -616,7 +619,7 @@ fn create_phi_nodes_for_modified_vars<'src>(
         if then_reg != else_reg {
             // Need a phi node
             let phi_dst = ctx.fresh_reg();
-            let var_ty = ctx.lookup_var_type(name);
+            let var_ty = widen_itype(ctx.lookup_var_type(name));
             let mut phi = PhiNode::new(phi_dst, var_ty.clone());
             phi.add_incoming(then_block, then_reg);
             phi.add_incoming(else_block, else_reg);
