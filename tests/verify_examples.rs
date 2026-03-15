@@ -91,26 +91,9 @@ verify_roundtrip!(e2e_roundtrip_add, "add.veri");
 // Feature-dependent: need array store/select axioms in constraint domain
 // ============================================================================
 
-#[test]
-#[ignore = "feature: quantified loop invariant over array contents needs Select reasoning"]
-fn e2e_20_array_loop_invariant() {
-    let source = include_str!("../src/examples/20_array_loop_invariant.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "feature: precondition depends on array element value after store"]
-fn e2e_selective_invalidation() {
-    let source = include_str!("../src/examples/selective_invalidation.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "feature: postcondition quantifier over sorted array contents"]
-fn e2e_sortedness() {
-    let source = include_str!("../src/examples/sortedness.veri");
-    compile_and_verify(source).unwrap();
-}
+verify_example!(e2e_20_array_loop_invariant, "20_array_loop_invariant.veri");
+verify_example!(e2e_selective_invalidation, "selective_invalidation.veri");
+verify_example!(e2e_sortedness, "sortedness.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation (30 tests)

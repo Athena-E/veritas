@@ -429,8 +429,8 @@ fn test_pipeline_function_with_inequality_postcondition() {
         "DTAL output should contain .postcondition directive"
     );
     assert!(
-        output.contains("result > 0"),
-        "Postcondition should show result > 0"
+        output.contains("> 0"),
+        "Postcondition should show > 0 (result substituted with register name)"
     );
 
     println!(

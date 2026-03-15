@@ -100,6 +100,24 @@ pub fn verify_instruction(
 
         DtalInstr::Alloca { dst, size: _, ty } => {
             state.register_types.insert(*dst, ty.clone());
+            // For array allocations, emit zero-initialization axioms:
+            // forall k in 0..size { arr_0[k] == 0 }
+            if let DtalType::Array { size, .. } = ty {
+                state.array_versions.insert(*dst, 0);
+                let arr_name = versioned_array_name(dst, 0);
+                state.constraints.push(Constraint::Forall {
+                    var: "_k".to_string(),
+                    lower: IndexExpr::Const(0),
+                    upper: size.clone(),
+                    body: Box::new(Constraint::Eq(
+                        IndexExpr::Select(
+                            arr_name,
+                            Box::new(IndexExpr::Var("_k".to_string())),
+                        ),
+                        IndexExpr::Const(0),
+                    )),
+                });
+            }
         }
 
         // Call: derive return type from callee's declared signature
@@ -110,17 +128,55 @@ pub fn verify_instruction(
 
             let derived_return_ty =
                 if let Some(callee) = program.functions.iter().find(|f| &f.name == target) {
-                    // Check callee's precondition if available
-                    if let Some(precond) = &callee.precondition
-                        && !is_constraint_provable(precond, &state.constraints)
-                    {
-                        return Err(VerifyError::PreconditionFailed {
-                            block: block_label.to_string(),
-                            callee: target.clone(),
-                            constraint: precond.clone(),
-                            context: state.constraints.clone(),
-                        });
+                    // Check callee's precondition if available.
+                    // Substitute callee's virtual param registers with physical
+                    // param registers (r0, r1, ...) since the caller has placed
+                    // arguments there before the call.
+                    if let Some(precond) = &callee.precondition {
+                        let param_regs = PhysicalReg::param_regs();
+                        let param_subs: std::collections::HashMap<String, String> = callee
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i < param_regs.len())
+                            .map(|(i, (reg, _))| {
+                                (format!("{}", reg), format!("{}", param_regs[i]))
+                            })
+                            .collect();
+                        let mut substituted = substitute_select_names(precond, &param_subs);
+                        // Also substitute Var references for param registers
+                        substituted =
+                            substitute_var_names_in_constraint(&substituted, &param_subs);
+                        // Version-substitute array Select names
+                        substituted =
+                            version_substitute_constraint(&substituted, &state.array_versions);
+
+                        if !is_constraint_provable(&substituted, &state.constraints) {
+                            return Err(VerifyError::PreconditionFailed {
+                                block: block_label.to_string(),
+                                callee: target.clone(),
+                                constraint: precond.clone(),
+                                context: state.constraints.clone(),
+                            });
+                        }
                     }
+
+                    // Propagate callee's postcondition to caller's constraint context.
+                    // Substitute "result" and callee param names with physical regs,
+                    // then version-substitute array names.
+                    if let Some(postcond) = &callee.postcondition {
+                        let r0_name = format!("{}", PhysicalReg::R0);
+                        let mut postcond_subs: std::collections::HashMap<String, String> =
+                            std::collections::HashMap::new();
+                        postcond_subs.insert("result".to_string(), r0_name);
+                        let mut substituted = substitute_select_names(postcond, &postcond_subs);
+                        substituted =
+                            substitute_var_names_in_constraint(&substituted, &postcond_subs);
+                        substituted =
+                            version_substitute_constraint(&substituted, &state.array_versions);
+                        state.constraints.push(substituted);
+                    }
+
                     // Derive return type from callee's declared signature
                     callee.return_type.clone()
                 } else {
@@ -183,9 +239,33 @@ fn verify_mov_reg(
     let src_ty = get_register_type(src, state, block_label)?;
     let derived_ty = src_ty.clone();
 
-    // Link dst to src's index if singleton
-    if let DtalType::SingletonInt(ref idx) = derived_ty {
-        add_register_index_constraint(dst, idx, state);
+    match &derived_ty {
+        // Singleton: link dst to the concrete index expression
+        DtalType::SingletonInt(idx) => {
+            add_register_index_constraint(dst, idx, state);
+        }
+        // Scalar types: link dst to src register variable
+        DtalType::Int | DtalType::RefinedInt { .. } | DtalType::Bool => {
+            let src_idx = extract_index(&derived_ty, &src);
+            add_register_index_constraint(dst, &src_idx, state);
+        }
+        // Array: copy version and emit linking constraint
+        DtalType::Array { size, .. } => {
+            let src_version = state.array_versions.get(&src).copied().unwrap_or(0);
+            state.array_versions.insert(dst, 0);
+            let src_name = versioned_array_name(&src, src_version);
+            let dst_name = versioned_array_name(&dst, 0);
+            state.constraints.push(Constraint::Forall {
+                var: "_k".to_string(),
+                lower: IndexExpr::Const(0),
+                upper: size.clone(),
+                body: Box::new(Constraint::Eq(
+                    IndexExpr::Select(dst_name, Box::new(IndexExpr::Var("_k".to_string()))),
+                    IndexExpr::Select(src_name, Box::new(IndexExpr::Var("_k".to_string()))),
+                )),
+            });
+        }
+        _ => {}
     }
 
     state.register_types.insert(dst, derived_ty);
@@ -334,11 +414,12 @@ fn verify_load(
         size,
     } = &base_ty
     {
-        // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
+
+        // Construct bounds constraint: 0 <= offset < size
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
-            Box::new(Constraint::Lt(offset_expr, size.clone())),
+            Box::new(Constraint::Lt(offset_expr.clone(), size.clone())),
         );
 
         if !is_constraint_provable(&bounds_constraint, &state.constraints) {
@@ -353,6 +434,15 @@ fn verify_load(
         // Derive element type from array base — don't trust annotation
         let derived_ty = element_type.as_ref().clone();
         state.register_types.insert(dst, derived_ty);
+
+        // Emit select constraint: dst == current_arr[offset]
+        let current_version = state.array_versions.get(&base).copied().unwrap_or(0);
+        let arr_name = versioned_array_name(&base, current_version);
+        let dst_expr = reg_to_index_expr(&dst);
+        state.constraints.push(Constraint::Eq(
+            dst_expr,
+            IndexExpr::Select(arr_name, Box::new(offset_expr)),
+        ));
     } else {
         // Non-array base: no element type to derive from, trust annotation
         state.register_types.insert(dst, ty.clone());
@@ -362,6 +452,10 @@ fn verify_load(
 }
 
 /// Verify store instruction
+///
+/// After bounds and type checks, emits array store axioms:
+/// - **Write axiom**: `new_arr[offset] == src_value`
+/// - **Frame axiom**: `forall k. k != offset → new_arr[k] == old_arr[k]`
 fn verify_store(
     base: Reg,
     offset: Reg,
@@ -373,17 +467,18 @@ fn verify_store(
     let _offset_ty = get_register_type(offset, state, block_label)?;
     let src_ty = get_register_type(src, state, block_label)?;
 
-    // If base has an array type, perform bounds checking
+    // If base has an array type, perform bounds checking and emit axioms
     if let DtalType::Array {
         element_type,
         size,
     } = &base_ty
     {
-        // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
+
+        // Construct bounds constraint: 0 <= offset < size
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
-            Box::new(Constraint::Lt(offset_expr, size.clone())),
+            Box::new(Constraint::Lt(offset_expr.clone(), size.clone())),
         );
 
         if !is_constraint_provable(&bounds_constraint, &state.constraints) {
@@ -401,12 +496,55 @@ fn verify_store(
                 block: block_label.to_string(),
                 instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
                 expected: element_type.as_ref().clone(),
-                actual: src_ty,
+                actual: src_ty.clone(),
             });
         }
+
+        // Emit array store axioms (versioned array names)
+        let old_version = state.array_versions.get(&base).copied().unwrap_or(0);
+        let old_name = versioned_array_name(&base, old_version);
+        let new_version = old_version + 1;
+        let new_name = versioned_array_name(&base, new_version);
+        state.array_versions.insert(base, new_version);
+
+        let src_idx = extract_index(&src_ty, &src);
+
+        // Write axiom: new_arr[offset] == src_value
+        state.constraints.push(Constraint::Eq(
+            IndexExpr::Select(new_name.clone(), Box::new(offset_expr.clone())),
+            src_idx,
+        ));
+
+        // Frame axiom: forall k. k != offset → new_arr[k] == old_arr[k]
+        state.constraints.push(Constraint::Forall {
+            var: "_k".to_string(),
+            lower: IndexExpr::Const(0),
+            upper: size.clone(),
+            body: Box::new(Constraint::Implies(
+                Box::new(Constraint::Ne(
+                    IndexExpr::Var("_k".to_string()),
+                    offset_expr,
+                )),
+                Box::new(Constraint::Eq(
+                    IndexExpr::Select(
+                        new_name,
+                        Box::new(IndexExpr::Var("_k".to_string())),
+                    ),
+                    IndexExpr::Select(
+                        old_name,
+                        Box::new(IndexExpr::Var("_k".to_string())),
+                    ),
+                )),
+            )),
+        });
     }
 
     Ok(())
+}
+
+/// Get the versioned array name for a register
+fn versioned_array_name(reg: &Reg, version: u32) -> String {
+    format!("{}_{}", reg, version)
 }
 
 /// Verify cmp instruction
@@ -689,6 +827,243 @@ fn add_register_index_constraint(reg: Reg, idx: &IndexExpr, state: &mut TypeStat
         state
             .constraints
             .push(Constraint::Eq(reg_expr, idx.clone()));
+    }
+}
+
+/// Substitute unversioned array Select names with their current versioned names.
+///
+/// For each `Select(name, idx)` in the constraint, if `name` matches a register
+/// with a known array version, replace `name` with the versioned form (e.g., "v0" → "v0_3").
+pub fn version_substitute_constraint(
+    constraint: &Constraint,
+    array_versions: &std::collections::HashMap<Reg, u32>,
+) -> Constraint {
+    let subs: std::collections::HashMap<String, String> = array_versions
+        .iter()
+        .map(|(reg, ver)| (format!("{}", reg), format!("{}_{}", reg, ver)))
+        .collect();
+    substitute_select_names(constraint, &subs)
+}
+
+/// Recursively substitute Select names in a constraint
+fn substitute_select_names(
+    constraint: &Constraint,
+    subs: &std::collections::HashMap<String, String>,
+) -> Constraint {
+    match constraint {
+        Constraint::True | Constraint::False => constraint.clone(),
+        Constraint::Eq(l, r) => Constraint::Eq(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Lt(l, r) => Constraint::Lt(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Le(l, r) => Constraint::Le(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Gt(l, r) => Constraint::Gt(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Ge(l, r) => Constraint::Ge(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Ne(l, r) => Constraint::Ne(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::And(l, r) => Constraint::And(
+            Box::new(substitute_select_names(l, subs)),
+            Box::new(substitute_select_names(r, subs)),
+        ),
+        Constraint::Or(l, r) => Constraint::Or(
+            Box::new(substitute_select_names(l, subs)),
+            Box::new(substitute_select_names(r, subs)),
+        ),
+        Constraint::Not(c) => Constraint::Not(Box::new(substitute_select_names(c, subs))),
+        Constraint::Implies(l, r) => Constraint::Implies(
+            Box::new(substitute_select_names(l, subs)),
+            Box::new(substitute_select_names(r, subs)),
+        ),
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Forall {
+            var: var.clone(),
+            lower: substitute_select_in_index(lower, subs),
+            upper: substitute_select_in_index(upper, subs),
+            body: Box::new(substitute_select_names(body, subs)),
+        },
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Exists {
+            var: var.clone(),
+            lower: substitute_select_in_index(lower, subs),
+            upper: substitute_select_in_index(upper, subs),
+            body: Box::new(substitute_select_names(body, subs)),
+        },
+    }
+}
+
+/// Substitute Select names in an index expression
+fn substitute_select_in_index(
+    expr: &IndexExpr,
+    subs: &std::collections::HashMap<String, String>,
+) -> IndexExpr {
+    match expr {
+        IndexExpr::Const(_) | IndexExpr::Var(_) => expr.clone(),
+        IndexExpr::Add(l, r) => IndexExpr::Add(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Sub(l, r) => IndexExpr::Sub(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Mul(l, r) => IndexExpr::Mul(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Div(l, r) => IndexExpr::Div(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Select(name, idx) => {
+            let new_name = subs.get(name).cloned().unwrap_or_else(|| name.clone());
+            IndexExpr::Select(new_name, Box::new(substitute_select_in_index(idx, subs)))
+        }
+    }
+}
+
+/// Substitute Var names in a constraint (for register name remapping)
+fn substitute_var_names_in_constraint(
+    constraint: &Constraint,
+    subs: &std::collections::HashMap<String, String>,
+) -> Constraint {
+    match constraint {
+        Constraint::True | Constraint::False => constraint.clone(),
+        Constraint::Eq(l, r) => Constraint::Eq(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Lt(l, r) => Constraint::Lt(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Le(l, r) => Constraint::Le(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Gt(l, r) => Constraint::Gt(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Ge(l, r) => Constraint::Ge(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Ne(l, r) => Constraint::Ne(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::And(l, r) => Constraint::And(
+            Box::new(substitute_var_names_in_constraint(l, subs)),
+            Box::new(substitute_var_names_in_constraint(r, subs)),
+        ),
+        Constraint::Or(l, r) => Constraint::Or(
+            Box::new(substitute_var_names_in_constraint(l, subs)),
+            Box::new(substitute_var_names_in_constraint(r, subs)),
+        ),
+        Constraint::Not(c) => {
+            Constraint::Not(Box::new(substitute_var_names_in_constraint(c, subs)))
+        }
+        Constraint::Implies(l, r) => Constraint::Implies(
+            Box::new(substitute_var_names_in_constraint(l, subs)),
+            Box::new(substitute_var_names_in_constraint(r, subs)),
+        ),
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => {
+            // Don't substitute the bound variable
+            let filtered: std::collections::HashMap<String, String> = subs
+                .iter()
+                .filter(|(k, _)| *k != var)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            Constraint::Forall {
+                var: var.clone(),
+                lower: substitute_var_in_index(lower, subs),
+                upper: substitute_var_in_index(upper, subs),
+                body: Box::new(substitute_var_names_in_constraint(body, &filtered)),
+            }
+        }
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => {
+            let filtered: std::collections::HashMap<String, String> = subs
+                .iter()
+                .filter(|(k, _)| *k != var)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            Constraint::Exists {
+                var: var.clone(),
+                lower: substitute_var_in_index(lower, subs),
+                upper: substitute_var_in_index(upper, subs),
+                body: Box::new(substitute_var_names_in_constraint(body, &filtered)),
+            }
+        }
+    }
+}
+
+/// Substitute Var names in an index expression
+fn substitute_var_in_index(
+    expr: &IndexExpr,
+    subs: &std::collections::HashMap<String, String>,
+) -> IndexExpr {
+    match expr {
+        IndexExpr::Const(_) => expr.clone(),
+        IndexExpr::Var(name) => {
+            if let Some(new_name) = subs.get(name) {
+                IndexExpr::Var(new_name.clone())
+            } else {
+                expr.clone()
+            }
+        }
+        IndexExpr::Add(l, r) => IndexExpr::Add(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Sub(l, r) => IndexExpr::Sub(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Mul(l, r) => IndexExpr::Mul(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Div(l, r) => IndexExpr::Div(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Select(name, idx) => {
+            let new_name = subs.get(name).cloned().unwrap_or_else(|| name.clone());
+            IndexExpr::Select(new_name, Box::new(substitute_var_in_index(idx, subs)))
+        }
     }
 }
 

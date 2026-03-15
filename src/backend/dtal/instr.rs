@@ -29,6 +29,14 @@ pub struct TypeState {
     /// Typed stack (Xi & Harper's `S = τ :: S`).
     /// Top of stack is the last element.
     pub stack: Vec<DtalType>,
+    /// Array version tracking for store/select axioms.
+    /// Each store to an array register increments its version,
+    /// creating a new uninterpreted function name in the constraint domain.
+    pub array_versions: HashMap<Reg, u32>,
+    /// Frontend-proven assertions (e.g., loop invariants) that survive joins.
+    /// Taken as union across predecessors since they've been verified by the
+    /// frontend typechecker and are safe to assume at join points.
+    pub proven_assertions: Vec<Constraint>,
 }
 
 impl TypeState {
@@ -38,6 +46,8 @@ impl TypeState {
             constraints: Vec::new(),
             last_cmp: None,
             stack: Vec::new(),
+            array_versions: HashMap::new(),
+            proven_assertions: Vec::new(),
         }
     }
 }

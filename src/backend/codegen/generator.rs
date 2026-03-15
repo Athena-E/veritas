@@ -87,6 +87,15 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction {
         .map(|(name, (vreg, _))| (name.clone(), format!("{}", Reg::Virtual(*vreg))))
         .collect();
 
+    // Add "result" → return value register mapping for postcondition substitution
+    for block in func.blocks.values() {
+        if let Terminator::Return { value: Some(vreg) } = &block.terminator {
+            ctx.var_subs
+                .push(("result".to_string(), format!("{}", Reg::Virtual(*vreg))));
+            break;
+        }
+    }
+
     // Pre-generate labels for all blocks
     for block_id in func.blocks.keys() {
         ctx.label_for_block(*block_id);

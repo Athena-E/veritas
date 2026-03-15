@@ -161,6 +161,14 @@ fn verify_block_derivation(
 ) -> Result<(), VerifyError> {
     let mut state = block.entry_state.clone();
 
+    // Add proven assertions (e.g., loop invariants) to the constraint context.
+    // These survive joins because the frontend typechecker has verified them.
+    for assertion in &state.proven_assertions {
+        if !state.constraints.contains(assertion) {
+            state.constraints.push(assertion.clone());
+        }
+    }
+
     // Seed constraint context with register-to-index equalities from the
     // entry state. This re-establishes the linkage between register names
     // and their index expressions so Z3 can reason about bounds checks.
@@ -276,14 +284,17 @@ fn verify_return(
         }
     }
 
-    if let Some(postcond) = &func.postcondition
-        && !checker::is_constraint_provable(postcond, &state.constraints)
-    {
-        return Err(VerifyError::PostconditionFailed {
-            function: func.name.clone(),
-            constraint: postcond.clone(),
-            context: state.constraints.clone(),
-        });
+    if let Some(postcond) = &func.postcondition {
+        // Version-substitute Select names so the postcondition references
+        // the latest versioned array names (e.g., "v0" → "v0_6").
+        let versioned = checker::version_substitute_constraint(postcond, &state.array_versions);
+        if !checker::is_constraint_provable(&versioned, &state.constraints) {
+            return Err(VerifyError::PostconditionFailed {
+                function: func.name.clone(),
+                constraint: postcond.clone(),
+                context: state.constraints.clone(),
+            });
+        }
     }
 
     Ok(())

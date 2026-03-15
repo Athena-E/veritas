@@ -10,7 +10,7 @@ use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use crate::verifier::checker::{constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Result of dataflow analysis
 #[allow(dead_code)]
@@ -288,21 +288,72 @@ fn join_states(
         }
     }
 
-    // Join constraints - take intersection (constraints true on all paths)
-    // For simplicity, start with first predecessor's constraints
-    if let Some(first_label) = pred_labels.first()
-        && let Some(first_state) = get_pred_state(first_label)
-    {
-        let first_constraints = first_state.constraints.clone();
-        // Only keep constraints that appear in all predecessors
-        for constraint in &first_constraints {
-            let in_all = pred_labels.iter().skip(1).all(|label| {
-                get_pred_state(label)
-                    .map(|s| s.constraints.contains(constraint))
-                    .unwrap_or(false)
-            });
-            if in_all {
-                result.constraints.push(constraint.clone());
+    // Join constraints: keep constraints provable from ALL predecessors.
+    // First, do fast syntactic intersection (constraints in all predecessors).
+    // Then, for constraints in some but not all predecessors, use Z3 to check
+    // if they're provable from the other predecessors' contexts (e.g., a loop
+    // invariant that's vacuously true on the entry edge).
+    use std::collections::HashSet;
+    let mut kept: HashSet<usize> = HashSet::new();
+
+    // Collect all unique constraints from all predecessors
+    let mut all_constraints: Vec<crate::backend::dtal::constraints::Constraint> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for label in pred_labels {
+        if let Some(state) = get_pred_state(label) {
+            for c in &state.constraints {
+                let key = format!("{:?}", c);
+                if seen.insert(key) {
+                    all_constraints.push(c.clone());
+                }
+            }
+        }
+    }
+
+    for (idx, constraint) in all_constraints.iter().enumerate() {
+        let provable_from_all = pred_labels.iter().all(|label| {
+            get_pred_state(label)
+                .map(|s| {
+                    s.constraints.contains(constraint)
+                        || crate::verifier::checker::is_constraint_provable(
+                            constraint,
+                            &s.constraints,
+                        )
+                })
+                .unwrap_or(false)
+        });
+        if provable_from_all {
+            kept.insert(idx);
+        }
+    }
+
+    for idx in 0..all_constraints.len() {
+        if kept.contains(&idx) {
+            result.constraints.push(all_constraints[idx].clone());
+        }
+    }
+
+    // Join array versions - take max to ensure fresh names for future stores
+    for label in pred_labels {
+        if let Some(state) = get_pred_state(label) {
+            for (reg, version) in &state.array_versions {
+                let current = result.array_versions.get(reg).copied().unwrap_or(0);
+                if *version > current {
+                    result.array_versions.insert(*reg, *version);
+                }
+            }
+        }
+    }
+
+    // Join proven assertions - take union (these are frontend-verified)
+    let mut seen_assertions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for label in pred_labels {
+        if let Some(state) = get_pred_state(label) {
+            for assertion in &state.proven_assertions {
+                let key = format!("{:?}", assertion);
+                if seen_assertions.insert(key) {
+                    result.proven_assertions.push(assertion.clone());
+                }
             }
         }
     }
@@ -476,9 +527,13 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .unwrap_or(DtalType::Int);
             state.stack.push(src_ty);
         }
-        DtalInstr::Store { .. }
-        | DtalInstr::ConstraintAssert { .. }
-        | DtalInstr::Jmp { .. }
+        DtalInstr::Store { .. } => {}
+        DtalInstr::ConstraintAssert { constraint, .. } => {
+            // Propagate proven assertions through the dataflow.
+            state.constraints.push(constraint.clone());
+            state.proven_assertions.push(constraint.clone());
+        }
+        DtalInstr::Jmp { .. }
         | DtalInstr::Branch { .. }
         | DtalInstr::Ret => {}
     }
@@ -501,9 +556,13 @@ fn states_equal(a: &TypeState, b: &TypeState) -> bool {
         }
     }
 
-    // Also check constraints and stack
+    // Also check constraints, stack, and proven assertions
     a.constraints.len() == b.constraints.len()
         && a.constraints.iter().all(|c| b.constraints.contains(c))
         && a.stack.len() == b.stack.len()
         && a.stack.iter().zip(&b.stack).all(|(a, b)| a == b)
+        && a.proven_assertions.len() == b.proven_assertions.len()
+        && a.proven_assertions
+            .iter()
+            .all(|c| b.proven_assertions.contains(c))
 }
