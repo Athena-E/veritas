@@ -16,18 +16,14 @@ fn compile_and_verify(source: &str) -> Result<(), String> {
 /// Compile source and verify the DTAL text round-trip (emit → parse → verify)
 fn compile_and_verify_roundtrip(source: &str) -> Result<(), String> {
     let output = compile_verbose(source).map_err(|e| format!("Compilation failed: {}", e))?;
-
-    // First: verify the in-memory program
     verify_dtal(&output.dtal_program)
         .map_err(|e| format!("Verification failed (in-memory): {}", e))?;
-
-    // Second: verify via text round-trip (emit → parse → verify)
     veritas::verifier::verify_dtal_text(&output.dtal)
         .map_err(|e| format!("Verification failed (text round-trip): {}", e))
 }
 
 // ============================================================================
-// Success cases: these programs should compile and verify
+// Success cases: compile + verify
 // ============================================================================
 
 macro_rules! verify_example {
@@ -56,11 +52,7 @@ macro_rules! expect_compile_error {
         fn $name() {
             let source = include_str!(concat!("../src/examples/errors/", $file));
             let result = compile_verbose(source);
-            assert!(
-                result.is_err(),
-                "{}: expected compilation error but succeeded",
-                $file
-            );
+            assert!(result.is_err(), "{}: expected compilation error but succeeded", $file);
         }
     };
 }
@@ -69,6 +61,7 @@ macro_rules! expect_compile_error {
 verify_example!(e2e_01_simple, "01_simple.veri");
 verify_example!(e2e_05_comparisons, "05_comparisons.veri");
 verify_example!(e2e_06_logical, "06_logical.veri");
+verify_example!(e2e_07_function_calls, "07_function_calls.veri");
 verify_example!(e2e_08_mutable, "08_mutable.veri");
 verify_example!(e2e_09_complex_expressions, "09_complex_expressions.veri");
 verify_example!(e2e_11_unary_not, "11_unary_not.veri");
@@ -98,75 +91,31 @@ verify_example!(e2e_smt_minimal, "smt_minimal_annotations.veri");
 
 // --- Text round-trip (emit → parse → verify) ---
 verify_roundtrip!(e2e_roundtrip_01_simple, "01_simple.veri");
+verify_roundtrip!(e2e_roundtrip_07_function_calls, "07_function_calls.veri");
 
 // ============================================================================
-// Known failures: pre-existing codegen issues exposed by derivation-based
-// verification. Each documents the root cause for future fixing.
+// Known failures: pre-existing codegen/lowering issues
 // ============================================================================
 
-// Phi node type annotations widen array types to Int incorrectly
+// Phi node type annotations: loop-carried singleton types (int(0)) conflict with
+// derived types after arithmetic (int). Requires phi type widening at join points.
 #[test]
-#[ignore = "codegen: phi node TypeAnnotation narrows array type to int"]
-fn e2e_22_bubble_sort() {
-    let source = include_str!("../src/examples/22_bubble_sort.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "codegen: phi node TypeAnnotation narrows array type to int"]
-fn e2e_linear_search() {
-    let source = include_str!("../src/examples/linear_search.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Constraint propagation: register-index linkage doesn't reach target blocks
-#[test]
-#[ignore = "codegen: constraint v3==0 not provable across jump edges"]
+#[ignore = "lowering: phi node singleton type int(0) conflicts with derived int after add"]
 fn e2e_02_conditionals() {
     let source = include_str!("../src/examples/02_conditionals.veri");
     compile_and_verify(source).unwrap();
 }
 
 #[test]
-#[ignore = "codegen: constraint v3==0 not provable across jump edges"]
+#[ignore = "lowering: phi node singleton type int(0) conflicts with derived int after add"]
 fn e2e_14_for_loops() {
     let source = include_str!("../src/examples/14_for_loops.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Return type: unit function has derived int in r0
+// Loop invariant constraints not provable: loop counter bounds not in context
 #[test]
-#[ignore = "codegen: unit-returning function has derived int type in r0"]
-fn e2e_07_function_calls() {
-    let source = include_str!("../src/examples/07_function_calls.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Array store: element type mismatch with derived singleton types
-#[test]
-#[ignore = "codegen: array store element type mismatch (bool vs int(1))"]
-fn e2e_15_array_init() {
-    let source = include_str!("../src/examples/15_array_init.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "codegen: array store element type mismatch with derived singletons"]
-fn e2e_16_array_assignment() {
-    let source = include_str!("../src/examples/16_array_assignment.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "codegen: array store element type mismatch with derived singletons"]
-fn e2e_selective_invalidation() {
-    let source = include_str!("../src/examples/selective_invalidation.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Loop invariant constraint propagation
-#[test]
-#[ignore = "verifier: loop invariant constraint not provable (i >= 0)"]
+#[ignore = "verifier: loop invariant constraint i >= 0 not provable"]
 fn e2e_19_loop_invariant() {
     let source = include_str!("../src/examples/19_loop_invariant.veri");
     compile_and_verify(source).unwrap();
@@ -179,38 +128,66 @@ fn e2e_20_array_loop_invariant() {
     compile_and_verify(source).unwrap();
 }
 
+// Array store type mismatches: derived singletons or int(1) for bool
+#[test]
+#[ignore = "codegen: array store bool element vs derived int(1)"]
+fn e2e_15_array_init() {
+    let source = include_str!("../src/examples/15_array_init.veri");
+    compile_and_verify(source).unwrap();
+}
+
+#[test]
+#[ignore = "verifier: array bounds not provable after phi type widening"]
+fn e2e_16_array_assignment() {
+    let source = include_str!("../src/examples/16_array_assignment.veri");
+    compile_and_verify(source).unwrap();
+}
+
+#[test]
+#[ignore = "verifier: array bounds not provable (precondition constraint mismatch)"]
+fn e2e_selective_invalidation() {
+    let source = include_str!("../src/examples/selective_invalidation.veri");
+    compile_and_verify(source).unwrap();
+}
+
 // Complex programs with multiple interacting issues
 #[test]
-#[ignore = "codegen: refined array element type mismatch (init vs smt)"]
+#[ignore = "verifier: bounds check not provable (empty constraint context in loop body)"]
+fn e2e_22_bubble_sort() {
+    let source = include_str!("../src/examples/22_bubble_sort.veri");
+    compile_and_verify(source).unwrap();
+}
+
+#[test]
+#[ignore = "lowering: phi node singleton type int(-1) conflicts with derived int"]
+fn e2e_linear_search() {
+    let source = include_str!("../src/examples/linear_search.veri");
+    compile_and_verify(source).unwrap();
+}
+
+#[test]
+#[ignore = "codegen: refined array return type mismatch"]
 fn e2e_smt_synthesis() {
     let source = include_str!("../src/examples/smt_synthesis_tests.veri");
     compile_and_verify(source).unwrap();
 }
 
 #[test]
-#[ignore = "codegen: postcondition with quantifiers over sorted array"]
+#[ignore = "verifier: postcondition with quantifiers over sorted array"]
 fn e2e_sortedness() {
     let source = include_str!("../src/examples/sortedness.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Round-trip failures (depend on the same underlying issues)
 #[test]
-#[ignore = "depends on e2e_add fix (unit return type)"]
+#[ignore = "depends on e2e_add roundtrip fix"]
 fn e2e_roundtrip_add() {
     let source = include_str!("../src/examples/add.veri");
     compile_and_verify_roundtrip(source).unwrap();
 }
 
-#[test]
-#[ignore = "depends on e2e_07_function_calls fix"]
-fn e2e_roundtrip_07_function_calls() {
-    let source = include_str!("../src/examples/07_function_calls.veri");
-    compile_and_verify_roundtrip(source).unwrap();
-}
-
 // ============================================================================
-// Error cases: these programs should fail during compilation (not reach DTAL)
+// Error cases: should fail during compilation
 // ============================================================================
 
 expect_compile_error!(e2e_err_01_type_mismatch, "01_type_mismatch.veri");

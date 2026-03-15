@@ -248,16 +248,27 @@ fn verify_return(
     state: &TypeState,
 ) -> Result<(), VerifyError> {
     use crate::backend::dtal::regs::{PhysicalReg, Reg};
+    use crate::backend::dtal::types::DtalType;
 
-    let return_reg = Reg::Physical(PhysicalReg::R0);
-    if let Some(actual_type) = state.register_types.get(&return_reg)
-        && !types_compatible_with_constraints(actual_type, &func.return_type, &state.constraints)
-    {
-        return Err(VerifyError::ReturnTypeMismatch {
-            function: func.name.clone(),
-            expected: func.return_type.clone(),
-            actual: actual_type.clone(),
-        });
+    // Unit-returning functions don't use r0 for the return value.
+    // r0 may contain a stale type from a prior call instruction.
+    if func.return_type == DtalType::Unit {
+        // Skip r0 check for unit returns — no value to verify
+    } else {
+        let return_reg = Reg::Physical(PhysicalReg::R0);
+        if let Some(actual_type) = state.register_types.get(&return_reg)
+            && !types_compatible_with_constraints(
+                actual_type,
+                &func.return_type,
+                &state.constraints,
+            )
+        {
+            return Err(VerifyError::ReturnTypeMismatch {
+                function: func.name.clone(),
+                expected: func.return_type.clone(),
+                actual: actual_type.clone(),
+            });
+        }
     }
 
     if let Some(postcond) = &func.postcondition

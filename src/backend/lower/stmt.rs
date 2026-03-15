@@ -67,13 +67,13 @@ fn lower_let<'src>(
     ctx: &mut LoweringContext<'src>,
     name: &str,
     value: &Spanned<TExpr<'src>>,
-    _ty: &IType<'src>,
+    ty: &IType<'src>,
 ) {
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
 
-    // Bind the variable name to this register
-    ctx.bind_var(name, value_reg);
+    // Bind the variable name to this register with its type
+    ctx.bind_var_typed(name, value_reg, ty.clone());
 }
 
 /// Lower an assignment statement
@@ -97,8 +97,8 @@ fn lower_assignment<'src>(
                 ty: rhs.0.get_type().clone(),
             });
 
-            // Update the variable binding
-            ctx.bind_var(name, new_reg);
+            // Update the variable binding with the RHS type
+            ctx.bind_var_typed(name, new_reg, rhs.0.get_type().clone());
         }
 
         TExpr::Index { base, index, ty: _ } => {
@@ -206,7 +206,7 @@ fn lower_for_loop<'src>(
     ctx.emit_phi(i_phi);
 
     // Bind the loop variable to the phi result
-    ctx.bind_var(var, i_phi_reg);
+    ctx.bind_var_typed(var, i_phi_reg, var_ty.clone());
 
     // Create phi nodes for ALL existing mutable variables (loop-carried state)
     // These phi nodes will be at indices 1, 2, 3, ... in the header block
@@ -217,7 +217,8 @@ fn lower_for_loop<'src>(
         if name != var {
             // Create phi node for this variable
             let phi_reg = ctx.fresh_reg();
-            let mut phi = PhiNode::new(phi_reg, IType::Int); // TODO: track actual types
+            let var_ty = ctx.lookup_var_type(name);
+            let mut phi = PhiNode::new(phi_reg, var_ty);
             phi.add_incoming(entry_block, before_reg);
             ctx.emit_phi(phi);
             // Update var binding to use phi result

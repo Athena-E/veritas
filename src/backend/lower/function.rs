@@ -25,7 +25,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     let mut params: Vec<(VirtualReg, IType<'src>)> = Vec::new();
     for param in &func.parameters {
         let reg = ctx.fresh_reg();
-        ctx.bind_var(&param.name, reg);
+        ctx.bind_var_typed(&param.name, reg, param.ty.clone());
         params.push((reg, param.ty.clone()));
     }
 

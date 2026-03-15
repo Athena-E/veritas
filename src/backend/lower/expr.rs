@@ -616,18 +616,18 @@ fn create_phi_nodes_for_modified_vars<'src>(
         if then_reg != else_reg {
             // Need a phi node
             let phi_dst = ctx.fresh_reg();
-            // We don't have type info here - use Int as placeholder
-            // In a production compiler, we'd track types in the var_map
-            let mut phi = PhiNode::new(phi_dst, IType::Int);
+            let var_ty = ctx.lookup_var_type(name);
+            let mut phi = PhiNode::new(phi_dst, var_ty.clone());
             phi.add_incoming(then_block, then_reg);
             phi.add_incoming(else_block, else_reg);
             ctx.emit_phi(phi);
 
             // Update var_map to point to the phi result
-            ctx.bind_var(name, phi_dst);
+            ctx.bind_var_typed(name, phi_dst, var_ty);
         } else if then_reg != before_reg {
             // Both branches modified it the same way - just update binding
-            ctx.bind_var(name, then_reg);
+            let var_ty = ctx.lookup_var_type(name);
+            ctx.bind_var_typed(name, then_reg, var_ty);
         }
     }
 }
