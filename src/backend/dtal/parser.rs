@@ -8,7 +8,7 @@ use crate::backend::dtal::instr::{
     BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
 };
 use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-use crate::backend::dtal::types::{DtalType, DtalValue};
+use crate::backend::dtal::types::DtalType;
 use std::sync::Arc;
 
 /// Parse error for DTAL text
@@ -202,7 +202,11 @@ impl<'a> DtalParser<'a> {
 
     fn parse_params(&self, line: &str) -> Result<Vec<(Reg, DtalType)>, DtalParseError> {
         // .params {v0: int, v1: bool}
-        let inner = line.trim_start_matches(".params {").trim_end_matches('}');
+        let content = line.trim_start_matches(".params ").trim();
+        let inner = content
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(content);
         if inner.is_empty() {
             return Ok(Vec::new());
         }
@@ -213,8 +217,8 @@ impl<'a> DtalParser<'a> {
             if part.is_empty() {
                 continue;
             }
-            let colon_pos = part
-                .find(':')
+            // Use top-level ':' to avoid matching inside nested types like {v: int | ...}
+            let colon_pos = find_top_level_char(part, ':')
                 .ok_or_else(|| self.err(format!("expected ':' in param '{}'", part)))?;
             let reg_str = part[..colon_pos].trim();
             let ty_str = part[colon_pos + 1..].trim();
@@ -234,19 +238,57 @@ impl<'a> DtalParser<'a> {
         let label = line.trim().trim_end_matches(':').to_string();
         self.advance();
 
-        // Skip entry state comments
-        if let Some(line) = self.current_line()
-            && line.trim() == "; Entry state:"
-        {
-            self.advance();
-            while let Some(line) = self.current_line() {
-                let trimmed = line.trim();
-                if trimmed.starts_with(";   ") {
-                    self.advance();
-                } else {
-                    break;
+        let mut entry_state = TypeState::new();
+
+        // Parse entry state directives and skip legacy comments
+        while let Some(line) = self.current_line() {
+            let trimmed = line.trim();
+
+            // Parse .entry {reg: type, ...} directive
+            if let Some(content) = trimmed.strip_prefix(".entry ") {
+                if let Some(inner) = content.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    for pair in split_top_level(inner, ',') {
+                        let pair = pair.trim();
+                        if pair.is_empty() {
+                            continue;
+                        }
+                        if let Some(colon) = find_top_level_char(pair, ':') {
+                            let reg_str = pair[..colon].trim();
+                            let ty_str = pair[colon + 1..].trim();
+                            let reg = parse_reg(reg_str)
+                                .ok_or_else(|| self.err(format!("bad register in .entry: '{}'", reg_str)))?;
+                            let ty = parse_type_str(ty_str)?;
+                            entry_state.register_types.insert(reg, ty);
+                        }
+                    }
                 }
+                self.advance();
+                continue;
             }
+
+            // Parse .assume constraint directive
+            if let Some(constraint_str) = trimmed.strip_prefix(".assume ") {
+                let constraint = parse_constraint_str(constraint_str)?;
+                entry_state.constraints.push(constraint);
+                self.advance();
+                continue;
+            }
+
+            // Skip legacy entry state comments
+            if trimmed == "; Entry state:" {
+                self.advance();
+                while let Some(line) = self.current_line() {
+                    let t = line.trim();
+                    if t.starts_with(";   ") {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            break;
         }
 
         // Parse instructions
@@ -274,7 +316,7 @@ impl<'a> DtalParser<'a> {
 
         Ok(DtalBlock {
             label,
-            entry_state: TypeState::new(),
+            entry_state,
             instructions,
         })
     }
@@ -774,16 +816,8 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
         "bool" => Ok(DtalType::Bool),
         _ if s.starts_with("int(") && s.ends_with(')') => {
             let inner = &s[4..s.len() - 1];
-            // Could be int(42) or int(x) etc
-            if let Ok(n) = inner.parse::<i64>() {
-                Ok(DtalType::SingletonInt(DtalValue::Int(n)))
-            } else if inner == "true" || inner == "false" {
-                Ok(DtalType::SingletonInt(DtalValue::Bool(inner == "true")))
-            } else {
-                Ok(DtalType::SingletonInt(DtalValue::Symbolic(
-                    inner.to_string(),
-                )))
-            }
+            let idx = parse_index_expr(inner)?;
+            Ok(DtalType::SingletonInt(idx))
         }
         _ if s.starts_with('[') && s.ends_with(']') => {
             // [int; 10]
@@ -793,11 +827,7 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
             let elem_str = inner[..semi].trim();
             let size_str = inner[semi + 1..].trim();
             let element_type = parse_type_str(elem_str)?;
-            let size = if let Ok(n) = size_str.parse::<i64>() {
-                DtalValue::Int(n)
-            } else {
-                DtalValue::Symbolic(size_str.to_string())
-            };
+            let size = parse_index_expr(size_str)?;
             Ok(DtalType::Array {
                 element_type: Arc::new(element_type),
                 size,
@@ -1217,7 +1247,7 @@ add:
     fn test_parse_type_singleton() {
         assert_eq!(
             parse_type_str("int(42)").unwrap(),
-            DtalType::SingletonInt(DtalValue::Int(42))
+            DtalType::SingletonInt(IndexExpr::Const(42))
         );
     }
 
@@ -1228,7 +1258,7 @@ add:
             ty,
             DtalType::Array {
                 element_type: Arc::new(DtalType::Int),
-                size: DtalValue::Int(10),
+                size: IndexExpr::Const(10),
             }
         );
     }

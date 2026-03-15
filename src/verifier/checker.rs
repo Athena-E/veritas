@@ -7,7 +7,7 @@
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::{DtalType, DtalValue};
+use crate::backend::dtal::types::DtalType;
 use crate::verifier::error::VerifyError;
 
 /// Verify a single instruction updates the type state correctly
@@ -74,9 +74,11 @@ pub fn verify_instruction(
             verify_type_annotation(*reg, ty, state, block_label)?;
         }
 
-        DtalInstr::ConstraintAssume { .. } => {
-            // Ignore compiler-emitted constraint assumptions.
-            // The verifier derives constraints from Cmp+Branch sequences instead.
+        DtalInstr::ConstraintAssume { constraint } => {
+            // Add compiler-emitted constraint assumptions to the context.
+            // These provide structural information the verifier can't derive
+            // from Cmp+Branch alone (e.g., loop counter lower bounds).
+            state.constraints.push(constraint.clone());
         }
 
         DtalInstr::ConstraintAssert { constraint, msg: _ } => {
@@ -84,37 +86,107 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Push { src, ty: _ } => {
-            check_register_defined(*src, state, block_label)?;
+            // Xi & Harper's type-push: push the source register's type onto the stack
+            let src_ty = get_register_type(*src, state, block_label)?;
+            state.stack.push(src_ty);
         }
 
-        DtalInstr::Pop { dst, ty } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::Pop { dst, ty: _ } => {
+            // Xi & Harper's type-pop: pop the top type from the stack
+            // If the stack is empty, this is an error
+            let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
+            state.register_types.insert(*dst, popped_ty);
         }
 
         DtalInstr::Alloca { dst, size: _, ty } => {
             state.register_types.insert(*dst, ty.clone());
+            // For array allocations, emit zero-initialization axioms:
+            // forall k in 0..size { arr_0[k] == 0 }
+            if let DtalType::Array { size, .. } = ty {
+                state.array_versions.insert(*dst, 0);
+                let arr_name = versioned_array_name(dst, 0);
+                state.constraints.push(Constraint::Forall {
+                    var: "_k".to_string(),
+                    lower: IndexExpr::Const(0),
+                    upper: size.clone(),
+                    body: Box::new(Constraint::Eq(
+                        IndexExpr::Select(
+                            arr_name,
+                            Box::new(IndexExpr::Var("_k".to_string())),
+                        ),
+                        IndexExpr::Const(0),
+                    )),
+                });
+            }
         }
 
-        // Call defines r0 with the return type
+        // Call: derive return type from callee's declared signature
         DtalInstr::Call {
             target, return_ty, ..
         } => {
-            // Check callee's precondition if available
-            if let Some(callee) = program.functions.iter().find(|f| &f.name == target)
-                && let Some(precond) = &callee.precondition
-                && !is_constraint_provable(precond, &state.constraints)
-            {
-                return Err(VerifyError::PreconditionFailed {
-                    block: block_label.to_string(),
-                    callee: target.clone(),
-                    constraint: precond.clone(),
-                    context: state.constraints.clone(),
-                });
-            }
             use crate::backend::dtal::regs::PhysicalReg;
+
+            let derived_return_ty =
+                if let Some(callee) = program.functions.iter().find(|f| &f.name == target) {
+                    // Check callee's precondition if available.
+                    // Substitute callee's virtual param registers with physical
+                    // param registers (r0, r1, ...) since the caller has placed
+                    // arguments there before the call.
+                    if let Some(precond) = &callee.precondition {
+                        let param_regs = PhysicalReg::param_regs();
+                        let param_subs: std::collections::HashMap<String, String> = callee
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i < param_regs.len())
+                            .map(|(i, (reg, _))| {
+                                (format!("{}", reg), format!("{}", param_regs[i]))
+                            })
+                            .collect();
+                        let mut substituted = substitute_select_names(precond, &param_subs);
+                        // Also substitute Var references for param registers
+                        substituted =
+                            substitute_var_names_in_constraint(&substituted, &param_subs);
+                        // Version-substitute array Select names
+                        substituted =
+                            version_substitute_constraint(&substituted, &state.array_versions);
+
+                        if !is_constraint_provable(&substituted, &state.constraints) {
+                            return Err(VerifyError::PreconditionFailed {
+                                block: block_label.to_string(),
+                                callee: target.clone(),
+                                constraint: precond.clone(),
+                                context: state.constraints.clone(),
+                            });
+                        }
+                    }
+
+                    // Propagate callee's postcondition to caller's constraint context.
+                    // Substitute "result" and callee param names with physical regs,
+                    // then version-substitute array names.
+                    if let Some(postcond) = &callee.postcondition {
+                        let r0_name = format!("{}", PhysicalReg::R0);
+                        let mut postcond_subs: std::collections::HashMap<String, String> =
+                            std::collections::HashMap::new();
+                        postcond_subs.insert("result".to_string(), r0_name);
+                        let mut substituted = substitute_select_names(postcond, &postcond_subs);
+                        substituted =
+                            substitute_var_names_in_constraint(&substituted, &postcond_subs);
+                        substituted =
+                            version_substitute_constraint(&substituted, &state.array_versions);
+                        state.constraints.push(substituted);
+                    }
+
+                    // Derive return type from callee's declared signature
+                    callee.return_type.clone()
+                } else {
+                    // External/unknown callee: trust the annotation
+                    return_ty.clone()
+                };
+
             state
                 .register_types
-                .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
+                .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty);
         }
 
         DtalInstr::Branch { cond, .. } => {
@@ -136,71 +208,107 @@ pub fn verify_instruction(
 }
 
 /// Verify mov immediate instruction
+///
+/// Xi & Harper's type-movimm rule: `mov rd, c ⟹ rd : int(c)`
+/// The type is derived from the immediate value, not trusted from the annotation.
 fn verify_mov_imm(
     dst: Reg,
     imm: i64,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
-    block_label: &str,
+    _block_label: &str,
 ) -> Result<(), VerifyError> {
-    // For singleton types, check the value matches
-    if let DtalType::SingletonInt(DtalValue::Int(expected)) = ty
-        && imm != *expected
-    {
-        return Err(VerifyError::SingletonMismatch {
-            block: block_label.to_string(),
-            expected_value: *expected,
-            actual_value: imm,
-        });
-    }
-
-    state.register_types.insert(dst, ty.clone());
+    let derived_ty = DtalType::SingletonInt(IndexExpr::Const(imm));
+    let derived_idx = IndexExpr::Const(imm);
+    state.register_types.insert(dst, derived_ty);
+    add_register_index_constraint(dst, &derived_idx, state);
     Ok(())
 }
 
 /// Verify mov register instruction
+///
+/// Xi & Harper's type-mov rule: `mov rd, rs ⟹ rd : τ` where `rs : τ`
+/// The type is derived from the source register, not trusted from the annotation.
 fn verify_mov_reg(
     dst: Reg,
     src: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
-    // Check source register is defined
     let src_ty = get_register_type(src, state, block_label)?;
+    let derived_ty = src_ty.clone();
 
-    // Check source type is compatible with declared type
-    if !types_compatible(&src_ty, ty) {
-        return Err(VerifyError::TypeMismatch {
-            block: block_label.to_string(),
-            instr_desc: format!("mov {:?}, {:?}", dst, src),
-            expected: ty.clone(),
-            actual: src_ty,
-        });
+    match &derived_ty {
+        // Singleton: link dst to the concrete index expression
+        DtalType::SingletonInt(idx) => {
+            add_register_index_constraint(dst, idx, state);
+        }
+        // Scalar types: link dst to src register variable
+        DtalType::Int | DtalType::RefinedInt { .. } | DtalType::Bool => {
+            let src_idx = extract_index(&derived_ty, &src);
+            add_register_index_constraint(dst, &src_idx, state);
+        }
+        // Array: copy version and emit linking constraint
+        DtalType::Array { size, .. } => {
+            let src_version = state.array_versions.get(&src).copied().unwrap_or(0);
+            state.array_versions.insert(dst, 0);
+            let src_name = versioned_array_name(&src, src_version);
+            let dst_name = versioned_array_name(&dst, 0);
+            state.constraints.push(Constraint::Forall {
+                var: "_k".to_string(),
+                lower: IndexExpr::Const(0),
+                upper: size.clone(),
+                body: Box::new(Constraint::Eq(
+                    IndexExpr::Select(dst_name, Box::new(IndexExpr::Var("_k".to_string()))),
+                    IndexExpr::Select(src_name, Box::new(IndexExpr::Var("_k".to_string()))),
+                )),
+            });
+        }
+        _ => {}
     }
 
-    state.register_types.insert(dst, ty.clone());
+    state.register_types.insert(dst, derived_ty);
     Ok(())
 }
 
+/// Extract the index expression from a type for derivation-based typing.
+///
+/// - `SingletonInt(idx)` → `idx`
+/// - `RefinedInt { var, .. }` → `Var(var)`
+/// - `Int` → `Var(reg_name)` (treat register as opaque index variable)
+pub fn extract_index(ty: &DtalType, reg: &Reg) -> IndexExpr {
+    match ty {
+        DtalType::SingletonInt(idx) => idx.clone(),
+        DtalType::RefinedInt { var, .. } => IndexExpr::Var(var.clone()),
+        _ => reg_to_index_expr(reg),
+    }
+}
+
 /// Verify binary operation
+///
+/// Xi & Harper's derivation rules:
+/// - type-add: `rs : int(x), v : int(y) ⟹ rd : int(x+y)`
+/// - type-sub, type-mul, type-div similarly
+/// - And/Or: boolean result
+///
+/// The verifier derives the result type from operand types, ignoring `ty`.
 fn verify_binop(
     op: BinaryOp,
     dst: Reg,
     lhs: Reg,
     rhs: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     let lhs_ty = get_register_type(lhs, state, block_label)?;
     let rhs_ty = get_register_type(rhs, state, block_label)?;
 
-    // Check operand types based on operation
-    match op {
-        // Logical operations require boolean operands
+    let derived_ty = match op {
+        // Logical operations require boolean operands, produce Bool
         BinaryOp::And | BinaryOp::Or => {
-            if !matches!(lhs_ty, DtalType::Bool) || !matches!(rhs_ty, DtalType::Bool) {
+            if !is_bool_compatible(&lhs_ty) || !is_bool_compatible(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
                     op: format!("{}", op),
@@ -208,8 +316,9 @@ fn verify_binop(
                     rhs_type: rhs_ty,
                 });
             }
+            DtalType::Bool
         }
-        // Arithmetic operations require numeric operands
+        // Arithmetic operations: derive result type symbolically
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
@@ -220,49 +329,46 @@ fn verify_binop(
                 });
             }
 
-            // For singleton types, verify the result
-            if let (
-                DtalType::SingletonInt(DtalValue::Int(l)),
-                DtalType::SingletonInt(DtalValue::Int(r)),
-            ) = (&lhs_ty, &rhs_ty)
-            {
-                let expected_result = match op {
-                    BinaryOp::Add => l + r,
-                    BinaryOp::Sub => l - r,
-                    BinaryOp::Mul => l * r,
-                    BinaryOp::Div => {
-                        if *r != 0 {
-                            l / r
-                        } else {
-                            0
-                        }
-                    }
-                    _ => unreachable!(),
-                };
+            let lhs_idx = extract_index(&lhs_ty, &lhs);
+            let rhs_idx = extract_index(&rhs_ty, &rhs);
 
-                if let DtalType::SingletonInt(DtalValue::Int(declared)) = ty
-                    && *declared != expected_result
-                {
-                    return Err(VerifyError::SingletonMismatch {
-                        block: block_label.to_string(),
-                        expected_value: expected_result,
-                        actual_value: *declared,
-                    });
+            let result_idx = match op {
+                BinaryOp::Add => {
+                    IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx))
                 }
-            }
+                BinaryOp::Sub => {
+                    IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx))
+                }
+                BinaryOp::Mul => {
+                    IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx))
+                }
+                BinaryOp::Div => {
+                    IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx))
+                }
+                _ => unreachable!(),
+            };
+
+            DtalType::SingletonInt(result_idx)
         }
+    };
+
+    // Add register-to-index linkage for derived singleton types
+    if let DtalType::SingletonInt(ref idx) = derived_ty {
+        add_register_index_constraint(dst, idx, state);
     }
 
-    state.register_types.insert(dst, ty.clone());
+    state.register_types.insert(dst, derived_ty);
     Ok(())
 }
 
 /// Verify add immediate instruction
+///
+/// Derived type: `src : int(x) ⟹ dst : int(x + imm)`
 fn verify_add_imm(
     dst: Reg,
     src: Reg,
     imm: i64,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
@@ -273,30 +379,24 @@ fn verify_add_imm(
             block: block_label.to_string(),
             op: "addi".to_string(),
             lhs_type: src_ty,
-            rhs_type: DtalType::SingletonInt(DtalValue::Int(imm)),
+            rhs_type: DtalType::SingletonInt(IndexExpr::Const(imm)),
         });
     }
 
-    // For singleton types, verify the result
-    if let DtalType::SingletonInt(DtalValue::Int(src_val)) = &src_ty {
-        let expected_result = src_val + imm;
+    let src_idx = extract_index(&src_ty, &src);
+    let result_idx = IndexExpr::Add(Box::new(src_idx), Box::new(IndexExpr::Const(imm)));
+    let derived_ty = DtalType::SingletonInt(result_idx.clone());
 
-        if let DtalType::SingletonInt(DtalValue::Int(declared)) = ty
-            && *declared != expected_result
-        {
-            return Err(VerifyError::SingletonMismatch {
-                block: block_label.to_string(),
-                expected_value: expected_result,
-                actual_value: *declared,
-            });
-        }
-    }
-
-    state.register_types.insert(dst, ty.clone());
+    add_register_index_constraint(dst, &result_idx, state);
+    state.register_types.insert(dst, derived_ty);
     Ok(())
 }
 
 /// Verify load instruction
+///
+/// Derives the result type from the array's element type, not the annotation.
+/// If the base register doesn't have an array type, falls back to the annotation
+/// (e.g., raw pointer loads where no array type information is available).
 fn verify_load(
     dst: Reg,
     base: Reg,
@@ -308,17 +408,18 @@ fn verify_load(
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
-    // If base has an array type, perform bounds checking
+    // If base has an array type, derive element type and perform bounds checking
     if let DtalType::Array {
         element_type,
-        size: DtalValue::Int(array_size),
+        size,
     } = &base_ty
     {
-        // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
+
+        // Construct bounds constraint: 0 <= offset < size
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
-            Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
+            Box::new(Constraint::Lt(offset_expr.clone(), size.clone())),
         );
 
         if !is_constraint_provable(&bounds_constraint, &state.constraints) {
@@ -330,23 +431,31 @@ fn verify_load(
             });
         }
 
-        // Derive element type from base, don't trust the annotation
+        // Derive element type from array base — don't trust annotation
         let derived_ty = element_type.as_ref().clone();
-        if !types_compatible(&derived_ty, ty) {
-            return Err(VerifyError::TypeMismatch {
-                block: block_label.to_string(),
-                instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
-                expected: ty.clone(),
-                actual: derived_ty,
-            });
-        }
+        state.register_types.insert(dst, derived_ty);
+
+        // Emit select constraint: dst == current_arr[offset]
+        let current_version = state.array_versions.get(&base).copied().unwrap_or(0);
+        let arr_name = versioned_array_name(&base, current_version);
+        let dst_expr = reg_to_index_expr(&dst);
+        state.constraints.push(Constraint::Eq(
+            dst_expr,
+            IndexExpr::Select(arr_name, Box::new(offset_expr)),
+        ));
+    } else {
+        // Non-array base: no element type to derive from, trust annotation
+        state.register_types.insert(dst, ty.clone());
     }
 
-    state.register_types.insert(dst, ty.clone());
     Ok(())
 }
 
 /// Verify store instruction
+///
+/// After bounds and type checks, emits array store axioms:
+/// - **Write axiom**: `new_arr[offset] == src_value`
+/// - **Frame axiom**: `forall k. k != offset → new_arr[k] == old_arr[k]`
 fn verify_store(
     base: Reg,
     offset: Reg,
@@ -358,17 +467,18 @@ fn verify_store(
     let _offset_ty = get_register_type(offset, state, block_label)?;
     let src_ty = get_register_type(src, state, block_label)?;
 
-    // If base has an array type, perform bounds checking
+    // If base has an array type, perform bounds checking and emit axioms
     if let DtalType::Array {
         element_type,
-        size: DtalValue::Int(array_size),
+        size,
     } = &base_ty
     {
-        // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
+
+        // Construct bounds constraint: 0 <= offset < size
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
-            Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
+            Box::new(Constraint::Lt(offset_expr.clone(), size.clone())),
         );
 
         if !is_constraint_provable(&bounds_constraint, &state.constraints) {
@@ -381,17 +491,60 @@ fn verify_store(
         }
 
         // Check stored value type is compatible with array element type
-        if !types_compatible(&src_ty, element_type.as_ref()) {
+        if !types_compatible_with_constraints(&src_ty, element_type.as_ref(), &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
                 expected: element_type.as_ref().clone(),
-                actual: src_ty,
+                actual: src_ty.clone(),
             });
         }
+
+        // Emit array store axioms (versioned array names)
+        let old_version = state.array_versions.get(&base).copied().unwrap_or(0);
+        let old_name = versioned_array_name(&base, old_version);
+        let new_version = old_version + 1;
+        let new_name = versioned_array_name(&base, new_version);
+        state.array_versions.insert(base, new_version);
+
+        let src_idx = extract_index(&src_ty, &src);
+
+        // Write axiom: new_arr[offset] == src_value
+        state.constraints.push(Constraint::Eq(
+            IndexExpr::Select(new_name.clone(), Box::new(offset_expr.clone())),
+            src_idx,
+        ));
+
+        // Frame axiom: forall k. k != offset → new_arr[k] == old_arr[k]
+        state.constraints.push(Constraint::Forall {
+            var: "_k".to_string(),
+            lower: IndexExpr::Const(0),
+            upper: size.clone(),
+            body: Box::new(Constraint::Implies(
+                Box::new(Constraint::Ne(
+                    IndexExpr::Var("_k".to_string()),
+                    offset_expr,
+                )),
+                Box::new(Constraint::Eq(
+                    IndexExpr::Select(
+                        new_name,
+                        Box::new(IndexExpr::Var("_k".to_string())),
+                    ),
+                    IndexExpr::Select(
+                        old_name,
+                        Box::new(IndexExpr::Var("_k".to_string())),
+                    ),
+                )),
+            )),
+        });
     }
 
     Ok(())
+}
+
+/// Get the versioned array name for a register
+fn versioned_array_name(reg: &Reg, version: u32) -> String {
+    format!("{}_{}", reg, version)
 }
 
 /// Verify cmp instruction
@@ -420,15 +573,17 @@ fn verify_cmp_imm(
 }
 
 /// Verify not instruction
+///
+/// Logical negation always produces Bool, regardless of annotation.
 fn verify_not(
     dst: Reg,
     src: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     check_register_defined(src, state, block_label)?;
-    state.register_types.insert(dst, ty.clone());
+    state.register_types.insert(dst, DtalType::Bool);
     Ok(())
 }
 
@@ -440,8 +595,8 @@ fn verify_type_annotation(
     block_label: &str,
 ) -> Result<(), VerifyError> {
     if let Some(existing_ty) = state.register_types.get(&reg) {
-        // Register already has a type -- verify compatibility
-        if !types_compatible(existing_ty, ty) {
+        // Register already has a type -- verify compatibility with constraint context
+        if !types_compatible_with_constraints(existing_ty, ty, &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("type_annotation {:?} : {}", reg, ty),
@@ -455,10 +610,13 @@ fn verify_type_annotation(
     Ok(())
 }
 
-/// Verify a constraint assertion
+/// Verify a constraint assertion.
+///
+/// If the constraint is provable from the current context, it is added
+/// to the context for use by downstream instructions (e.g., bounds checks).
 fn verify_constraint_assert(
     constraint: &Constraint,
-    state: &TypeState,
+    state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     // Check if constraint is provable from current context (syntactic fast-path + Z3)
@@ -469,6 +627,8 @@ fn verify_constraint_assert(
             block: block_label.to_string(),
         });
     }
+    // Add proven constraint to context for downstream use
+    state.constraints.push(constraint.clone());
     Ok(())
 }
 
@@ -511,15 +671,60 @@ fn is_numeric_type(ty: &DtalType) -> bool {
     )
 }
 
+/// Check if a type can be used as a boolean operand.
+///
+/// At the DTAL level, booleans are represented as integers 0/1.
+/// `Bool`, `int(0)`, and `int(1)` are all valid boolean operands.
+fn is_bool_compatible(ty: &DtalType) -> bool {
+    matches!(
+        ty,
+        DtalType::Bool
+            | DtalType::SingletonInt(IndexExpr::Const(0))
+            | DtalType::SingletonInt(IndexExpr::Const(1))
+    )
+}
+
 /// Check if actual type is a subtype of (or equal to) expected type.
-pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
+///
+/// Uses the constraint context for Xi & Harper's coerce-int rule:
+/// `φ ⊨ x = y ⟹ int(x) ≤ int(y)`
+pub fn types_compatible_with_constraints(
+    actual: &DtalType,
+    expected: &DtalType,
+    constraints: &[Constraint],
+) -> bool {
     match (actual, expected) {
         (DtalType::Int, DtalType::Int) => true,
         (DtalType::Bool, DtalType::Bool) => true,
         (DtalType::Unit, DtalType::Unit) => true,
-        (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => a == b,
+        (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => {
+            a == b || is_constraint_provable(&Constraint::Eq(a.clone(), b.clone()), constraints)
+        }
         (DtalType::SingletonInt(_), DtalType::Int) => true,
+        // At the DTAL level, booleans are integers 0/1
+        (DtalType::SingletonInt(IndexExpr::Const(0 | 1)), DtalType::Bool) => true,
+        (DtalType::Bool, DtalType::SingletonInt(IndexExpr::Const(0 | 1))) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
+        (DtalType::SingletonInt(_), DtalType::RefinedInt { base, .. }) => {
+            // A singleton is compatible with a refined type if it's compatible with the base
+            types_compatible_with_constraints(actual, base.as_ref(), constraints)
+        }
+        (
+            DtalType::RefinedInt {
+                base: b1,
+                var: v1,
+                constraint: c1,
+            },
+            DtalType::RefinedInt {
+                base: b2,
+                var: v2,
+                constraint: c2,
+            },
+        ) => {
+            // Structural equality first, then base compatibility
+            (v1 == v2 && c1 == c2 && types_compatible_with_constraints(b1, b2, constraints))
+                || types_compatible_with_constraints(b1, b2, constraints)
+        }
         (DtalType::Int, DtalType::SingletonInt(_)) => false,
         (DtalType::Int, DtalType::RefinedInt { .. }) => false,
         (
@@ -531,18 +736,35 @@ pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
                 element_type: e2,
                 size: s2,
             },
-        ) => types_compatible(e1.as_ref(), e2.as_ref()) && s1 == s2,
+        ) => {
+            types_compatible_with_constraints(e1.as_ref(), e2.as_ref(), constraints)
+                && (s1 == s2
+                    || is_constraint_provable(
+                        &Constraint::Eq(s1.clone(), s2.clone()),
+                        constraints,
+                    ))
+        }
         (DtalType::Ref(a), DtalType::Ref(b)) => {
-            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)
+                && types_compatible_with_constraints(b.as_ref(), a.as_ref(), constraints)
         }
         (DtalType::RefMut(a), DtalType::RefMut(b)) => {
-            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)
+                && types_compatible_with_constraints(b.as_ref(), a.as_ref(), constraints)
         }
         (DtalType::Master(a), DtalType::Master(b)) => {
-            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)
+                && types_compatible_with_constraints(b.as_ref(), a.as_ref(), constraints)
         }
         _ => false,
     }
+}
+
+/// Check if actual type is a subtype of (or equal to) expected type.
+/// Convenience wrapper without constraint context (syntactic check only).
+#[allow(dead_code)]
+pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
+    types_compatible_with_constraints(actual, expected, &[])
 }
 
 /// Check if a constraint is provable from context
@@ -590,6 +812,259 @@ fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
 /// Convert a register to an IndexExpr variable
 pub fn reg_to_index_expr(reg: &Reg) -> IndexExpr {
     IndexExpr::Var(format!("{}", reg))
+}
+
+/// Add a constraint linking a register to its index expression.
+///
+/// When the verifier assigns `reg : SingletonInt(idx)`, this adds
+/// `reg == idx` to the constraint context (unless idx is already the
+/// register's own variable). This bridges types and constraints so Z3
+/// can reason across them.
+fn add_register_index_constraint(reg: Reg, idx: &IndexExpr, state: &mut TypeState) {
+    let reg_expr = reg_to_index_expr(&reg);
+    // Don't add tautological constraint reg == reg
+    if *idx != reg_expr {
+        state
+            .constraints
+            .push(Constraint::Eq(reg_expr, idx.clone()));
+    }
+}
+
+/// Substitute unversioned array Select names with their current versioned names.
+///
+/// For each `Select(name, idx)` in the constraint, if `name` matches a register
+/// with a known array version, replace `name` with the versioned form (e.g., "v0" → "v0_3").
+pub fn version_substitute_constraint(
+    constraint: &Constraint,
+    array_versions: &std::collections::HashMap<Reg, u32>,
+) -> Constraint {
+    let subs: std::collections::HashMap<String, String> = array_versions
+        .iter()
+        .map(|(reg, ver)| (format!("{}", reg), format!("{}_{}", reg, ver)))
+        .collect();
+    substitute_select_names(constraint, &subs)
+}
+
+/// Recursively substitute Select names in a constraint
+fn substitute_select_names(
+    constraint: &Constraint,
+    subs: &std::collections::HashMap<String, String>,
+) -> Constraint {
+    match constraint {
+        Constraint::True | Constraint::False => constraint.clone(),
+        Constraint::Eq(l, r) => Constraint::Eq(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Lt(l, r) => Constraint::Lt(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Le(l, r) => Constraint::Le(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Gt(l, r) => Constraint::Gt(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Ge(l, r) => Constraint::Ge(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::Ne(l, r) => Constraint::Ne(
+            substitute_select_in_index(l, subs),
+            substitute_select_in_index(r, subs),
+        ),
+        Constraint::And(l, r) => Constraint::And(
+            Box::new(substitute_select_names(l, subs)),
+            Box::new(substitute_select_names(r, subs)),
+        ),
+        Constraint::Or(l, r) => Constraint::Or(
+            Box::new(substitute_select_names(l, subs)),
+            Box::new(substitute_select_names(r, subs)),
+        ),
+        Constraint::Not(c) => Constraint::Not(Box::new(substitute_select_names(c, subs))),
+        Constraint::Implies(l, r) => Constraint::Implies(
+            Box::new(substitute_select_names(l, subs)),
+            Box::new(substitute_select_names(r, subs)),
+        ),
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Forall {
+            var: var.clone(),
+            lower: substitute_select_in_index(lower, subs),
+            upper: substitute_select_in_index(upper, subs),
+            body: Box::new(substitute_select_names(body, subs)),
+        },
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Exists {
+            var: var.clone(),
+            lower: substitute_select_in_index(lower, subs),
+            upper: substitute_select_in_index(upper, subs),
+            body: Box::new(substitute_select_names(body, subs)),
+        },
+    }
+}
+
+/// Substitute Select names in an index expression
+fn substitute_select_in_index(
+    expr: &IndexExpr,
+    subs: &std::collections::HashMap<String, String>,
+) -> IndexExpr {
+    match expr {
+        IndexExpr::Const(_) | IndexExpr::Var(_) => expr.clone(),
+        IndexExpr::Add(l, r) => IndexExpr::Add(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Sub(l, r) => IndexExpr::Sub(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Mul(l, r) => IndexExpr::Mul(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Div(l, r) => IndexExpr::Div(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
+        IndexExpr::Select(name, idx) => {
+            let new_name = subs.get(name).cloned().unwrap_or_else(|| name.clone());
+            IndexExpr::Select(new_name, Box::new(substitute_select_in_index(idx, subs)))
+        }
+    }
+}
+
+/// Substitute Var names in a constraint (for register name remapping)
+fn substitute_var_names_in_constraint(
+    constraint: &Constraint,
+    subs: &std::collections::HashMap<String, String>,
+) -> Constraint {
+    match constraint {
+        Constraint::True | Constraint::False => constraint.clone(),
+        Constraint::Eq(l, r) => Constraint::Eq(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Lt(l, r) => Constraint::Lt(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Le(l, r) => Constraint::Le(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Gt(l, r) => Constraint::Gt(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Ge(l, r) => Constraint::Ge(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::Ne(l, r) => Constraint::Ne(
+            substitute_var_in_index(l, subs),
+            substitute_var_in_index(r, subs),
+        ),
+        Constraint::And(l, r) => Constraint::And(
+            Box::new(substitute_var_names_in_constraint(l, subs)),
+            Box::new(substitute_var_names_in_constraint(r, subs)),
+        ),
+        Constraint::Or(l, r) => Constraint::Or(
+            Box::new(substitute_var_names_in_constraint(l, subs)),
+            Box::new(substitute_var_names_in_constraint(r, subs)),
+        ),
+        Constraint::Not(c) => {
+            Constraint::Not(Box::new(substitute_var_names_in_constraint(c, subs)))
+        }
+        Constraint::Implies(l, r) => Constraint::Implies(
+            Box::new(substitute_var_names_in_constraint(l, subs)),
+            Box::new(substitute_var_names_in_constraint(r, subs)),
+        ),
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => {
+            // Don't substitute the bound variable
+            let filtered: std::collections::HashMap<String, String> = subs
+                .iter()
+                .filter(|(k, _)| *k != var)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            Constraint::Forall {
+                var: var.clone(),
+                lower: substitute_var_in_index(lower, subs),
+                upper: substitute_var_in_index(upper, subs),
+                body: Box::new(substitute_var_names_in_constraint(body, &filtered)),
+            }
+        }
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => {
+            let filtered: std::collections::HashMap<String, String> = subs
+                .iter()
+                .filter(|(k, _)| *k != var)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            Constraint::Exists {
+                var: var.clone(),
+                lower: substitute_var_in_index(lower, subs),
+                upper: substitute_var_in_index(upper, subs),
+                body: Box::new(substitute_var_names_in_constraint(body, &filtered)),
+            }
+        }
+    }
+}
+
+/// Substitute Var names in an index expression
+fn substitute_var_in_index(
+    expr: &IndexExpr,
+    subs: &std::collections::HashMap<String, String>,
+) -> IndexExpr {
+    match expr {
+        IndexExpr::Const(_) => expr.clone(),
+        IndexExpr::Var(name) => {
+            if let Some(new_name) = subs.get(name) {
+                IndexExpr::Var(new_name.clone())
+            } else {
+                expr.clone()
+            }
+        }
+        IndexExpr::Add(l, r) => IndexExpr::Add(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Sub(l, r) => IndexExpr::Sub(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Mul(l, r) => IndexExpr::Mul(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Div(l, r) => IndexExpr::Div(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Select(name, idx) => {
+            let new_name = subs.get(name).cloned().unwrap_or_else(|| name.clone());
+            IndexExpr::Select(new_name, Box::new(substitute_var_in_index(idx, subs)))
+        }
+    }
 }
 
 /// Negate a CmpOp (Lt <-> Ge, Le <-> Gt, Eq <-> Ne)

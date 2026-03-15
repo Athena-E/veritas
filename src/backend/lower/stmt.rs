@@ -6,7 +6,7 @@
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
-use crate::backend::tir::builder::negate_constraint;
+use crate::backend::lower::widen_itype;
 use crate::backend::tir::{
     BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
 };
@@ -67,13 +67,13 @@ fn lower_let<'src>(
     ctx: &mut LoweringContext<'src>,
     name: &str,
     value: &Spanned<TExpr<'src>>,
-    _ty: &IType<'src>,
+    ty: &IType<'src>,
 ) {
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
 
-    // Bind the variable name to this register
-    ctx.bind_var(name, value_reg);
+    // Bind the variable name to this register with its type
+    ctx.bind_var_typed(name, value_reg, ty.clone());
 }
 
 /// Lower an assignment statement
@@ -97,8 +97,8 @@ fn lower_assignment<'src>(
                 ty: rhs.0.get_type().clone(),
             });
 
-            // Update the variable binding
-            ctx.bind_var(name, new_reg);
+            // Update the variable binding with the RHS type
+            ctx.bind_var_typed(name, new_reg, rhs.0.get_type().clone());
         }
 
         TExpr::Index { base, index, ty: _ } => {
@@ -206,7 +206,7 @@ fn lower_for_loop<'src>(
     ctx.emit_phi(i_phi);
 
     // Bind the loop variable to the phi result
-    ctx.bind_var(var, i_phi_reg);
+    ctx.bind_var_typed(var, i_phi_reg, var_ty.clone());
 
     // Create phi nodes for ALL existing mutable variables (loop-carried state)
     // These phi nodes will be at indices 1, 2, 3, ... in the header block
@@ -215,23 +215,18 @@ fn lower_for_loop<'src>(
     let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
     for (name, &before_reg) in &vars_before_loop {
         if name != var {
-            // Create phi node for this variable
+            // Create phi node for this variable.
+            // Widen the type to its base since the variable may change
+            // across iterations (e.g., int(0) after init → int after add).
             let phi_reg = ctx.fresh_reg();
-            let mut phi = PhiNode::new(phi_reg, IType::Int); // TODO: track actual types
+            let var_ty = widen_itype(ctx.lookup_var_type(name));
+            let mut phi = PhiNode::new(phi_reg, var_ty);
             phi.add_incoming(entry_block, before_reg);
             ctx.emit_phi(phi);
             // Update var binding to use phi result
             ctx.bind_var(name, phi_reg);
             loop_carried_vars.push((name.clone(), phi_reg));
         }
-    }
-
-    // Emit loop invariant assertion (if present)
-    if let Some(inv_constraint) = invariant {
-        ctx.emit(TirInstr::AssertConstraint {
-            constraint: inv_constraint.clone(),
-            msg: format!("loop invariant: {}", inv_constraint),
-        });
     }
 
     // 4. Compare i < end
@@ -244,13 +239,18 @@ fn lower_for_loop<'src>(
         ty: IType::Bool,
     });
 
-    // Derive constraints for the loop condition: i < end
-    let loop_var_idx = IndexExpr::Var(var.to_string());
-    // Fallback: if end can't be converted, use a placeholder
-    // This is sound but imprecise (returns True effectively)
+    // Derive constraints for the loop condition: start <= i < end
+    // Use register name (v3) for the loop variable so constraints match
+    // the register-based verification context.
+    let loop_var_idx = IndexExpr::Var(format!("v{}", i_phi_reg.0));
+    let start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
     let end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX));
-    let true_constraint = Constraint::Lt(loop_var_idx.clone(), end_idx.clone());
-    let false_constraint = negate_constraint(true_constraint.clone());
+    // True branch (body): i >= start AND i < end
+    let true_constraint = Constraint::And(
+        Box::new(Constraint::Ge(loop_var_idx.clone(), start_idx)),
+        Box::new(Constraint::Lt(loop_var_idx.clone(), end_idx.clone())),
+    );
+    let false_constraint = Constraint::Ge(loop_var_idx.clone(), end_idx);
 
     // Branch: if i < end, go to body; else go to exit
     ctx.finish_block(
@@ -266,6 +266,18 @@ fn lower_for_loop<'src>(
 
     // 5. Lower the body block
     ctx.start_block(body_block);
+
+    // Emit loop invariant assertion (if present) in the body block,
+    // where the ConstraintAssume provides loop counter bounds.
+    if let Some(inv_constraint) = invariant {
+        let subs = ctx.var_substitutions();
+        let substituted =
+            crate::backend::codegen::generator::substitute_constraint_vars(inv_constraint, &subs);
+        ctx.emit(TirInstr::AssertConstraint {
+            constraint: substituted,
+            msg: format!("loop invariant: {}", inv_constraint),
+        });
+    }
 
     // Lower body statements
     for stmt in &body.statements {

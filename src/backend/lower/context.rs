@@ -22,6 +22,10 @@ pub struct LoweringContext<'src> {
     /// always points to the "current" version of each variable.
     var_map: BTreeMap<String, VirtualReg>,
 
+    /// Map from variable names to their types
+    /// Used to create phi nodes with correct types (not IType::Int placeholders)
+    var_type_map: BTreeMap<String, IType<'src>>,
+
     /// Stack of variable maps for nested scopes
     /// Used to restore variable bindings when exiting a scope
     scope_stack: Vec<BTreeMap<String, VirtualReg>>,
@@ -33,6 +37,7 @@ impl<'src> LoweringContext<'src> {
         Self {
             builder: TirBuilder::new(),
             var_map: BTreeMap::new(),
+            var_type_map: BTreeMap::new(),
             scope_stack: Vec::new(),
         }
     }
@@ -55,9 +60,31 @@ impl<'src> LoweringContext<'src> {
         self.var_map.insert(name.to_string(), reg);
     }
 
+    /// Bind a variable name to an SSA register with its type
+    pub fn bind_var_typed(&mut self, name: &str, reg: VirtualReg, ty: IType<'src>) {
+        self.var_map.insert(name.to_string(), reg);
+        self.var_type_map.insert(name.to_string(), ty);
+    }
+
     /// Look up the current SSA register for a variable
     pub fn lookup_var(&self, name: &str) -> Option<VirtualReg> {
         self.var_map.get(name).copied()
+    }
+
+    /// Get variable name → register name substitution pairs for all bound variables
+    pub fn var_substitutions(&self) -> Vec<(String, String)> {
+        self.var_map
+            .iter()
+            .map(|(name, reg)| (name.clone(), format!("v{}", reg.0)))
+            .collect()
+    }
+
+    /// Look up the type of a variable
+    pub fn lookup_var_type(&self, name: &str) -> IType<'src> {
+        self.var_type_map
+            .get(name)
+            .cloned()
+            .unwrap_or(IType::Int)
     }
 
     /// Get a snapshot of the current variable map
@@ -172,6 +199,7 @@ impl<'src> LoweringContext<'src> {
         self,
         name: String,
         params: Vec<(VirtualReg, IType<'src>)>,
+        param_names: Vec<String>,
         return_type: IType<'src>,
         precondition: Option<Constraint>,
         postcondition: Option<Constraint>,
@@ -180,6 +208,7 @@ impl<'src> LoweringContext<'src> {
         self.builder.build(
             name,
             params,
+            param_names,
             return_type,
             precondition,
             postcondition,

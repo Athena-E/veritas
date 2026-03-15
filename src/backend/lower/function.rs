@@ -23,10 +23,12 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
 
     // Allocate registers for parameters and bind them
     let mut params: Vec<(VirtualReg, IType<'src>)> = Vec::new();
+    let mut param_names: Vec<String> = Vec::new();
     for param in &func.parameters {
         let reg = ctx.fresh_reg();
-        ctx.bind_var(&param.name, reg);
+        ctx.bind_var_typed(&param.name, reg, param.ty.clone());
         params.push((reg, param.ty.clone()));
+        param_names.push(param.name.clone());
     }
 
     // Lower the function body statements
@@ -47,7 +49,14 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         vec![], // Entry block has no predecessors
     );
 
-    // Convert postcondition from IProposition to Constraint
+    // Lower precondition, but skip quantified preconditions (forall/exists)
+    // since the verifier can't yet reason about array contents
+    let precondition = func
+        .precondition
+        .as_ref()
+        .and_then(|prop| proposition_to_constraint(prop))
+        .filter(|c| !contains_quantifier(c));
+
     let postcondition = func
         .postcondition
         .as_ref()
@@ -57,8 +66,9 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     ctx.build_function(
         func.name.clone(),
         params,
+        param_names,
         func.return_type.clone(),
-        None, // TODO: Convert precondition from IProposition to Constraint
+        precondition,
         postcondition,
         entry_block,
     )
@@ -67,4 +77,16 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
 /// Convert an IProposition to a Constraint
 pub(super) fn proposition_to_constraint(prop: &IProposition) -> Option<Constraint> {
     expr_to_constraint(&prop.predicate.0)
+}
+
+/// Check if a constraint contains quantifiers (forall/exists)
+fn contains_quantifier(c: &Constraint) -> bool {
+    match c {
+        Constraint::Forall { .. } | Constraint::Exists { .. } => true,
+        Constraint::And(l, r) | Constraint::Or(l, r) | Constraint::Implies(l, r) => {
+            contains_quantifier(l) || contains_quantifier(r)
+        }
+        Constraint::Not(inner) => contains_quantifier(inner),
+        _ => false,
+    }
 }

@@ -23,4 +23,4 @@ pub use instr::{
     BinaryOp, CmpOp, CmpOperands, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
 };
 pub use regs::{PhysicalReg, Reg, VirtualReg, VirtualRegAllocator};
-pub use types::{DtalType, DtalValue};
+pub use types::DtalType;

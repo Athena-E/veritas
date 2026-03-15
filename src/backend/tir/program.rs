@@ -39,6 +39,9 @@ pub struct TirFunction<'src> {
     pub name: String,
     /// Parameters with their SSA registers and types
     pub params: Vec<(VirtualReg, IType<'src>)>,
+    /// Parameter names (parallel to `params`), for translating constraints
+    /// from source-level variable names to register names
+    pub param_names: Vec<String>,
     /// Return type
     pub return_type: IType<'src>,
     /// Precondition (optional)

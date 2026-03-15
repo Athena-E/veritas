@@ -6,7 +6,8 @@
 
 use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
 use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::{DtalType, DtalValue};
+use crate::backend::dtal::constraints::IndexExpr;
+use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
 
@@ -112,10 +113,12 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             let element_size = 8u32; // Simplified: all elements are 8 bytes
             let total_size = element_size * (*size as u32);
 
-            // Create array type for annotation
+            // Create array type — widen element type to base (Int/Bool)
+            // since different values will be stored into the array.
+            let element_dtal_ty = widen_to_base(DtalType::from_itype(element_ty));
             let array_ty = DtalType::Array {
-                element_type: Arc::new(DtalType::from_itype(element_ty)),
-                size: DtalValue::Int(*size),
+                element_type: Arc::new(element_dtal_ty),
+                size: IndexExpr::Const(*size),
             };
 
             instrs.push(DtalInstr::Alloca {
@@ -381,5 +384,17 @@ fn lower_call<'src>(
             src: Reg::Physical(PhysicalReg::R0),
             ty: dtal_result_ty,
         });
+    }
+}
+
+/// Widen a type to its base form for array element types.
+///
+/// `SingletonInt(n)` → `Int`. Refined types are preserved since they
+/// carry meaningful constraints (e.g., `{v: int | v > 0}` for positive arrays).
+/// Other types are returned unchanged.
+fn widen_to_base(ty: DtalType) -> DtalType {
+    match ty {
+        DtalType::SingletonInt(_) => DtalType::Int,
+        other => other,
     }
 }
