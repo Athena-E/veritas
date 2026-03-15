@@ -95,26 +95,35 @@ pub fn verify_instruction(
             state.register_types.insert(*dst, ty.clone());
         }
 
-        // Call defines r0 with the return type
+        // Call: derive return type from callee's declared signature
         DtalInstr::Call {
             target, return_ty, ..
         } => {
-            // Check callee's precondition if available
-            if let Some(callee) = program.functions.iter().find(|f| &f.name == target)
-                && let Some(precond) = &callee.precondition
-                && !is_constraint_provable(precond, &state.constraints)
-            {
-                return Err(VerifyError::PreconditionFailed {
-                    block: block_label.to_string(),
-                    callee: target.clone(),
-                    constraint: precond.clone(),
-                    context: state.constraints.clone(),
-                });
-            }
             use crate::backend::dtal::regs::PhysicalReg;
+
+            let derived_return_ty =
+                if let Some(callee) = program.functions.iter().find(|f| &f.name == target) {
+                    // Check callee's precondition if available
+                    if let Some(precond) = &callee.precondition
+                        && !is_constraint_provable(precond, &state.constraints)
+                    {
+                        return Err(VerifyError::PreconditionFailed {
+                            block: block_label.to_string(),
+                            callee: target.clone(),
+                            constraint: precond.clone(),
+                            context: state.constraints.clone(),
+                        });
+                    }
+                    // Derive return type from callee's declared signature
+                    callee.return_type.clone()
+                } else {
+                    // External/unknown callee: trust the annotation
+                    return_ty.clone()
+                };
+
             state
                 .register_types
-                .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
+                .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty);
         }
 
         DtalInstr::Branch { cond, .. } => {
@@ -297,6 +306,10 @@ fn verify_add_imm(
 }
 
 /// Verify load instruction
+///
+/// Derives the result type from the array's element type, not the annotation.
+/// If the base register doesn't have an array type, falls back to the annotation
+/// (e.g., raw pointer loads where no array type information is available).
 fn verify_load(
     dst: Reg,
     base: Reg,
@@ -308,7 +321,7 @@ fn verify_load(
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
-    // If base has an array type, perform bounds checking
+    // If base has an array type, derive element type and perform bounds checking
     if let DtalType::Array {
         element_type,
         size,
@@ -330,19 +343,14 @@ fn verify_load(
             });
         }
 
-        // Derive element type from base, don't trust the annotation
+        // Derive element type from array base — don't trust annotation
         let derived_ty = element_type.as_ref().clone();
-        if !types_compatible_with_constraints(&derived_ty, ty, &state.constraints) {
-            return Err(VerifyError::TypeMismatch {
-                block: block_label.to_string(),
-                instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
-                expected: ty.clone(),
-                actual: derived_ty,
-            });
-        }
+        state.register_types.insert(dst, derived_ty);
+    } else {
+        // Non-array base: no element type to derive from, trust annotation
+        state.register_types.insert(dst, ty.clone());
     }
 
-    state.register_types.insert(dst, ty.clone());
     Ok(())
 }
 
@@ -420,15 +428,17 @@ fn verify_cmp_imm(
 }
 
 /// Verify not instruction
+///
+/// Logical negation always produces Bool, regardless of annotation.
 fn verify_not(
     dst: Reg,
     src: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     check_register_defined(src, state, block_label)?;
-    state.register_types.insert(dst, ty.clone());
+    state.register_types.insert(dst, DtalType::Bool);
     Ok(())
 }
 

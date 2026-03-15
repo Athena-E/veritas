@@ -421,14 +421,24 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .register_types
                 .insert(*dst, DtalType::SingletonInt(result_idx));
         }
-        DtalInstr::Load { dst, ty, .. } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::Load {
+            dst, base, ty, ..
+        } => {
+            // Derive element type from array base when available
+            let derived_ty = if let Some(base_ty) = state.register_types.get(base)
+                && let DtalType::Array { element_type, .. } = base_ty
+            {
+                element_type.as_ref().clone()
+            } else {
+                ty.clone()
+            };
+            state.register_types.insert(*dst, derived_ty);
         }
         DtalInstr::SetCC { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Bool);
         }
-        DtalInstr::Not { dst, ty, .. } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::Not { dst, .. } => {
+            state.register_types.insert(*dst, DtalType::Bool);
         }
         DtalInstr::TypeAnnotation { reg, ty } => {
             state.register_types.insert(*reg, ty.clone());
