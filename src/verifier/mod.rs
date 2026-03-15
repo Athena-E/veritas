@@ -132,7 +132,7 @@ fn verify_function_derivation(
         let entry_state = &entry_block.entry_state;
         for (reg, ty) in &func.params {
             if let Some(declared_ty) = entry_state.register_types.get(reg)
-                && !checker::types_compatible(declared_ty, ty)
+                && !checker::types_compatible_with_constraints(declared_ty, ty, &entry_state.constraints)
             {
                 return Err(VerifyError::TypeMismatch {
                     block: entry_block.label.clone(),
@@ -1656,5 +1656,74 @@ mod tests {
         } else {
             panic!("Expected ReturnTypeMismatch from caller");
         }
+    }
+
+    // ========================================================================
+    // Stack type tracking: Push/Pop derive types from stack
+    // ========================================================================
+
+    #[test]
+    fn test_push_pop_derives_type_from_stack() {
+        // Push int(5) onto stack, pop it back — should derive int(5)
+        let program = make_program(vec![make_func(
+            "ok",
+            vec![],
+            DtalType::SingletonInt(IndexExpr::Const(5)),
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::MovImm {
+                        dst: v(0),
+                        imm: 5,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Push {
+                        src: v(0),
+                        ty: DtalType::Int, // annotation ignored
+                    },
+                    DtalInstr::Pop {
+                        dst: r0(),
+                        ty: DtalType::Int, // annotation ignored — derives from stack
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        // v0 has int(5), pushed onto stack, popped as r0 → r0 : int(5)
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    #[test]
+    fn test_push_pop_bool_derives_correctly() {
+        // Push Bool onto stack, pop it — should derive Bool, not the annotation
+        let program = make_program(vec![make_func(
+            "ok",
+            vec![(v(0), DtalType::Int), (v(1), DtalType::Int)],
+            DtalType::Bool,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Cmp {
+                        lhs: v(0),
+                        rhs: v(1),
+                    },
+                    DtalInstr::SetCC {
+                        dst: v(2),
+                        cond: CmpOp::Lt,
+                    },
+                    DtalInstr::Push {
+                        src: v(2),
+                        ty: DtalType::Int, // wrong annotation
+                    },
+                    DtalInstr::Pop {
+                        dst: r0(),
+                        ty: DtalType::Int, // wrong annotation — derives Bool from stack
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        // v2 is Bool, pushed and popped → r0 is Bool, matching return type
+        assert!(verify_dtal(&program).is_ok());
     }
 }

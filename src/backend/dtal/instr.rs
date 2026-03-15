@@ -26,6 +26,9 @@ pub struct TypeState {
     pub constraints: Vec<Constraint>,
     /// Operands of the most recent comparison (for deriving branch constraints)
     pub last_cmp: Option<CmpOperands>,
+    /// Typed stack (Xi & Harper's `S = τ :: S`).
+    /// Top of stack is the last element.
+    pub stack: Vec<DtalType>,
 }
 
 impl TypeState {
@@ -34,6 +37,7 @@ impl TypeState {
             register_types: HashMap::new(),
             constraints: Vec::new(),
             last_cmp: None,
+            stack: Vec::new(),
         }
     }
 }

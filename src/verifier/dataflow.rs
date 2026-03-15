@@ -444,8 +444,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.register_types.insert(*reg, ty.clone());
         }
         DtalInstr::ConstraintAssume { .. } => {}
-        DtalInstr::Pop { dst, ty } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::Pop { dst, .. } => {
+            let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
+            state.register_types.insert(*dst, popped_ty);
         }
         DtalInstr::Alloca { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
@@ -462,8 +463,15 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::CmpImm { lhs, imm } => {
             state.last_cmp = Some(CmpOperands::RegImm(*lhs, *imm));
         }
+        DtalInstr::Push { src, .. } => {
+            let src_ty = state
+                .register_types
+                .get(src)
+                .cloned()
+                .unwrap_or(DtalType::Int);
+            state.stack.push(src_ty);
+        }
         DtalInstr::Store { .. }
-        | DtalInstr::Push { .. }
         | DtalInstr::ConstraintAssert { .. }
         | DtalInstr::Jmp { .. }
         | DtalInstr::Branch { .. }
@@ -488,7 +496,9 @@ fn states_equal(a: &TypeState, b: &TypeState) -> bool {
         }
     }
 
-    // Also check constraints
+    // Also check constraints and stack
     a.constraints.len() == b.constraints.len()
         && a.constraints.iter().all(|c| b.constraints.contains(c))
+        && a.stack.len() == b.stack.len()
+        && a.stack.iter().zip(&b.stack).all(|(a, b)| a == b)
 }

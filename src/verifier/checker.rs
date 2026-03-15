@@ -84,11 +84,16 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Push { src, ty: _ } => {
-            check_register_defined(*src, state, block_label)?;
+            // Xi & Harper's type-push: push the source register's type onto the stack
+            let src_ty = get_register_type(*src, state, block_label)?;
+            state.stack.push(src_ty);
         }
 
-        DtalInstr::Pop { dst, ty } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::Pop { dst, ty: _ } => {
+            // Xi & Harper's type-pop: pop the top type from the stack
+            // If the stack is empty, this is an error
+            let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
+            state.register_types.insert(*dst, popped_ty);
         }
 
         DtalInstr::Alloca { dst, size: _, ty } => {
@@ -221,7 +226,7 @@ fn verify_binop(
     let derived_ty = match op {
         // Logical operations require boolean operands, produce Bool
         BinaryOp::And | BinaryOp::Or => {
-            if !matches!(lhs_ty, DtalType::Bool) || !matches!(rhs_ty, DtalType::Bool) {
+            if !is_bool_compatible(&lhs_ty) || !is_bool_compatible(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
                     op: format!("{}", op),
@@ -521,6 +526,19 @@ fn is_numeric_type(ty: &DtalType) -> bool {
     )
 }
 
+/// Check if a type can be used as a boolean operand.
+///
+/// At the DTAL level, booleans are represented as integers 0/1.
+/// `Bool`, `int(0)`, and `int(1)` are all valid boolean operands.
+fn is_bool_compatible(ty: &DtalType) -> bool {
+    matches!(
+        ty,
+        DtalType::Bool
+            | DtalType::SingletonInt(IndexExpr::Const(0))
+            | DtalType::SingletonInt(IndexExpr::Const(1))
+    )
+}
+
 /// Check if actual type is a subtype of (or equal to) expected type.
 ///
 /// Uses the constraint context for Xi & Harper's coerce-int rule:
@@ -539,6 +557,26 @@ pub fn types_compatible_with_constraints(
         }
         (DtalType::SingletonInt(_), DtalType::Int) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
+        (DtalType::SingletonInt(_), DtalType::RefinedInt { base, .. }) => {
+            // A singleton is compatible with a refined type if it's compatible with the base
+            types_compatible_with_constraints(actual, base.as_ref(), constraints)
+        }
+        (
+            DtalType::RefinedInt {
+                base: b1,
+                var: v1,
+                constraint: c1,
+            },
+            DtalType::RefinedInt {
+                base: b2,
+                var: v2,
+                constraint: c2,
+            },
+        ) => {
+            // Structural equality first, then base compatibility
+            (v1 == v2 && c1 == c2 && types_compatible_with_constraints(b1, b2, constraints))
+                || types_compatible_with_constraints(b1, b2, constraints)
+        }
         (DtalType::Int, DtalType::SingletonInt(_)) => false,
         (DtalType::Int, DtalType::RefinedInt { .. }) => false,
         (

@@ -113,9 +113,11 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             let element_size = 8u32; // Simplified: all elements are 8 bytes
             let total_size = element_size * (*size as u32);
 
-            // Create array type for annotation
+            // Create array type — widen element type to base (Int/Bool)
+            // since different values will be stored into the array.
+            let element_dtal_ty = widen_to_base(DtalType::from_itype(element_ty));
             let array_ty = DtalType::Array {
-                element_type: Arc::new(DtalType::from_itype(element_ty)),
+                element_type: Arc::new(element_dtal_ty),
                 size: IndexExpr::Const(*size),
             };
 
@@ -382,5 +384,17 @@ fn lower_call<'src>(
             src: Reg::Physical(PhysicalReg::R0),
             ty: dtal_result_ty,
         });
+    }
+}
+
+/// Widen a type to its base form for array element types.
+///
+/// `SingletonInt(n)` → `Int`, `RefinedInt { base, .. }` → `*base`.
+/// Other types are returned unchanged.
+fn widen_to_base(ty: DtalType) -> DtalType {
+    match ty {
+        DtalType::SingletonInt(_) => DtalType::Int,
+        DtalType::RefinedInt { base, .. } => base.as_ref().clone(),
+        other => other,
     }
 }
