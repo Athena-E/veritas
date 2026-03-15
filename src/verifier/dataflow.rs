@@ -4,10 +4,11 @@
 
 #![allow(clippy::result_large_err)]
 
+use crate::backend::dtal::constraints::IndexExpr;
 use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use crate::verifier::checker::{constraint_from_cmp_op, negate_cmp_op};
+use crate::verifier::checker::{constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
@@ -368,26 +369,57 @@ fn compute_exit_state(
     Ok(state)
 }
 
-/// Update type state based on instruction definitions (non-verifying)
+/// Update type state based on instruction definitions (non-verifying).
+///
+/// Derives types using the same rules as the verifier (Xi & Harper derivation)
+/// so that dataflow-computed states match verifier expectations.
 fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
+    use crate::backend::dtal::instr::BinaryOp;
+
     match instr {
-        DtalInstr::MovImm { dst, ty, .. } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::MovImm { dst, imm, .. } => {
+            state
+                .register_types
+                .insert(*dst, DtalType::SingletonInt(IndexExpr::Const(*imm)));
         }
-        DtalInstr::MovReg { dst, src, ty } => {
-            // Use explicit type if provided, otherwise inherit from source
-            let ty = if matches!(ty, DtalType::Int) {
-                state.register_types.get(src).cloned().unwrap_or(ty.clone())
-            } else {
-                ty.clone()
-            };
+        DtalInstr::MovReg { dst, src, .. } => {
+            let ty = state
+                .register_types
+                .get(src)
+                .cloned()
+                .unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, ty);
         }
-        DtalInstr::BinOp { dst, ty, .. } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::BinOp {
+            op, dst, lhs, rhs, ..
+        } => {
+            let lhs_ty = state.register_types.get(lhs).cloned().unwrap_or(DtalType::Int);
+            let rhs_ty = state.register_types.get(rhs).cloned().unwrap_or(DtalType::Int);
+
+            let derived_ty = match op {
+                BinaryOp::And | BinaryOp::Or => DtalType::Bool,
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                    let lhs_idx = extract_index(&lhs_ty, lhs);
+                    let rhs_idx = extract_index(&rhs_ty, rhs);
+                    let result_idx = match op {
+                        BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        _ => unreachable!(),
+                    };
+                    DtalType::SingletonInt(result_idx)
+                }
+            };
+            state.register_types.insert(*dst, derived_ty);
         }
-        DtalInstr::AddImm { dst, ty, .. } => {
-            state.register_types.insert(*dst, ty.clone());
+        DtalInstr::AddImm { dst, src, imm, .. } => {
+            let src_ty = state.register_types.get(src).cloned().unwrap_or(DtalType::Int);
+            let src_idx = extract_index(&src_ty, src);
+            let result_idx = IndexExpr::Add(Box::new(src_idx), Box::new(IndexExpr::Const(*imm)));
+            state
+                .register_types
+                .insert(*dst, DtalType::SingletonInt(result_idx));
         }
         DtalInstr::Load { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
@@ -399,22 +431,15 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.register_types.insert(*dst, ty.clone());
         }
         DtalInstr::TypeAnnotation { reg, ty } => {
-            // In dataflow (non-verifying), check compatibility but still apply.
-            // If existing type is compatible, apply annotation. If not, still
-            // apply to maintain forward progress (the verifier pass will reject it).
             state.register_types.insert(*reg, ty.clone());
         }
-        DtalInstr::ConstraintAssume { .. } => {
-            // Ignore compiler-emitted constraint assumptions.
-            // The verifier derives constraints from Cmp+Branch sequences instead.
-        }
+        DtalInstr::ConstraintAssume { .. } => {}
         DtalInstr::Pop { dst, ty } => {
             state.register_types.insert(*dst, ty.clone());
         }
         DtalInstr::Alloca { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
         }
-        // Call defines r0 with the return type
         DtalInstr::Call { return_ty, .. } => {
             use crate::backend::dtal::regs::PhysicalReg;
             state
@@ -427,7 +452,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::CmpImm { lhs, imm } => {
             state.last_cmp = Some(CmpOperands::RegImm(*lhs, *imm));
         }
-        // Instructions that don't define registers
         DtalInstr::Store { .. }
         | DtalInstr::Push { .. }
         | DtalInstr::ConstraintAssert { .. }

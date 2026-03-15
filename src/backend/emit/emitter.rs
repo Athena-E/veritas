@@ -74,15 +74,21 @@ fn emit_block(output: &mut String, block: &DtalBlock) {
     // Block label
     writeln!(output, "{}:", block.label).unwrap();
 
-    // Entry state comment (if non-empty)
-    if !block.entry_state.register_types.is_empty() || !block.entry_state.constraints.is_empty() {
-        writeln!(output, "    ; Entry state:").unwrap();
-        for (reg, ty) in &block.entry_state.register_types {
-            writeln!(output, "    ;   {}: {}", emit_reg(reg), emit_type(ty)).unwrap();
+    // Entry state directives (parseable, not just comments)
+    if !block.entry_state.register_types.is_empty() {
+        let mut entries: Vec<_> = block.entry_state.register_types.iter().collect();
+        entries.sort_by_key(|(reg, _)| emit_reg(reg));
+        write!(output, "    .entry {{").unwrap();
+        for (i, (reg, ty)) in entries.iter().enumerate() {
+            if i > 0 {
+                write!(output, ", ").unwrap();
+            }
+            write!(output, "{}: {}", emit_reg(reg), emit_type(ty)).unwrap();
         }
-        for constraint in &block.entry_state.constraints {
-            writeln!(output, "    ;   assume {}", emit_constraint(constraint)).unwrap();
-        }
+        writeln!(output, "}}").unwrap();
+    }
+    for constraint in &block.entry_state.constraints {
+        writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
     }
 
     // Instructions

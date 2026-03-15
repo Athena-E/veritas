@@ -7,7 +7,7 @@
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::{DtalType, DtalValue};
+use crate::backend::dtal::types::DtalType;
 use crate::verifier::error::VerifyError;
 
 /// Verify a single instruction updates the type state correctly
@@ -136,69 +136,81 @@ pub fn verify_instruction(
 }
 
 /// Verify mov immediate instruction
+///
+/// Xi & Harper's type-movimm rule: `mov rd, c ⟹ rd : int(c)`
+/// The type is derived from the immediate value, not trusted from the annotation.
 fn verify_mov_imm(
     dst: Reg,
     imm: i64,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
-    block_label: &str,
+    _block_label: &str,
 ) -> Result<(), VerifyError> {
-    // For singleton types, check the value matches
-    if let DtalType::SingletonInt(DtalValue::Int(expected)) = ty
-        && imm != *expected
-    {
-        return Err(VerifyError::SingletonMismatch {
-            block: block_label.to_string(),
-            expected_value: *expected,
-            actual_value: imm,
-        });
-    }
-
-    state.register_types.insert(dst, ty.clone());
+    let derived_ty = DtalType::SingletonInt(IndexExpr::Const(imm));
+    let derived_idx = IndexExpr::Const(imm);
+    state.register_types.insert(dst, derived_ty);
+    add_register_index_constraint(dst, &derived_idx, state);
     Ok(())
 }
 
 /// Verify mov register instruction
+///
+/// Xi & Harper's type-mov rule: `mov rd, rs ⟹ rd : τ` where `rs : τ`
+/// The type is derived from the source register, not trusted from the annotation.
 fn verify_mov_reg(
     dst: Reg,
     src: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
-    // Check source register is defined
     let src_ty = get_register_type(src, state, block_label)?;
+    let derived_ty = src_ty.clone();
 
-    // Check source type is compatible with declared type
-    if !types_compatible(&src_ty, ty) {
-        return Err(VerifyError::TypeMismatch {
-            block: block_label.to_string(),
-            instr_desc: format!("mov {:?}, {:?}", dst, src),
-            expected: ty.clone(),
-            actual: src_ty,
-        });
+    // Link dst to src's index if singleton
+    if let DtalType::SingletonInt(ref idx) = derived_ty {
+        add_register_index_constraint(dst, idx, state);
     }
 
-    state.register_types.insert(dst, ty.clone());
+    state.register_types.insert(dst, derived_ty);
     Ok(())
 }
 
+/// Extract the index expression from a type for derivation-based typing.
+///
+/// - `SingletonInt(idx)` → `idx`
+/// - `RefinedInt { var, .. }` → `Var(var)`
+/// - `Int` → `Var(reg_name)` (treat register as opaque index variable)
+pub fn extract_index(ty: &DtalType, reg: &Reg) -> IndexExpr {
+    match ty {
+        DtalType::SingletonInt(idx) => idx.clone(),
+        DtalType::RefinedInt { var, .. } => IndexExpr::Var(var.clone()),
+        _ => reg_to_index_expr(reg),
+    }
+}
+
 /// Verify binary operation
+///
+/// Xi & Harper's derivation rules:
+/// - type-add: `rs : int(x), v : int(y) ⟹ rd : int(x+y)`
+/// - type-sub, type-mul, type-div similarly
+/// - And/Or: boolean result
+///
+/// The verifier derives the result type from operand types, ignoring `ty`.
 fn verify_binop(
     op: BinaryOp,
     dst: Reg,
     lhs: Reg,
     rhs: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     let lhs_ty = get_register_type(lhs, state, block_label)?;
     let rhs_ty = get_register_type(rhs, state, block_label)?;
 
-    // Check operand types based on operation
-    match op {
-        // Logical operations require boolean operands
+    let derived_ty = match op {
+        // Logical operations require boolean operands, produce Bool
         BinaryOp::And | BinaryOp::Or => {
             if !matches!(lhs_ty, DtalType::Bool) || !matches!(rhs_ty, DtalType::Bool) {
                 return Err(VerifyError::BinOpTypeMismatch {
@@ -208,8 +220,9 @@ fn verify_binop(
                     rhs_type: rhs_ty,
                 });
             }
+            DtalType::Bool
         }
-        // Arithmetic operations require numeric operands
+        // Arithmetic operations: derive result type symbolically
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
@@ -220,49 +233,46 @@ fn verify_binop(
                 });
             }
 
-            // For singleton types, verify the result
-            if let (
-                DtalType::SingletonInt(DtalValue::Int(l)),
-                DtalType::SingletonInt(DtalValue::Int(r)),
-            ) = (&lhs_ty, &rhs_ty)
-            {
-                let expected_result = match op {
-                    BinaryOp::Add => l + r,
-                    BinaryOp::Sub => l - r,
-                    BinaryOp::Mul => l * r,
-                    BinaryOp::Div => {
-                        if *r != 0 {
-                            l / r
-                        } else {
-                            0
-                        }
-                    }
-                    _ => unreachable!(),
-                };
+            let lhs_idx = extract_index(&lhs_ty, &lhs);
+            let rhs_idx = extract_index(&rhs_ty, &rhs);
 
-                if let DtalType::SingletonInt(DtalValue::Int(declared)) = ty
-                    && *declared != expected_result
-                {
-                    return Err(VerifyError::SingletonMismatch {
-                        block: block_label.to_string(),
-                        expected_value: expected_result,
-                        actual_value: *declared,
-                    });
+            let result_idx = match op {
+                BinaryOp::Add => {
+                    IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx))
                 }
-            }
+                BinaryOp::Sub => {
+                    IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx))
+                }
+                BinaryOp::Mul => {
+                    IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx))
+                }
+                BinaryOp::Div => {
+                    IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx))
+                }
+                _ => unreachable!(),
+            };
+
+            DtalType::SingletonInt(result_idx)
         }
+    };
+
+    // Add register-to-index linkage for derived singleton types
+    if let DtalType::SingletonInt(ref idx) = derived_ty {
+        add_register_index_constraint(dst, idx, state);
     }
 
-    state.register_types.insert(dst, ty.clone());
+    state.register_types.insert(dst, derived_ty);
     Ok(())
 }
 
 /// Verify add immediate instruction
+///
+/// Derived type: `src : int(x) ⟹ dst : int(x + imm)`
 fn verify_add_imm(
     dst: Reg,
     src: Reg,
     imm: i64,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
@@ -273,26 +283,16 @@ fn verify_add_imm(
             block: block_label.to_string(),
             op: "addi".to_string(),
             lhs_type: src_ty,
-            rhs_type: DtalType::SingletonInt(DtalValue::Int(imm)),
+            rhs_type: DtalType::SingletonInt(IndexExpr::Const(imm)),
         });
     }
 
-    // For singleton types, verify the result
-    if let DtalType::SingletonInt(DtalValue::Int(src_val)) = &src_ty {
-        let expected_result = src_val + imm;
+    let src_idx = extract_index(&src_ty, &src);
+    let result_idx = IndexExpr::Add(Box::new(src_idx), Box::new(IndexExpr::Const(imm)));
+    let derived_ty = DtalType::SingletonInt(result_idx.clone());
 
-        if let DtalType::SingletonInt(DtalValue::Int(declared)) = ty
-            && *declared != expected_result
-        {
-            return Err(VerifyError::SingletonMismatch {
-                block: block_label.to_string(),
-                expected_value: expected_result,
-                actual_value: *declared,
-            });
-        }
-    }
-
-    state.register_types.insert(dst, ty.clone());
+    add_register_index_constraint(dst, &result_idx, state);
+    state.register_types.insert(dst, derived_ty);
     Ok(())
 }
 
@@ -311,14 +311,14 @@ fn verify_load(
     // If base has an array type, perform bounds checking
     if let DtalType::Array {
         element_type,
-        size: DtalValue::Int(array_size),
+        size,
     } = &base_ty
     {
         // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
-            Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
+            Box::new(Constraint::Lt(offset_expr, size.clone())),
         );
 
         if !is_constraint_provable(&bounds_constraint, &state.constraints) {
@@ -332,7 +332,7 @@ fn verify_load(
 
         // Derive element type from base, don't trust the annotation
         let derived_ty = element_type.as_ref().clone();
-        if !types_compatible(&derived_ty, ty) {
+        if !types_compatible_with_constraints(&derived_ty, ty, &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
@@ -361,14 +361,14 @@ fn verify_store(
     // If base has an array type, perform bounds checking
     if let DtalType::Array {
         element_type,
-        size: DtalValue::Int(array_size),
+        size,
     } = &base_ty
     {
         // Construct bounds constraint: 0 <= offset < size
         let offset_expr = reg_to_index_expr(&offset);
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
-            Box::new(Constraint::Lt(offset_expr, IndexExpr::Const(*array_size))),
+            Box::new(Constraint::Lt(offset_expr, size.clone())),
         );
 
         if !is_constraint_provable(&bounds_constraint, &state.constraints) {
@@ -381,7 +381,7 @@ fn verify_store(
         }
 
         // Check stored value type is compatible with array element type
-        if !types_compatible(&src_ty, element_type.as_ref()) {
+        if !types_compatible_with_constraints(&src_ty, element_type.as_ref(), &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
@@ -440,8 +440,8 @@ fn verify_type_annotation(
     block_label: &str,
 ) -> Result<(), VerifyError> {
     if let Some(existing_ty) = state.register_types.get(&reg) {
-        // Register already has a type -- verify compatibility
-        if !types_compatible(existing_ty, ty) {
+        // Register already has a type -- verify compatibility with constraint context
+        if !types_compatible_with_constraints(existing_ty, ty, &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("type_annotation {:?} : {}", reg, ty),
@@ -512,12 +512,21 @@ fn is_numeric_type(ty: &DtalType) -> bool {
 }
 
 /// Check if actual type is a subtype of (or equal to) expected type.
-pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
+///
+/// Uses the constraint context for Xi & Harper's coerce-int rule:
+/// `φ ⊨ x = y ⟹ int(x) ≤ int(y)`
+pub fn types_compatible_with_constraints(
+    actual: &DtalType,
+    expected: &DtalType,
+    constraints: &[Constraint],
+) -> bool {
     match (actual, expected) {
         (DtalType::Int, DtalType::Int) => true,
         (DtalType::Bool, DtalType::Bool) => true,
         (DtalType::Unit, DtalType::Unit) => true,
-        (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => a == b,
+        (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => {
+            a == b || is_constraint_provable(&Constraint::Eq(a.clone(), b.clone()), constraints)
+        }
         (DtalType::SingletonInt(_), DtalType::Int) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
         (DtalType::Int, DtalType::SingletonInt(_)) => false,
@@ -531,18 +540,35 @@ pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
                 element_type: e2,
                 size: s2,
             },
-        ) => types_compatible(e1.as_ref(), e2.as_ref()) && s1 == s2,
+        ) => {
+            types_compatible_with_constraints(e1.as_ref(), e2.as_ref(), constraints)
+                && (s1 == s2
+                    || is_constraint_provable(
+                        &Constraint::Eq(s1.clone(), s2.clone()),
+                        constraints,
+                    ))
+        }
         (DtalType::Ref(a), DtalType::Ref(b)) => {
-            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)
+                && types_compatible_with_constraints(b.as_ref(), a.as_ref(), constraints)
         }
         (DtalType::RefMut(a), DtalType::RefMut(b)) => {
-            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)
+                && types_compatible_with_constraints(b.as_ref(), a.as_ref(), constraints)
         }
         (DtalType::Master(a), DtalType::Master(b)) => {
-            types_compatible(a.as_ref(), b.as_ref()) && types_compatible(b.as_ref(), a.as_ref())
+            types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)
+                && types_compatible_with_constraints(b.as_ref(), a.as_ref(), constraints)
         }
         _ => false,
     }
+}
+
+/// Check if actual type is a subtype of (or equal to) expected type.
+/// Convenience wrapper without constraint context (syntactic check only).
+#[allow(dead_code)]
+pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
+    types_compatible_with_constraints(actual, expected, &[])
 }
 
 /// Check if a constraint is provable from context
@@ -590,6 +616,22 @@ fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
 /// Convert a register to an IndexExpr variable
 pub fn reg_to_index_expr(reg: &Reg) -> IndexExpr {
     IndexExpr::Var(format!("{}", reg))
+}
+
+/// Add a constraint linking a register to its index expression.
+///
+/// When the verifier assigns `reg : SingletonInt(idx)`, this adds
+/// `reg == idx` to the constraint context (unless idx is already the
+/// register's own variable). This bridges types and constraints so Z3
+/// can reason across them.
+fn add_register_index_constraint(reg: Reg, idx: &IndexExpr, state: &mut TypeState) {
+    let reg_expr = reg_to_index_expr(&reg);
+    // Don't add tautological constraint reg == reg
+    if *idx != reg_expr {
+        state
+            .constraints
+            .push(Constraint::Eq(reg_expr, idx.clone()));
+    }
 }
 
 /// Negate a CmpOp (Lt <-> Ge, Le <-> Gt, Eq <-> Ne)

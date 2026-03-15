@@ -107,13 +107,33 @@ pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction {
         .map(|(vreg, ty)| (Reg::Virtual(*vreg), DtalType::from_itype(ty)))
         .collect();
 
-    DtalFunction {
+    let mut dtal_func = DtalFunction {
         name: func.name.clone(),
-        params,
+        params: params.clone(),
         return_type: DtalType::from_itype(&func.return_type),
         precondition: func.precondition.clone(),
         postcondition: func.postcondition.clone(),
         blocks: ctx.take_blocks(),
+    };
+
+    // Compute and stamp entry states on blocks using dataflow analysis.
+    // This makes the DTAL program self-describing — the verifier can check
+    // each block independently using the declared entry state.
+    stamp_entry_states(&mut dtal_func);
+
+    dtal_func
+}
+
+/// Compute entry states for all blocks and stamp them onto the DTAL function.
+fn stamp_entry_states(func: &mut DtalFunction) {
+    use crate::verifier::dataflow::analyze_function;
+
+    if let Ok(dataflow) = analyze_function(func) {
+        for block in &mut func.blocks {
+            if let Some(entry_state) = dataflow.entry_states.get(&block.label) {
+                block.entry_state = entry_state.clone();
+            }
+        }
     }
 }
 

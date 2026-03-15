@@ -3,33 +3,23 @@
 //! These types mirror `IType<'src>` but use `Constraint` instead of
 //! `IProposition<'src>`, making DTAL programs self-contained and
 //! independent of the source AST.
+//!
+//! Singleton types use `IndexExpr` for symbolic index tracking:
+//! `SingletonInt(IndexExpr::Const(5))` for concrete values,
+//! `SingletonInt(IndexExpr::Var("n"))` for symbolic values,
+//! `SingletonInt(IndexExpr::Add(..))` for derived values.
 
-use crate::backend::dtal::constraints::Constraint;
+use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use std::fmt;
 use std::sync::Arc;
-
-/// A compile-time value in the DTAL domain (lifetime-free mirror of `IValue`)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum DtalValue {
-    Int(i64),
-    Bool(bool),
-    Symbolic(String),
-}
-
-impl fmt::Display for DtalValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DtalValue::Int(n) => write!(f, "{}", n),
-            DtalValue::Bool(b) => write!(f, "{}", b),
-            DtalValue::Symbolic(s) => write!(f, "{}", s),
-        }
-    }
-}
 
 /// A first-order DTAL type (no `'src` lifetime)
 ///
 /// The key difference from `IType<'src>`: `RefinedInt` uses `Constraint`
 /// (first-order, index domain) instead of `IProposition<'src>` (full source AST).
+///
+/// `SingletonInt` and `Array` use `IndexExpr` for symbolic value tracking,
+/// enabling Xi & Harper's derivation-based typing rules.
 #[derive(Clone, Debug)]
 pub enum DtalType {
     Unit,
@@ -37,11 +27,11 @@ pub enum DtalType {
     Bool,
     Array {
         element_type: Arc<Self>,
-        size: DtalValue,
+        size: IndexExpr,
     },
     Ref(Arc<Self>),
     RefMut(Arc<Self>),
-    SingletonInt(DtalValue),
+    SingletonInt(IndexExpr),
     RefinedInt {
         base: Arc<Self>,
         var: String,
@@ -87,6 +77,34 @@ impl PartialEq for DtalType {
     }
 }
 
+impl std::hash::Hash for DtalType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            DtalType::Unit | DtalType::Int | DtalType::Bool => {}
+            DtalType::Array { element_type, size } => {
+                element_type.hash(state);
+                format!("{}", size).hash(state);
+            }
+            DtalType::Ref(inner) | DtalType::RefMut(inner) | DtalType::Master(inner) => {
+                inner.hash(state);
+            }
+            DtalType::SingletonInt(idx) => {
+                format!("{}", idx).hash(state);
+            }
+            DtalType::RefinedInt {
+                base,
+                var,
+                constraint,
+            } => {
+                base.hash(state);
+                var.hash(state);
+                format!("{}", constraint).hash(state);
+            }
+        }
+    }
+}
+
 impl Eq for DtalType {}
 
 impl fmt::Display for DtalType {
@@ -100,7 +118,7 @@ impl fmt::Display for DtalType {
             }
             DtalType::Ref(inner) => write!(f, "&{}", inner),
             DtalType::RefMut(inner) => write!(f, "&mut {}", inner),
-            DtalType::SingletonInt(val) => write!(f, "int({})", val),
+            DtalType::SingletonInt(idx) => write!(f, "int({})", idx),
             DtalType::RefinedInt {
                 base: _,
                 var,
@@ -128,11 +146,11 @@ impl DtalType {
             IType::Bool => DtalType::Bool,
             IType::Array { element_type, size } => DtalType::Array {
                 element_type: Arc::new(DtalType::from_itype(element_type)),
-                size: DtalValue::from_ivalue(size),
+                size: Self::ivalue_to_index_expr(size),
             },
             IType::Ref(inner) => DtalType::Ref(Arc::new(DtalType::from_itype(inner))),
             IType::RefMut(inner) => DtalType::RefMut(Arc::new(DtalType::from_itype(inner))),
-            IType::SingletonInt(val) => DtalType::SingletonInt(DtalValue::from_ivalue(val)),
+            IType::SingletonInt(val) => DtalType::SingletonInt(Self::ivalue_to_index_expr(val)),
             IType::RefinedInt { base, prop } => {
                 use crate::backend::dtal::convert::expr_to_constraint;
                 match expr_to_constraint(&prop.predicate.0) {
@@ -150,16 +168,14 @@ impl DtalType {
             IType::Master(inner) => DtalType::Master(Arc::new(DtalType::from_itype(inner))),
         }
     }
-}
 
-impl DtalValue {
-    /// Convert an `IValue` to a `DtalValue`.
-    pub fn from_ivalue(val: &crate::common::types::IValue) -> Self {
+    /// Convert an `IValue` to an `IndexExpr`.
+    fn ivalue_to_index_expr(val: &crate::common::types::IValue) -> IndexExpr {
         use crate::common::types::IValue;
         match val {
-            IValue::Int(n) => DtalValue::Int(*n),
-            IValue::Bool(b) => DtalValue::Bool(*b),
-            IValue::Symbolic(s) => DtalValue::Symbolic(s.clone()),
+            IValue::Int(n) => IndexExpr::Const(*n),
+            IValue::Bool(b) => IndexExpr::Const(if *b { 1 } else { 0 }),
+            IValue::Symbolic(s) => IndexExpr::Var(s.clone()),
         }
     }
 }
@@ -178,15 +194,30 @@ mod tests {
 
     #[test]
     fn test_display_singleton() {
-        let ty = DtalType::SingletonInt(DtalValue::Int(42));
+        let ty = DtalType::SingletonInt(IndexExpr::Const(42));
         assert_eq!(ty.to_string(), "int(42)");
+    }
+
+    #[test]
+    fn test_display_singleton_symbolic() {
+        let ty = DtalType::SingletonInt(IndexExpr::Var("n".to_string()));
+        assert_eq!(ty.to_string(), "int(n)");
+    }
+
+    #[test]
+    fn test_display_singleton_compound() {
+        let ty = DtalType::SingletonInt(IndexExpr::Add(
+            Box::new(IndexExpr::Var("n".to_string())),
+            Box::new(IndexExpr::Const(1)),
+        ));
+        assert_eq!(ty.to_string(), "int((n + 1))");
     }
 
     #[test]
     fn test_display_array() {
         let ty = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(10),
+            size: IndexExpr::Const(10),
         };
         assert_eq!(ty.to_string(), "[int; 10]");
     }
@@ -231,7 +262,7 @@ mod tests {
     fn test_from_itype_singleton() {
         let itype = IType::SingletonInt(IValue::Int(5));
         let dtal_type = DtalType::from_itype(&itype);
-        assert_eq!(dtal_type, DtalType::SingletonInt(DtalValue::Int(5)));
+        assert_eq!(dtal_type, DtalType::SingletonInt(IndexExpr::Const(5)));
     }
 
     #[test]
@@ -245,7 +276,7 @@ mod tests {
             dtal_type,
             DtalType::Array {
                 element_type: Arc::new(DtalType::Int),
-                size: DtalValue::Int(10),
+                size: IndexExpr::Const(10),
             }
         );
     }
@@ -255,12 +286,19 @@ mod tests {
         assert_eq!(DtalType::Int, DtalType::Int);
         assert_ne!(DtalType::Int, DtalType::Bool);
         assert_eq!(
-            DtalType::SingletonInt(DtalValue::Int(5)),
-            DtalType::SingletonInt(DtalValue::Int(5))
+            DtalType::SingletonInt(IndexExpr::Const(5)),
+            DtalType::SingletonInt(IndexExpr::Const(5))
         );
         assert_ne!(
-            DtalType::SingletonInt(DtalValue::Int(5)),
-            DtalType::SingletonInt(DtalValue::Int(6))
+            DtalType::SingletonInt(IndexExpr::Const(5)),
+            DtalType::SingletonInt(IndexExpr::Const(6))
         );
+    }
+
+    #[test]
+    fn test_parse_roundtrip_symbolic() {
+        let ty = DtalType::SingletonInt(IndexExpr::Var("n".to_string()));
+        let s = ty.to_string();
+        assert_eq!(s, "int(n)");
     }
 }

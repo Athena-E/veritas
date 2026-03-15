@@ -37,15 +37,15 @@
 #![allow(clippy::result_large_err)]
 
 pub(crate) mod checker;
-mod dataflow;
+pub(crate) mod dataflow;
 mod error;
 pub(crate) mod smt;
 
 pub use error::VerifyError;
 
-use crate::backend::dtal::instr::{DtalFunction, DtalProgram};
+use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use checker::verify_instruction;
-use dataflow::analyze_function;
+use std::collections::HashMap;
 
 /// Error type for standalone DTAL text verification
 #[derive(Debug)]
@@ -90,81 +90,259 @@ pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
     Ok(())
 }
 
-/// Verify a single DTAL function
+/// Verify a single DTAL function using derivation-based checking.
+///
+/// Each block is checked independently:
+/// 1. Start from the block's declared entry state
+/// 2. Derive types through the instruction sequence
+/// 3. At jumps/branches, prove state coercion into target's declared state
+/// 4. At return, check return type and postcondition
+///
+/// No dataflow analysis is used. The entry block's declared state must be
+/// consistent with function parameters and precondition. If a block has no
+/// declared entry state, the verifier computes one via dataflow (backward
+/// compatibility for programs that don't yet declare states).
 fn verify_function(func: &DtalFunction, program: &DtalProgram) -> Result<(), VerifyError> {
-    // Run dataflow analysis to compute entry/exit states
-    let dataflow = analyze_function(func)?;
+    // Build label map for state coercion checks at jumps
+    let label_map: HashMap<&str, &TypeState> = func
+        .blocks
+        .iter()
+        .map(|b| (b.label.as_str(), &b.entry_state))
+        .collect();
 
-    // Verify each block
+    // If blocks have declared entry states, use derivation-based checking.
+    // Otherwise, fall back to dataflow-based checking for backward compatibility.
+    let has_declared_states = func.blocks.iter().any(|b| !b.entry_state.register_types.is_empty());
+
+    if has_declared_states {
+        verify_function_derivation(func, program, &label_map)
+    } else {
+        verify_function_dataflow(func, program)
+    }
+}
+
+/// Derivation-based verification: each block is checked independently
+fn verify_function_derivation(
+    func: &DtalFunction,
+    program: &DtalProgram,
+    label_map: &HashMap<&str, &TypeState>,
+) -> Result<(), VerifyError> {
+    // Check entry block's declared state is consistent with function parameters
+    if let Some(entry_block) = func.blocks.first() {
+        let entry_state = &entry_block.entry_state;
+        for (reg, ty) in &func.params {
+            if let Some(declared_ty) = entry_state.register_types.get(reg)
+                && !checker::types_compatible(declared_ty, ty)
+            {
+                return Err(VerifyError::TypeMismatch {
+                    block: entry_block.label.clone(),
+                    instr_desc: format!("entry state for {:?}", reg),
+                    expected: ty.clone(),
+                    actual: declared_ty.clone(),
+                });
+            }
+        }
+    }
+
+    for (block_idx, block) in func.blocks.iter().enumerate() {
+        verify_block_derivation(func, program, block, block_idx, label_map)?;
+    }
+
+    Ok(())
+}
+
+/// Verify a single block using derivation-based checking
+fn verify_block_derivation(
+    func: &DtalFunction,
+    program: &DtalProgram,
+    block: &DtalBlock,
+    block_idx: usize,
+    label_map: &HashMap<&str, &TypeState>,
+) -> Result<(), VerifyError> {
+    let mut state = block.entry_state.clone();
+
+    // Walk instructions, deriving types
+    for instr in &block.instructions {
+        match instr {
+            DtalInstr::Jmp { target } => {
+                // Prove current state coerces into target's declared state
+                if let Some(target_state) = label_map.get(target.as_str()) {
+                    verify_state_coercion(&state, target_state, &block.label, target)?;
+                }
+            }
+            DtalInstr::Branch { cond, target } => {
+                // Taken edge: add positive constraint, prove coercion
+                if let Some(pos_constraint) =
+                    checker::constraint_from_cmp_op(*cond, &state.last_cmp)
+                {
+                    let mut taken_state = state.clone();
+                    taken_state.constraints.push(pos_constraint);
+                    if let Some(target_state) = label_map.get(target.as_str()) {
+                        verify_state_coercion(
+                            &taken_state,
+                            target_state,
+                            &block.label,
+                            target,
+                        )?;
+                    }
+                }
+
+                // Fall-through edge: add negated constraint, prove coercion
+                let neg_cond = checker::negate_cmp_op(*cond);
+                if let Some(neg_constraint) =
+                    checker::constraint_from_cmp_op(neg_cond, &state.last_cmp)
+                {
+                    state.constraints.push(neg_constraint);
+                }
+                if let Some(next_block) = func.blocks.get(block_idx + 1)
+                    && let Some(next_state) = label_map.get(next_block.label.as_str())
+                {
+                    verify_state_coercion(
+                        &state,
+                        next_state,
+                        &block.label,
+                        &next_block.label,
+                    )?;
+                }
+            }
+            DtalInstr::Ret => {
+                verify_return(func, &state)?;
+            }
+            other => {
+                verify_instruction(other, &mut state, &block.label, program)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Fallback: dataflow-based verification for programs without declared entry states
+fn verify_function_dataflow(
+    func: &DtalFunction,
+    program: &DtalProgram,
+) -> Result<(), VerifyError> {
+    let dataflow = dataflow::analyze_function(func)?;
+
     for block in &func.blocks {
-        // Get entry state from dataflow analysis
         let entry_state = dataflow
             .entry_states
             .get(&block.label)
             .cloned()
             .unwrap_or_else(|| block.entry_state.clone());
 
-        // Verify instructions with entry state
         let mut state = entry_state;
         for instr in &block.instructions {
             verify_instruction(instr, &mut state, &block.label, program)?;
         }
 
-        // Verify terminator (for return instructions, check return type and postconditions)
-        verify_terminator(func, block, &state)?;
+        verify_return_if_present(func, block, &state)?;
     }
 
     Ok(())
 }
 
-/// Verify block terminator
-fn verify_terminator(
+/// Check return type and postcondition
+fn verify_return(
     func: &DtalFunction,
-    block: &crate::backend::dtal::instr::DtalBlock,
-    state: &crate::backend::dtal::instr::TypeState,
+    state: &TypeState,
 ) -> Result<(), VerifyError> {
-    use crate::backend::dtal::instr::DtalInstr;
     use crate::backend::dtal::regs::{PhysicalReg, Reg};
 
-    // Find terminator instruction
+    let return_reg = Reg::Physical(PhysicalReg::R0);
+    if let Some(actual_type) = state.register_types.get(&return_reg)
+        && !types_compatible_with_constraints(actual_type, &func.return_type, &state.constraints)
+    {
+        return Err(VerifyError::ReturnTypeMismatch {
+            function: func.name.clone(),
+            expected: func.return_type.clone(),
+            actual: actual_type.clone(),
+        });
+    }
+
+    if let Some(postcond) = &func.postcondition
+        && !checker::is_constraint_provable(postcond, &state.constraints)
+    {
+        return Err(VerifyError::PostconditionFailed {
+            function: func.name.clone(),
+            constraint: postcond.clone(),
+            context: state.constraints.clone(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Check return type/postcondition for any Ret instruction in a block (dataflow path)
+fn verify_return_if_present(
+    func: &DtalFunction,
+    block: &DtalBlock,
+    state: &TypeState,
+) -> Result<(), VerifyError> {
     for instr in &block.instructions {
         if let DtalInstr::Ret = instr {
-            // For return, check that R0 (return register) has correct type
-            let return_reg = Reg::Physical(PhysicalReg::R0);
-            if let Some(actual_type) = state.register_types.get(&return_reg) {
-                // Check return type compatibility
-                if !types_compatible(actual_type, &func.return_type) {
-                    return Err(VerifyError::ReturnTypeMismatch {
-                        function: func.name.clone(),
-                        expected: func.return_type.clone(),
-                        actual: actual_type.clone(),
-                    });
-                }
-            }
+            verify_return(func, state)?;
+        }
+    }
+    Ok(())
+}
 
-            // Check postcondition if present
-            if let Some(postcond) = &func.postcondition
-                && !checker::is_constraint_provable(postcond, &state.constraints)
-            {
-                return Err(VerifyError::PostconditionFailed {
-                    function: func.name.clone(),
-                    constraint: postcond.clone(),
-                    context: state.constraints.clone(),
-                });
-            }
+/// Verify that `current` state coerces into `target` declared state.
+///
+/// Xi & Harper's type-jmp rule: at a jump to label L, the current state
+/// must coerce into L's declared state.
+///
+/// - For each register in the target: `τ_current ≤ τ_target` (subtyping modulo constraints)
+/// - For each constraint in the target: must be provable from the current constraints
+fn verify_state_coercion(
+    current: &TypeState,
+    target: &TypeState,
+    source_block: &str,
+    target_label: &str,
+) -> Result<(), VerifyError> {
+    // Check register types
+    for (reg, target_ty) in &target.register_types {
+        if let Some(current_ty) = current.register_types.get(reg)
+            && !checker::types_compatible_with_constraints(
+                current_ty,
+                target_ty,
+                &current.constraints,
+            )
+        {
+            return Err(VerifyError::JoinMismatch {
+                block: target_label.to_string(),
+                reg: *reg,
+                expected: target_ty.clone(),
+                actual: current_ty.clone(),
+                from_block: source_block.to_string(),
+            });
+        }
+        // If register not in current state, that's OK — the target state
+        // declares it, and a TypeAnnotation in the target block will define it
+    }
+
+    // Check constraints
+    for target_constraint in &target.constraints {
+        if !checker::is_constraint_provable(target_constraint, &current.constraints) {
+            return Err(VerifyError::UnprovableConstraint {
+                constraint: target_constraint.clone(),
+                context: current.constraints.clone(),
+                block: format!("{} -> {}", source_block, target_label),
+            });
         }
     }
 
     Ok(())
 }
 
-/// Check if actual type is a subtype of (or equal to) expected type.
-/// Delegates to the consolidated implementation in checker.rs.
-fn types_compatible(
+/// Check if actual type is a subtype of (or equal to) expected type,
+/// using the constraint context for coercion proofs.
+fn types_compatible_with_constraints(
     actual: &crate::backend::dtal::types::DtalType,
     expected: &crate::backend::dtal::types::DtalType,
+    constraints: &[crate::backend::dtal::constraints::Constraint],
 ) -> bool {
-    checker::types_compatible(actual, expected)
+    checker::types_compatible_with_constraints(actual, expected, constraints)
 }
 
 #[cfg(test)]
@@ -173,7 +351,7 @@ mod tests {
     use crate::backend::dtal::constraints::{Constraint, IndexExpr};
     use crate::backend::dtal::instr::{CmpOp, DtalBlock, DtalInstr, TypeState};
     use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-    use crate::backend::dtal::types::{DtalType, DtalValue};
+    use crate::backend::dtal::types::DtalType;
     use std::sync::Arc;
 
     // Helpers for concise register construction
@@ -243,14 +421,14 @@ mod tests {
         let program = make_program(vec![make_func(
             "const_five",
             vec![],
-            DtalType::SingletonInt(DtalValue::Int(5)),
+            DtalType::SingletonInt(IndexExpr::Const(5)),
             vec![make_block(
                 ".entry",
                 vec![
                     DtalInstr::MovImm {
                         dst: v(0),
                         imm: 5,
-                        ty: DtalType::SingletonInt(DtalValue::Int(5)),
+                        ty: DtalType::SingletonInt(IndexExpr::Const(5)),
                     },
                     DtalInstr::Ret,
                 ],
@@ -260,25 +438,26 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_singleton_mismatch() {
+    fn test_movimm_derives_correct_type_ignoring_annotation() {
+        // Derivation-based: verifier derives int(5) regardless of ty annotation
         let program = make_program(vec![make_func(
-            "bad",
+            "ok",
             vec![],
-            DtalType::Int,
+            DtalType::SingletonInt(IndexExpr::Const(5)),
             vec![make_block(
                 ".entry",
-                vec![DtalInstr::MovImm {
-                    dst: v(0),
-                    imm: 5,
-                    ty: DtalType::SingletonInt(DtalValue::Int(6)), // Wrong!
-                }],
+                vec![
+                    DtalInstr::MovImm {
+                        dst: r0(),
+                        imm: 5,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(6)), // Wrong annotation, ignored
+                    },
+                    DtalInstr::Ret,
+                ],
             )],
         )]);
-        let result = verify_dtal(&program);
-        assert!(matches!(
-            result.unwrap_err(),
-            VerifyError::SingletonMismatch { .. }
-        ));
+        // Verifier derives int(5) for r0, which matches return type int(5)
+        assert!(verify_dtal(&program).is_ok());
     }
 
     #[test]
@@ -438,33 +617,33 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_reject_int_as_singleton() {
+    fn test_movreg_derives_from_source_ignoring_annotation() {
+        // Derivation-based: MovReg derives dst type from src, ignoring ty annotation
         let program = make_program(vec![make_func(
-            "bad",
+            "ok",
             vec![(v(0), DtalType::Int)],
             DtalType::Int,
             vec![make_block(
                 ".entry",
-                vec![DtalInstr::MovReg {
-                    dst: v(1),
-                    src: v(0),
-                    ty: DtalType::SingletonInt(DtalValue::Int(5)),
-                }],
+                vec![
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::SingletonInt(IndexExpr::Const(5)), // Wrong annotation, ignored
+                    },
+                    DtalInstr::Ret,
+                ],
             )],
         )]);
-        let result = verify_dtal(&program);
-        assert!(result.is_err(), "Int is not a subtype of SingletonInt");
-        assert!(matches!(
-            result.unwrap_err(),
-            VerifyError::TypeMismatch { .. }
-        ));
+        // Verifier derives Int for r0 (from v0), matches return type Int
+        assert!(verify_dtal(&program).is_ok());
     }
 
     #[test]
     fn test_singleton_subtype_of_int() {
         let program = make_program(vec![make_func(
             "ok",
-            vec![(v(0), DtalType::SingletonInt(DtalValue::Int(5)))],
+            vec![(v(0), DtalType::SingletonInt(IndexExpr::Const(5)))],
             DtalType::Int,
             vec![make_block(
                 ".entry",
@@ -482,7 +661,9 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_bool_as_int() {
+    fn test_reject_bool_as_int_at_return() {
+        // Derivation-based: MovReg derives Bool from src (v2),
+        // then returning Bool where Int is expected triggers an error
         let program = make_program(vec![make_func(
             "bad",
             vec![(v(0), DtalType::Int), (v(1), DtalType::Int)],
@@ -499,22 +680,27 @@ mod tests {
                         cond: CmpOp::Lt,
                     },
                     DtalInstr::MovReg {
-                        dst: v(3),
+                        dst: r0(),
                         src: v(2),         // v2 is Bool
-                        ty: DtalType::Int, // annotated as Int
+                        ty: DtalType::Int, // annotation ignored
                     },
+                    DtalInstr::Ret,
                 ],
             )],
         )]);
         let result = verify_dtal(&program);
-        assert!(result.is_err(), "Bool is not a subtype of Int");
+        assert!(result.is_err(), "Bool is not a subtype of Int at return");
+        assert!(matches!(
+            result.unwrap_err(),
+            VerifyError::ReturnTypeMismatch { .. }
+        ));
     }
 
     #[test]
     fn test_array_subtyping_compatible() {
         let arr_ty = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(10),
+            size: IndexExpr::Const(10),
         };
         assert!(checker::types_compatible(&arr_ty, &arr_ty));
     }
@@ -523,11 +709,11 @@ mod tests {
     fn test_array_subtyping_different_sizes() {
         let arr10 = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(10),
+            size: IndexExpr::Const(10),
         };
         let arr5 = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(5),
+            size: IndexExpr::Const(5),
         };
         assert!(!checker::types_compatible(&arr10, &arr5));
     }
@@ -548,7 +734,7 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v(0),
                         imm: 5,
-                        ty: DtalType::SingletonInt(DtalValue::Int(5)),
+                        ty: DtalType::SingletonInt(IndexExpr::Const(5)),
                     },
                     DtalInstr::TypeAnnotation {
                         reg: v(0),
@@ -580,7 +766,7 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v(0),
                         imm: 5,
-                        ty: DtalType::SingletonInt(DtalValue::Int(5)),
+                        ty: DtalType::SingletonInt(IndexExpr::Const(5)),
                     },
                     DtalInstr::TypeAnnotation {
                         reg: v(0),
@@ -623,7 +809,7 @@ mod tests {
                 ".entry",
                 vec![DtalInstr::TypeAnnotation {
                     reg: v(0),
-                    ty: DtalType::SingletonInt(DtalValue::Int(5)),
+                    ty: DtalType::SingletonInt(IndexExpr::Const(5)),
                 }],
             )],
         )]);
@@ -642,7 +828,7 @@ mod tests {
     fn test_reject_load_without_bounds_proof() {
         let arr_ty = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(10),
+            size: IndexExpr::Const(10),
         };
         let program = make_program(vec![make_func(
             "bad",
@@ -673,7 +859,7 @@ mod tests {
     fn test_accept_load_with_constant_in_bounds() {
         let arr_ty = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(10),
+            size: IndexExpr::Const(10),
         };
         let program = make_program(vec![make_func(
             "ok",
@@ -685,7 +871,7 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v(1),
                         imm: 3,
-                        ty: DtalType::SingletonInt(DtalValue::Int(3)),
+                        ty: DtalType::SingletonInt(IndexExpr::Const(3)),
                     },
                     DtalInstr::ConstraintAssert {
                         constraint: Constraint::True,
@@ -708,7 +894,7 @@ mod tests {
     fn test_accept_load_with_precondition_bounds() {
         let arr_ty = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(10),
+            size: IndexExpr::Const(10),
         };
         let mut func = make_func(
             "ok",
@@ -753,7 +939,7 @@ mod tests {
     fn test_reject_store_without_bounds_proof() {
         let arr_ty = DtalType::Array {
             element_type: Arc::new(DtalType::Int),
-            size: DtalValue::Int(5),
+            size: IndexExpr::Const(5),
         };
         let program = make_program(vec![make_func(
             "bad",
@@ -1040,5 +1226,242 @@ mod tests {
             result.unwrap_err(),
             VerifyError::ReturnTypeMismatch { .. }
         ));
+    }
+
+    // ========================================================================
+    // Derivation-based typing tests (Phase 2)
+    // ========================================================================
+
+    #[test]
+    fn test_binop_derives_symbolic_type() {
+        // add v2, v0, v1 with v0: int(3), v1: int(5) derives v2: int((3 + 5))
+        let program = make_program(vec![make_func(
+            "ok",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::MovImm {
+                        dst: v(0),
+                        imm: 3,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::MovImm {
+                        dst: v(1),
+                        imm: 5,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::BinOp {
+                        op: crate::backend::dtal::instr::BinaryOp::Add,
+                        dst: v(2),
+                        lhs: v(0),
+                        rhs: v(1),
+                        ty: DtalType::Int, // annotation ignored
+                    },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(2),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        // v2 gets derived type int((3 + 5)), which is a subtype of Int
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    #[test]
+    fn test_addi_derives_symbolic_type() {
+        // addi v1, v0, 10 with v0: int(5) derives v1: int((5 + 10))
+        let program = make_program(vec![make_func(
+            "ok",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::MovImm {
+                        dst: v(0),
+                        imm: 5,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::AddImm {
+                        dst: v(1),
+                        src: v(0),
+                        imm: 10,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(1),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    // ========================================================================
+    // Constraint-modulo coercion tests (Phase 4)
+    // ========================================================================
+
+    #[test]
+    fn test_singleton_coercion_via_constraint() {
+        // int(n) coerces to int(5) when n == 5 is in constraint context
+        let constraints = vec![Constraint::Eq(
+            IndexExpr::Var("n".to_string()),
+            IndexExpr::Const(5),
+        )];
+        let actual = DtalType::SingletonInt(IndexExpr::Var("n".to_string()));
+        let expected = DtalType::SingletonInt(IndexExpr::Const(5));
+        assert!(checker::types_compatible_with_constraints(
+            &actual,
+            &expected,
+            &constraints
+        ));
+    }
+
+    #[test]
+    fn test_array_size_coercion_via_constraint() {
+        // [int; n] coerces to [int; 5] when n == 5 is in context
+        let constraints = vec![Constraint::Eq(
+            IndexExpr::Var("n".to_string()),
+            IndexExpr::Const(5),
+        )];
+        let actual = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Var("n".to_string()),
+        };
+        let expected = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(5),
+        };
+        assert!(checker::types_compatible_with_constraints(
+            &actual,
+            &expected,
+            &constraints
+        ));
+    }
+
+    // ========================================================================
+    // Derivation-based block verification tests (Phase 3)
+    // ========================================================================
+
+    #[test]
+    fn test_declared_entry_state_verified() {
+        // Block with declared entry state — verifier starts from it
+        use crate::backend::dtal::instr::TypeState;
+
+        let mut entry_state = TypeState::new();
+        entry_state.register_types.insert(v(0), DtalType::Int);
+
+        let program = make_program(vec![DtalFunction {
+            name: "ok".to_string(),
+            params: vec![(v(0), DtalType::Int)],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![DtalBlock {
+                label: ".entry".to_string(),
+                entry_state,
+                instructions: vec![
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            }],
+        }]);
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    #[test]
+    fn test_state_coercion_at_jump() {
+        // Jump where current state has v0: int(5) and target expects v0: int(n) with n > 0
+        use crate::backend::dtal::instr::TypeState;
+
+        let mut entry_state = TypeState::new();
+        entry_state
+            .register_types
+            .insert(v(0), DtalType::SingletonInt(IndexExpr::Const(5)));
+
+        let mut target_state = TypeState::new();
+        target_state.register_types.insert(v(0), DtalType::Int);
+
+        let program = make_program(vec![DtalFunction {
+            name: "ok".to_string(),
+            params: vec![],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                DtalBlock {
+                    label: ".entry".to_string(),
+                    entry_state,
+                    instructions: vec![DtalInstr::Jmp {
+                        target: ".target".to_string(),
+                    }],
+                },
+                DtalBlock {
+                    label: ".target".to_string(),
+                    entry_state: target_state,
+                    instructions: vec![
+                        DtalInstr::MovReg {
+                            dst: r0(),
+                            src: v(0),
+                            ty: DtalType::Int,
+                        },
+                        DtalInstr::Ret,
+                    ],
+                },
+            ],
+        }]);
+        // int(5) ≤ Int, so coercion succeeds
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    #[test]
+    fn test_reject_wrong_entry_state() {
+        // Block with intentionally wrong entry state: declares v0 but v0 is actually Bool
+        use crate::backend::dtal::instr::TypeState;
+
+        let mut entry_state = TypeState::new();
+        entry_state
+            .register_types
+            .insert(v(0), DtalType::SingletonInt(IndexExpr::Const(5)));
+
+        let mut target_state = TypeState::new();
+        target_state.register_types.insert(v(0), DtalType::Bool);
+
+        let program = make_program(vec![DtalFunction {
+            name: "bad".to_string(),
+            params: vec![],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                DtalBlock {
+                    label: ".entry".to_string(),
+                    entry_state,
+                    instructions: vec![DtalInstr::Jmp {
+                        target: ".target".to_string(),
+                    }],
+                },
+                DtalBlock {
+                    label: ".target".to_string(),
+                    entry_state: target_state,
+                    instructions: vec![DtalInstr::Ret],
+                },
+            ],
+        }]);
+        // int(5) is not a subtype of Bool → coercion should fail
+        let result = verify_dtal(&program);
+        assert!(result.is_err(), "State coercion should fail: int(5) ≤ Bool");
     }
 }

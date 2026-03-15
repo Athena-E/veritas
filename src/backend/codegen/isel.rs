@@ -6,7 +6,8 @@
 
 use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
 use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::{DtalType, DtalValue};
+use crate::backend::dtal::constraints::IndexExpr;
+use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
 
@@ -115,7 +116,7 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             // Create array type for annotation
             let array_ty = DtalType::Array {
                 element_type: Arc::new(DtalType::from_itype(element_ty)),
-                size: DtalValue::Int(*size),
+                size: IndexExpr::Const(*size),
             };
 
             instrs.push(DtalInstr::Alloca {
