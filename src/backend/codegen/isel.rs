@@ -389,12 +389,12 @@ fn lower_call<'src>(
 
 /// Widen a type to its base form for array element types.
 ///
-/// `SingletonInt(n)` → `Int`, `RefinedInt { base, .. }` → `*base`.
+/// `SingletonInt(n)` → `Int`. Refined types are preserved since they
+/// carry meaningful constraints (e.g., `{v: int | v > 0}` for positive arrays).
 /// Other types are returned unchanged.
 fn widen_to_base(ty: DtalType) -> DtalType {
     match ty {
         DtalType::SingletonInt(_) => DtalType::Int,
-        DtalType::RefinedInt { base, .. } => base.as_ref().clone(),
         other => other,
     }
 }

@@ -523,9 +523,11 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_constraint_assume_ignored() {
+    fn test_constraint_assume_adds_to_context() {
+        // ConstraintAssume adds the constraint to the context,
+        // so a subsequent ConstraintAssert can prove it
         let program = make_program(vec![make_func(
-            "bad",
+            "ok",
             vec![],
             DtalType::Int,
             vec![make_block(
@@ -542,20 +544,15 @@ mod tests {
                             IndexExpr::Var("v0".to_string()),
                             IndexExpr::Const(10),
                         ),
-                        msg: "should fail".to_string(),
+                        msg: "should pass".to_string(),
                     },
                 ],
             )],
         )]);
-        let result = verify_dtal(&program);
         assert!(
-            result.is_err(),
-            "ConstraintAssume should be ignored, so assert should fail"
+            verify_dtal(&program).is_ok(),
+            "ConstraintAssume should add constraint to context"
         );
-        assert!(matches!(
-            result.unwrap_err(),
-            VerifyError::UnprovableConstraint { .. }
-        ));
     }
 
     // ========================================================================

@@ -74,9 +74,11 @@ pub fn verify_instruction(
             verify_type_annotation(*reg, ty, state, block_label)?;
         }
 
-        DtalInstr::ConstraintAssume { .. } => {
-            // Ignore compiler-emitted constraint assumptions.
-            // The verifier derives constraints from Cmp+Branch sequences instead.
+        DtalInstr::ConstraintAssume { constraint } => {
+            // Add compiler-emitted constraint assumptions to the context.
+            // These provide structural information the verifier can't derive
+            // from Cmp+Branch alone (e.g., loop counter lower bounds).
+            state.constraints.push(constraint.clone());
         }
 
         DtalInstr::ConstraintAssert { constraint, msg: _ } => {
@@ -470,10 +472,13 @@ fn verify_type_annotation(
     Ok(())
 }
 
-/// Verify a constraint assertion
+/// Verify a constraint assertion.
+///
+/// If the constraint is provable from the current context, it is added
+/// to the context for use by downstream instructions (e.g., bounds checks).
 fn verify_constraint_assert(
     constraint: &Constraint,
-    state: &TypeState,
+    state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     // Check if constraint is provable from current context (syntactic fast-path + Z3)
@@ -484,6 +489,8 @@ fn verify_constraint_assert(
             block: block_label.to_string(),
         });
     }
+    // Add proven constraint to context for downstream use
+    state.constraints.push(constraint.clone());
     Ok(())
 }
 

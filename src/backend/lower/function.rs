@@ -23,10 +23,12 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
 
     // Allocate registers for parameters and bind them
     let mut params: Vec<(VirtualReg, IType<'src>)> = Vec::new();
+    let mut param_names: Vec<String> = Vec::new();
     for param in &func.parameters {
         let reg = ctx.fresh_reg();
         ctx.bind_var_typed(&param.name, reg, param.ty.clone());
         params.push((reg, param.ty.clone()));
+        param_names.push(param.name.clone());
     }
 
     // Lower the function body statements
@@ -47,7 +49,6 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         vec![], // Entry block has no predecessors
     );
 
-    // Convert postcondition from IProposition to Constraint
     let postcondition = func
         .postcondition
         .as_ref()
@@ -57,8 +58,9 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     ctx.build_function(
         func.name.clone(),
         params,
+        param_names,
         func.return_type.clone(),
-        None, // TODO: Convert precondition from IProposition to Constraint
+        None, // Preconditions flow through parameter refinement types
         postcondition,
         entry_block,
     )

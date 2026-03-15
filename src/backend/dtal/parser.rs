@@ -202,7 +202,11 @@ impl<'a> DtalParser<'a> {
 
     fn parse_params(&self, line: &str) -> Result<Vec<(Reg, DtalType)>, DtalParseError> {
         // .params {v0: int, v1: bool}
-        let inner = line.trim_start_matches(".params {").trim_end_matches('}');
+        let content = line.trim_start_matches(".params ").trim();
+        let inner = content
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(content);
         if inner.is_empty() {
             return Ok(Vec::new());
         }
@@ -213,8 +217,8 @@ impl<'a> DtalParser<'a> {
             if part.is_empty() {
                 continue;
             }
-            let colon_pos = part
-                .find(':')
+            // Use top-level ':' to avoid matching inside nested types like {v: int | ...}
+            let colon_pos = find_top_level_char(part, ':')
                 .ok_or_else(|| self.err(format!("expected ':' in param '{}'", part)))?;
             let reg_str = part[..colon_pos].trim();
             let ty_str = part[colon_pos + 1..].trim();
@@ -248,7 +252,7 @@ impl<'a> DtalParser<'a> {
                         if pair.is_empty() {
                             continue;
                         }
-                        if let Some(colon) = pair.find(':') {
+                        if let Some(colon) = find_top_level_char(pair, ':') {
                             let reg_str = pair[..colon].trim();
                             let ty_str = pair[colon + 1..].trim();
                             let reg = parse_reg(reg_str)

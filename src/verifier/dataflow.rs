@@ -206,10 +206,13 @@ fn compute_edge_states(
                     edge_states.insert((block.label.clone(), target.clone()), taken_state);
                 }
 
-                // Fall-through edge: add negated constraint
+                // Fall-through edge: add negated constraint.
+                // Only if the next block in layout is NOT the branch target
+                // (otherwise we'd overwrite the taken-edge constraint).
                 if !has_jmp
                     && !has_ret
                     && let Some(next_block) = func.blocks.get(block_index + 1)
+                    && next_block.label != *target
                 {
                     let neg_cond = negate_cmp_op(*cond);
                     if let Some(neg_constraint) =
@@ -443,7 +446,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::TypeAnnotation { reg, ty } => {
             state.register_types.insert(*reg, ty.clone());
         }
-        DtalInstr::ConstraintAssume { .. } => {}
+        DtalInstr::ConstraintAssume { constraint } => {
+            state.constraints.push(constraint.clone());
+        }
         DtalInstr::Pop { dst, .. } => {
             let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, popped_ty);

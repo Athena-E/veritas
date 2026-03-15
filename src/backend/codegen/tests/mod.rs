@@ -220,7 +220,14 @@ fn test_pipeline_conditional_function() {
     // Should have multiple blocks with branches
     assert!(output.contains(".function abs"));
     assert!(output.contains("cmp")); // Comparison
-    assert!(output.contains("bne") || output.contains("beq")); // Branch
+    assert!(
+        output.contains("bne")
+            || output.contains("beq")
+            || output.contains("blt")
+            || output.contains("bge")
+            || output.contains("ble")
+            || output.contains("bgt")
+    ); // Branch
     assert!(output.contains("jmp")); // Jump
     assert!(output.contains("ret"));
 

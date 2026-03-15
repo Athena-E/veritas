@@ -7,7 +7,6 @@ use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
 use crate::backend::lower::widen_itype;
-use crate::backend::tir::builder::negate_constraint;
 use crate::backend::tir::{
     BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
 };
@@ -248,13 +247,18 @@ fn lower_for_loop<'src>(
         ty: IType::Bool,
     });
 
-    // Derive constraints for the loop condition: i < end
-    let loop_var_idx = IndexExpr::Var(var.to_string());
-    // Fallback: if end can't be converted, use a placeholder
-    // This is sound but imprecise (returns True effectively)
+    // Derive constraints for the loop condition: start <= i < end
+    // Use register name (v3) for the loop variable so constraints match
+    // the register-based verification context.
+    let loop_var_idx = IndexExpr::Var(format!("v{}", i_phi_reg.0));
+    let start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
     let end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX));
-    let true_constraint = Constraint::Lt(loop_var_idx.clone(), end_idx.clone());
-    let false_constraint = negate_constraint(true_constraint.clone());
+    // True branch (body): i >= start AND i < end
+    let true_constraint = Constraint::And(
+        Box::new(Constraint::Ge(loop_var_idx.clone(), start_idx)),
+        Box::new(Constraint::Lt(loop_var_idx.clone(), end_idx.clone())),
+    );
+    let false_constraint = Constraint::Ge(loop_var_idx.clone(), end_idx);
 
     // Branch: if i < end, go to body; else go to exit
     ctx.finish_block(

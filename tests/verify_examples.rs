@@ -7,13 +7,11 @@
 use veritas::pipeline::compile_verbose;
 use veritas::verifier::verify_dtal;
 
-/// Compile source and verify the resulting DTAL program
 fn compile_and_verify(source: &str) -> Result<(), String> {
     let output = compile_verbose(source).map_err(|e| format!("Compilation failed: {}", e))?;
     verify_dtal(&output.dtal_program).map_err(|e| format!("Verification failed: {}", e))
 }
 
-/// Compile source and verify the DTAL text round-trip (emit → parse → verify)
 fn compile_and_verify_roundtrip(source: &str) -> Result<(), String> {
     let output = compile_verbose(source).map_err(|e| format!("Compilation failed: {}", e))?;
     verify_dtal(&output.dtal_program)
@@ -21,10 +19,6 @@ fn compile_and_verify_roundtrip(source: &str) -> Result<(), String> {
     veritas::verifier::verify_dtal_text(&output.dtal)
         .map_err(|e| format!("Verification failed (text round-trip): {}", e))
 }
-
-// ============================================================================
-// Success cases: compile + verify
-// ============================================================================
 
 macro_rules! verify_example {
     ($name:ident, $file:expr) => {
@@ -57,129 +51,80 @@ macro_rules! expect_compile_error {
     };
 }
 
-// --- Core language features ---
+// ============================================================================
+// Success cases: compile + verify (28 tests)
+// ============================================================================
+
 verify_example!(e2e_01_simple, "01_simple.veri");
 verify_example!(e2e_02_conditionals, "02_conditionals.veri");
+verify_example!(e2e_03_arrays, "03_arrays.veri");
+verify_example!(e2e_04_references, "04_references.veri");
 verify_example!(e2e_05_comparisons, "05_comparisons.veri");
 verify_example!(e2e_06_logical, "06_logical.veri");
 verify_example!(e2e_07_function_calls, "07_function_calls.veri");
 verify_example!(e2e_08_mutable, "08_mutable.veri");
 verify_example!(e2e_09_complex_expressions, "09_complex_expressions.veri");
+verify_example!(e2e_10_advanced_types, "10_advanced_types.veri");
 verify_example!(e2e_11_unary_not, "11_unary_not.veri");
 verify_example!(e2e_12_function_parameters, "12_function_parameters.veri");
 verify_example!(e2e_13_function_return, "13_function_return.veri");
-verify_example!(e2e_add, "add.veri");
-
-// --- Arrays ---
-verify_example!(e2e_03_arrays, "03_arrays.veri");
+verify_example!(e2e_14_for_loops, "14_for_loops.veri");
 verify_example!(e2e_15_array_init, "15_array_init.veri");
-
-// --- References ---
-verify_example!(e2e_04_references, "04_references.veri");
-
-// --- Types ---
-verify_example!(e2e_10_advanced_types, "10_advanced_types.veri");
-
-// --- Contracts ---
+verify_example!(e2e_16_array_assignment, "16_array_assignment.veri");
 verify_example!(e2e_17_preconditions, "17_preconditions.veri");
 verify_example!(e2e_18_precondition_use, "18_precondition_use.veri");
-verify_example!(e2e_21_safe_division, "21_safe_division.veri");
-
-// --- Quantifiers ---
 verify_example!(e2e_19_quantifier_showcase, "19_quantifier_showcase.veri");
-
-// --- SMT ---
+verify_example!(e2e_21_safe_division, "21_safe_division.veri");
+verify_example!(e2e_22_bubble_sort, "22_bubble_sort.veri");
+verify_example!(e2e_add, "add.veri");
+verify_example!(e2e_linear_search, "linear_search.veri");
 verify_example!(e2e_smt_minimal, "smt_minimal_annotations.veri");
+verify_example!(e2e_smt_synthesis, "smt_synthesis_tests.veri");
 
-// --- Text round-trip (emit → parse → verify) ---
+// Text round-trip
 verify_roundtrip!(e2e_roundtrip_01_simple, "01_simple.veri");
 verify_roundtrip!(e2e_roundtrip_07_function_calls, "07_function_calls.veri");
+verify_roundtrip!(e2e_roundtrip_add, "add.veri");
 
 // ============================================================================
-// Known failures: pre-existing codegen/lowering issues
+// Known failures: need variable name→register translation or feature additions
 // ============================================================================
 
-// Loop bounds: the for-loop lowering emits `cmp v_cond, 0; bne body` instead
-// of `cmp v_counter, v_end; blt body`. The branch constraint is `v_cond != 0`
-// which doesn't directly establish counter bounds (v_counter < v_end).
-// Fix requires changing the terminator lowering to emit direct comparisons.
+// Loop invariant constraints use source-level variable names (i, arr)
+// instead of register names — need full variable→register substitution
+// in loop invariant emission
 #[test]
-#[ignore = "lowering: for-loop branch constraint doesn't establish counter bounds"]
-fn e2e_14_for_loops() {
-    let source = include_str!("../src/examples/14_for_loops.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "lowering: loop counter bounds not provable (same root cause as 14)"]
-fn e2e_16_array_assignment() {
-    let source = include_str!("../src/examples/16_array_assignment.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "lowering: loop counter bounds not provable (same root cause as 14)"]
-fn e2e_22_bubble_sort() {
-    let source = include_str!("../src/examples/22_bubble_sort.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "lowering: loop counter bounds not provable (same root cause as 14)"]
-fn e2e_linear_search() {
-    let source = include_str!("../src/examples/linear_search.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Loop invariant constraints not provable (depends on counter bounds fix)
-#[test]
-#[ignore = "verifier: loop invariant constraint i >= 0 not provable (needs counter bounds)"]
+#[ignore = "lowering: loop invariant uses source name 'i' not register name"]
 fn e2e_19_loop_invariant() {
     let source = include_str!("../src/examples/19_loop_invariant.veri");
     compile_and_verify(source).unwrap();
 }
 
 #[test]
-#[ignore = "verifier: loop invariant + quantifier not provable (needs counter bounds)"]
+#[ignore = "lowering: quantified loop invariant uses source names"]
 fn e2e_20_array_loop_invariant() {
     let source = include_str!("../src/examples/20_array_loop_invariant.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Precondition constraint uses parameter names that don't match register names
+// Precondition not lowered from TAST to TIR (TFunction has no precondition field)
 #[test]
-#[ignore = "verifier: precondition bounds not provable (parameter name mismatch)"]
+#[ignore = "lowering: precondition not lowered from TAST (needs TFunction.precondition)"]
 fn e2e_selective_invalidation() {
     let source = include_str!("../src/examples/selective_invalidation.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Refined array return type lost during element type widening
+// Postcondition with quantifiers over array contents (feature: array store/select axioms)
 #[test]
-#[ignore = "codegen: refined array return type lost by widen_to_base"]
-fn e2e_smt_synthesis() {
-    let source = include_str!("../src/examples/smt_synthesis_tests.veri");
-    compile_and_verify(source).unwrap();
-}
-
-// Complex postcondition with quantifiers over array contents
-#[test]
-#[ignore = "verifier: postcondition with quantifiers over sorted array"]
+#[ignore = "feature: postcondition quantifier over array contents needs Select reasoning"]
 fn e2e_sortedness() {
     let source = include_str!("../src/examples/sortedness.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Parser limitation: refined type parsing in round-trip
-#[test]
-#[ignore = "parser: refined type parsing fails in round-trip"]
-fn e2e_roundtrip_add() {
-    let source = include_str!("../src/examples/add.veri");
-    compile_and_verify_roundtrip(source).unwrap();
-}
-
 // ============================================================================
-// Error cases: should fail during compilation
+// Error cases: should fail during compilation (30 tests)
 // ============================================================================
 
 expect_compile_error!(e2e_err_01_type_mismatch, "01_type_mismatch.veri");
