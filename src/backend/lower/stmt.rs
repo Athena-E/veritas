@@ -229,14 +229,6 @@ fn lower_for_loop<'src>(
         }
     }
 
-    // Emit loop invariant assertion (if present)
-    if let Some(inv_constraint) = invariant {
-        ctx.emit(TirInstr::AssertConstraint {
-            constraint: inv_constraint.clone(),
-            msg: format!("loop invariant: {}", inv_constraint),
-        });
-    }
-
     // 4. Compare i < end
     let cmp_reg = ctx.fresh_reg();
     ctx.emit(TirInstr::BinOp {
@@ -274,6 +266,18 @@ fn lower_for_loop<'src>(
 
     // 5. Lower the body block
     ctx.start_block(body_block);
+
+    // Emit loop invariant assertion (if present) in the body block,
+    // where the ConstraintAssume provides loop counter bounds.
+    if let Some(inv_constraint) = invariant {
+        let subs = ctx.var_substitutions();
+        let substituted =
+            crate::backend::codegen::generator::substitute_constraint_vars(inv_constraint, &subs);
+        ctx.emit(TirInstr::AssertConstraint {
+            constraint: substituted,
+            msg: format!("loop invariant: {}", inv_constraint),
+        });
+    }
 
     // Lower body statements
     for stmt in &body.statements {

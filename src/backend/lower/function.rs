@@ -49,6 +49,14 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         vec![], // Entry block has no predecessors
     );
 
+    // Lower precondition, but skip quantified preconditions (forall/exists)
+    // since the verifier can't yet reason about array contents
+    let precondition = func
+        .precondition
+        .as_ref()
+        .and_then(|prop| proposition_to_constraint(prop))
+        .filter(|c| !contains_quantifier(c));
+
     let postcondition = func
         .postcondition
         .as_ref()
@@ -60,7 +68,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         params,
         param_names,
         func.return_type.clone(),
-        None, // Preconditions flow through parameter refinement types
+        precondition,
         postcondition,
         entry_block,
     )
@@ -69,4 +77,16 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
 /// Convert an IProposition to a Constraint
 pub(super) fn proposition_to_constraint(prop: &IProposition) -> Option<Constraint> {
     expr_to_constraint(&prop.predicate.0)
+}
+
+/// Check if a constraint contains quantifiers (forall/exists)
+fn contains_quantifier(c: &Constraint) -> bool {
+    match c {
+        Constraint::Forall { .. } | Constraint::Exists { .. } => true,
+        Constraint::And(l, r) | Constraint::Or(l, r) | Constraint::Implies(l, r) => {
+            contains_quantifier(l) || contains_quantifier(r)
+        }
+        Constraint::Not(inner) => contains_quantifier(inner),
+        _ => false,
+    }
 }

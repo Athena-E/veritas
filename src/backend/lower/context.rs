@@ -71,6 +71,14 @@ impl<'src> LoweringContext<'src> {
         self.var_map.get(name).copied()
     }
 
+    /// Get variable name → register name substitution pairs for all bound variables
+    pub fn var_substitutions(&self) -> Vec<(String, String)> {
+        self.var_map
+            .iter()
+            .map(|(name, reg)| (name.clone(), format!("v{}", reg.0)))
+            .collect()
+    }
+
     /// Look up the type of a variable
     pub fn lookup_var_type(&self, name: &str) -> IType<'src> {
         self.var_type_map

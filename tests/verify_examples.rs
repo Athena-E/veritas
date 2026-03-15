@@ -52,7 +52,7 @@ macro_rules! expect_compile_error {
 }
 
 // ============================================================================
-// Success cases: compile + verify (28 tests)
+// Success cases: compile + verify (29 tests)
 // ============================================================================
 
 verify_example!(e2e_01_simple, "01_simple.veri");
@@ -73,6 +73,7 @@ verify_example!(e2e_15_array_init, "15_array_init.veri");
 verify_example!(e2e_16_array_assignment, "16_array_assignment.veri");
 verify_example!(e2e_17_preconditions, "17_preconditions.veri");
 verify_example!(e2e_18_precondition_use, "18_precondition_use.veri");
+verify_example!(e2e_19_loop_invariant, "19_loop_invariant.veri");
 verify_example!(e2e_19_quantifier_showcase, "19_quantifier_showcase.veri");
 verify_example!(e2e_21_safe_division, "21_safe_division.veri");
 verify_example!(e2e_22_bubble_sort, "22_bubble_sort.veri");
@@ -87,37 +88,25 @@ verify_roundtrip!(e2e_roundtrip_07_function_calls, "07_function_calls.veri");
 verify_roundtrip!(e2e_roundtrip_add, "add.veri");
 
 // ============================================================================
-// Known failures: need variable name→register translation or feature additions
+// Feature-dependent: need array store/select axioms in constraint domain
 // ============================================================================
 
-// Loop invariant constraints use source-level variable names (i, arr)
-// instead of register names — need full variable→register substitution
-// in loop invariant emission
 #[test]
-#[ignore = "lowering: loop invariant uses source name 'i' not register name"]
-fn e2e_19_loop_invariant() {
-    let source = include_str!("../src/examples/19_loop_invariant.veri");
-    compile_and_verify(source).unwrap();
-}
-
-#[test]
-#[ignore = "lowering: quantified loop invariant uses source names"]
+#[ignore = "feature: quantified loop invariant over array contents needs Select reasoning"]
 fn e2e_20_array_loop_invariant() {
     let source = include_str!("../src/examples/20_array_loop_invariant.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Precondition not lowered from TAST to TIR (TFunction has no precondition field)
 #[test]
-#[ignore = "lowering: precondition not lowered from TAST (needs TFunction.precondition)"]
+#[ignore = "feature: precondition depends on array element value after store"]
 fn e2e_selective_invalidation() {
     let source = include_str!("../src/examples/selective_invalidation.veri");
     compile_and_verify(source).unwrap();
 }
 
-// Postcondition with quantifiers over array contents (feature: array store/select axioms)
 #[test]
-#[ignore = "feature: postcondition quantifier over array contents needs Select reasoning"]
+#[ignore = "feature: postcondition quantifier over sorted array contents"]
 fn e2e_sortedness() {
     let source = include_str!("../src/examples/sortedness.veri");
     compile_and_verify(source).unwrap();

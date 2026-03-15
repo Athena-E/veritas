@@ -378,7 +378,7 @@ fn emit_phi_moves<'src>(
 /// Substitute variable names in a constraint with register names.
 ///
 /// Replaces `IndexExpr::Var("param_name")` with `IndexExpr::Var("v0")` etc.
-fn substitute_constraint_vars(
+pub(crate) fn substitute_constraint_vars(
     constraint: &crate::backend::dtal::Constraint,
     subs: &[(String, String)],
 ) -> crate::backend::dtal::Constraint {
@@ -423,28 +423,35 @@ fn substitute_constraint_vars(
             lower,
             upper,
             body,
-        } => Constraint::Forall {
-            var: var.clone(),
-            lower: substitute_index_vars(lower, subs),
-            upper: substitute_index_vars(upper, subs),
-            body: Box::new(substitute_constraint_vars(body, subs)),
-        },
+        } => {
+            // Don't substitute the bound variable inside the body
+            let filtered: Vec<_> = subs.iter().filter(|(n, _)| n != var).cloned().collect();
+            Constraint::Forall {
+                var: var.clone(),
+                lower: substitute_index_vars(lower, subs),
+                upper: substitute_index_vars(upper, subs),
+                body: Box::new(substitute_constraint_vars(body, &filtered)),
+            }
+        }
         Constraint::Exists {
             var,
             lower,
             upper,
             body,
-        } => Constraint::Exists {
-            var: var.clone(),
-            lower: substitute_index_vars(lower, subs),
-            upper: substitute_index_vars(upper, subs),
-            body: Box::new(substitute_constraint_vars(body, subs)),
-        },
+        } => {
+            let filtered: Vec<_> = subs.iter().filter(|(n, _)| n != var).cloned().collect();
+            Constraint::Exists {
+                var: var.clone(),
+                lower: substitute_index_vars(lower, subs),
+                upper: substitute_index_vars(upper, subs),
+                body: Box::new(substitute_constraint_vars(body, &filtered)),
+            }
+        }
     }
 }
 
 /// Substitute variable names in an index expression with register names.
-fn substitute_index_vars(
+pub(crate) fn substitute_index_vars(
     expr: &crate::backend::dtal::IndexExpr,
     subs: &[(String, String)],
 ) -> crate::backend::dtal::IndexExpr {

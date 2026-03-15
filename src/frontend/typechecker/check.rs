@@ -1010,10 +1010,15 @@ pub fn check_function<'src>(
         })
         .collect();
 
+    let precondition = global_ctx
+        .lookup_function(func_inner.name)
+        .and_then(|sig| sig.precondition.clone());
+
     let tfunc = TFunction {
         name: func_inner.name.to_string(),
         parameters: tparams,
         return_type,
+        precondition,
         postcondition,
         body: TFunctionBody {
             statements: tbody,
