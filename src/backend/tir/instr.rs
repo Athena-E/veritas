@@ -3,7 +3,7 @@
 //! This module defines the instruction set for TIR (Typed Intermediate Representation).
 
 use crate::backend::dtal::{Constraint, VirtualReg};
-use crate::backend::tir::types::{BinaryOp, BlockId, BoundsProof, UnaryOp};
+use crate::backend::tir::types::{BinaryOp, BlockId, UnaryOp};
 use crate::common::types::IType;
 
 /// TIR instructions (three-address code in SSA form)
@@ -46,7 +46,7 @@ pub enum TirInstr<'src> {
         base: VirtualReg,
         index: VirtualReg,
         element_ty: IType<'src>,
-        bounds_proof: BoundsProof,
+        bounds_constraint: Constraint,
     },
 
     /// base[index] = value
@@ -54,7 +54,7 @@ pub enum TirInstr<'src> {
         base: VirtualReg,
         index: VirtualReg,
         value: VirtualReg,
-        bounds_proof: BoundsProof,
+        bounds_constraint: Constraint,
     },
 
     /// dst = call func(args...)
@@ -76,7 +76,7 @@ pub enum TirInstr<'src> {
     AssumeConstraint { constraint: Constraint },
 
     /// Assert a constraint (proven by frontend, carried for verification)
-    AssertConstraint { constraint: Constraint, msg: String },
+    AssertConstraint { constraint: Constraint },
 }
 
 impl<'src> TirInstr<'src> {

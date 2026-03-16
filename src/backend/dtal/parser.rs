@@ -400,16 +400,16 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_constraint_assert(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // .assert <constraint> ; <msg>
+        // .assert <constraint>
         let rest = line.trim_start_matches(".assert ").trim();
-        // Split at " ; " to separate constraint from msg
-        let (constraint_str, msg) = if let Some(pos) = rest.find(" ; ") {
-            (&rest[..pos], rest[pos + 3..].to_string())
+        // Strip any trailing legacy " ; msg" comment
+        let constraint_str = if let Some(pos) = rest.find(" ; ") {
+            &rest[..pos]
         } else {
-            (rest, String::new())
+            rest
         };
         let constraint = parse_constraint_str(constraint_str)?;
-        Ok(Some(DtalInstr::ConstraintAssert { constraint, msg }))
+        Ok(Some(DtalInstr::ConstraintAssert { constraint }))
     }
 
     // Legacy comment-style annotation parsers (backward compatibility)
@@ -444,13 +444,13 @@ impl<'a> DtalParser<'a> {
         line: &str,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
         let rest = line.trim_start_matches("; assert ").trim();
-        let (constraint_str, msg) = if let Some(pos) = rest.find(" ; ") {
-            (&rest[..pos], rest[pos + 3..].to_string())
+        let constraint_str = if let Some(pos) = rest.find(" ; ") {
+            &rest[..pos]
         } else {
-            (rest, String::new())
+            rest
         };
         let constraint = parse_constraint_str(constraint_str)?;
-        Ok(Some(DtalInstr::ConstraintAssert { constraint, msg }))
+        Ok(Some(DtalInstr::ConstraintAssert { constraint }))
     }
 
     fn parse_mov(

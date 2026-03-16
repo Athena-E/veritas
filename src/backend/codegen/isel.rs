@@ -56,15 +56,11 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             base,
             index,
             element_ty,
-            bounds_proof,
+            bounds_constraint,
         } => {
-            // Emit bounds proof as a constraint assertion
             instrs.push(DtalInstr::ConstraintAssert {
-                constraint: bounds_proof.constraint.clone(),
-                msg: format!("array bounds check: {:?}", bounds_proof.justification),
+                constraint: bounds_constraint.clone(),
             });
-
-            // Emit load instruction
             instrs.push(DtalInstr::Load {
                 dst: Reg::Virtual(*dst),
                 base: Reg::Virtual(*base),
@@ -77,15 +73,11 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             base,
             index,
             value,
-            bounds_proof,
+            bounds_constraint,
         } => {
-            // Emit bounds proof as a constraint assertion
             instrs.push(DtalInstr::ConstraintAssert {
-                constraint: bounds_proof.constraint.clone(),
-                msg: format!("array bounds check: {:?}", bounds_proof.justification),
+                constraint: bounds_constraint.clone(),
             });
-
-            // Emit store instruction
             instrs.push(DtalInstr::Store {
                 base: Reg::Virtual(*base),
                 offset: Reg::Virtual(*index),
@@ -134,10 +126,9 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             });
         }
 
-        TirInstr::AssertConstraint { constraint, msg } => {
+        TirInstr::AssertConstraint { constraint } => {
             instrs.push(DtalInstr::ConstraintAssert {
                 constraint: constraint.clone(),
-                msg: msg.clone(),
             });
         }
     }

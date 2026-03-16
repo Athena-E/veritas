@@ -115,24 +115,3 @@ impl fmt::Display for UnaryOp {
     }
 }
 
-/// Justification for a bounds proof
-#[derive(Clone, Debug)]
-pub enum ProofJustification {
-    /// Proven by frontend type checker
-    FromFrontend,
-    /// From loop invariant
-    LoopInvariant(String),
-    /// From branch condition
-    BranchCondition,
-    /// From function precondition
-    Precondition,
-}
-
-/// Proof that an array access is in bounds
-#[derive(Clone, Debug)]
-pub struct BoundsProof {
-    /// The constraint that was proven: 0 <= index < size
-    pub constraint: Constraint,
-    /// How it was proven
-    pub justification: ProofJustification,
-}

@@ -546,7 +546,6 @@ mod tests {
                             IndexExpr::Var("v0".to_string()),
                             IndexExpr::Const(10),
                         ),
-                        msg: "should pass".to_string(),
                     },
                 ],
             )],
@@ -575,7 +574,6 @@ mod tests {
                             IndexExpr::Var("v0".to_string()),
                             IndexExpr::Const(0),
                         ),
-                        msg: "x >= 0".to_string(),
                     },
                     DtalInstr::Ret,
                 ],
@@ -605,7 +603,6 @@ mod tests {
                         IndexExpr::Var("v0".to_string()),
                         IndexExpr::Const(0),
                     ),
-                    msg: "x > 0".to_string(),
                 }],
             )],
         )]);
@@ -630,7 +627,6 @@ mod tests {
                             IndexExpr::Var("v0".to_string()),
                             IndexExpr::Const(3),
                         ),
-                        msg: "x >= 3".to_string(),
                     },
                     DtalInstr::Ret,
                 ],
@@ -910,7 +906,6 @@ mod tests {
                     },
                     DtalInstr::ConstraintAssert {
                         constraint: Constraint::True,
-                        msg: "".to_string(),
                     },
                     DtalInstr::Load {
                         dst: v(2),
@@ -1147,7 +1142,6 @@ mod tests {
                                 IndexExpr::Var("v0".to_string()),
                                 IndexExpr::Const(10),
                             ),
-                            msg: "v0 >= 10 on fall-through".to_string(),
                         },
                         DtalInstr::MovReg {
                             dst: r0(),

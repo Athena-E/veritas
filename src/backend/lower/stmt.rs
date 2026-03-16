@@ -7,9 +7,7 @@ use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
 use crate::backend::lower::widen_itype;
-use crate::backend::tir::{
-    BinaryOp, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr,
-};
+use crate::backend::tir::{BinaryOp, PhiNode, Terminator, TirInstr};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
@@ -107,17 +105,11 @@ fn lower_assignment<'src>(
             let index_reg = lower_expr(ctx, index);
             let rhs_reg = lower_expr(ctx, rhs);
 
-            // Create bounds proof (frontend verified)
-            let bounds_proof = BoundsProof {
-                constraint: Constraint::True,
-                justification: ProofJustification::FromFrontend,
-            };
-
             ctx.emit(TirInstr::ArrayStore {
                 base: base_reg,
                 index: index_reg,
                 value: rhs_reg,
-                bounds_proof,
+                bounds_constraint: Constraint::True,
             });
         }
 
@@ -275,7 +267,6 @@ fn lower_for_loop<'src>(
             crate::backend::codegen::generator::substitute_constraint_vars(inv_constraint, &subs);
         ctx.emit(TirInstr::AssertConstraint {
             constraint: substituted,
-            msg: format!("loop invariant: {}", inv_constraint),
         });
     }
 

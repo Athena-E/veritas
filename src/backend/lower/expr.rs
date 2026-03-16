@@ -7,9 +7,7 @@ use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
-use crate::backend::tir::{
-    BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
-};
+use crate::backend::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
@@ -345,19 +343,12 @@ fn lower_index<'src>(
     let index_reg = lower_expr(ctx, index);
     let dst = ctx.fresh_reg();
 
-    // Create a bounds proof - in the frontend, bounds have already been verified
-    // We trust the frontend's type checking here
-    let bounds_proof = BoundsProof {
-        constraint: Constraint::True, // Placeholder - frontend verified
-        justification: ProofJustification::FromFrontend,
-    };
-
     ctx.emit(TirInstr::ArrayLoad {
         dst,
         base: base_reg,
         index: index_reg,
         element_ty: ty.clone(),
-        bounds_proof,
+        bounds_constraint: Constraint::True,
     });
 
     dst
@@ -407,19 +398,14 @@ fn lower_array_init<'src>(
             ty: IType::Int,
         });
 
-        let bounds_proof = BoundsProof {
-            constraint: Constraint::And(
-                Box::new(Constraint::Ge(IndexExpr::Const(i), IndexExpr::Const(0))),
-                Box::new(Constraint::Lt(IndexExpr::Const(i), IndexExpr::Const(size))),
-            ),
-            justification: ProofJustification::FromFrontend,
-        };
-
         ctx.emit(TirInstr::ArrayStore {
             base: arr_reg,
             index: idx_reg,
             value: init_val_reg,
-            bounds_proof,
+            bounds_constraint: Constraint::And(
+                Box::new(Constraint::Ge(IndexExpr::Const(i), IndexExpr::Const(0))),
+                Box::new(Constraint::Lt(IndexExpr::Const(i), IndexExpr::Const(size))),
+            ),
         });
     }
 

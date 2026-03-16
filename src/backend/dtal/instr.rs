@@ -210,5 +210,5 @@ pub enum DtalInstr {
     /// Assume a constraint
     ConstraintAssume { constraint: Constraint },
     /// Assert a constraint (for bounds checks)
-    ConstraintAssert { constraint: Constraint, msg: String },
+    ConstraintAssert { constraint: Constraint },
 }

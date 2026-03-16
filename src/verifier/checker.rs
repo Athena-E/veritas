@@ -81,7 +81,7 @@ pub fn verify_instruction(
             state.constraints.push(constraint.clone());
         }
 
-        DtalInstr::ConstraintAssert { constraint, msg: _ } => {
+        DtalInstr::ConstraintAssert { constraint } => {
             verify_constraint_assert(constraint, state, block_label)?;
         }
 

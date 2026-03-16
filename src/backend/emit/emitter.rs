@@ -247,14 +247,8 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
         }
 
-        DtalInstr::ConstraintAssert { constraint, msg } => {
-            writeln!(
-                output,
-                "    .assert {} ; {}",
-                emit_constraint(constraint),
-                msg
-            )
-            .unwrap();
+        DtalInstr::ConstraintAssert { constraint } => {
+            writeln!(output, "    .assert {}", emit_constraint(constraint)).unwrap();
         }
     }
 }
