@@ -103,7 +103,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         DtalInstr::MovImm { dst, imm, ty } => {
             writeln!(
                 output,
-                "    mov {}, {}    ; {}",
+                "    mov {}, {}    : {}",
                 emit_reg(dst),
                 imm,
                 emit_type(ty)
@@ -114,7 +114,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         DtalInstr::MovReg { dst, src, ty } => {
             writeln!(
                 output,
-                "    mov {}, {}    ; {}",
+                "    mov {}, {}    : {}",
                 emit_reg(dst),
                 emit_reg(src),
                 emit_type(ty)
@@ -130,7 +130,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         } => {
             writeln!(
                 output,
-                "    load {}, [{} + {}]    ; {}",
+                "    load {}, [{} + {}]    : {}",
                 emit_reg(dst),
                 emit_reg(base),
                 emit_reg(offset),
@@ -159,7 +159,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         } => {
             writeln!(
                 output,
-                "    {} {}, {}, {}    ; {}",
+                "    {} {}, {}, {}    : {}",
                 emit_binop(op),
                 emit_reg(dst),
                 emit_reg(lhs),
@@ -172,7 +172,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         DtalInstr::AddImm { dst, src, imm, ty } => {
             writeln!(
                 output,
-                "    addi {}, {}, {}    ; {}",
+                "    addi {}, {}, {}    : {}",
                 emit_reg(dst),
                 emit_reg(src),
                 imm,
@@ -196,7 +196,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         DtalInstr::Not { dst, src, ty } => {
             writeln!(
                 output,
-                "    not {}, {}    ; {}",
+                "    not {}, {}    : {}",
                 emit_reg(dst),
                 emit_reg(src),
                 emit_type(ty)
@@ -215,7 +215,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         DtalInstr::Call { target, return_ty } => {
             writeln!(
                 output,
-                "    call {}    ; -> {}",
+                "    call {}    : {}",
                 target,
                 emit_type(return_ty)
             )
@@ -227,17 +227,17 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::Push { src, ty } => {
-            writeln!(output, "    push {}    ; {}", emit_reg(src), emit_type(ty)).unwrap();
+            writeln!(output, "    push {}    : {}", emit_reg(src), emit_type(ty)).unwrap();
         }
 
         DtalInstr::Pop { dst, ty } => {
-            writeln!(output, "    pop {}    ; {}", emit_reg(dst), emit_type(ty)).unwrap();
+            writeln!(output, "    pop {}    : {}", emit_reg(dst), emit_type(ty)).unwrap();
         }
 
         DtalInstr::Alloca { dst, size, ty } => {
             writeln!(
                 output,
-                "    alloca {}, {}    ; {}",
+                "    alloca {}, {}    : {}",
                 emit_reg(dst),
                 size,
                 emit_type(ty)
@@ -246,17 +246,17 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::TypeAnnotation { reg, ty } => {
-            writeln!(output, "    ; type {}: {}", emit_reg(reg), emit_type(ty)).unwrap();
+            writeln!(output, "    .type {}: {}", emit_reg(reg), emit_type(ty)).unwrap();
         }
 
         DtalInstr::ConstraintAssume { constraint } => {
-            writeln!(output, "    ; assume {}", emit_constraint(constraint)).unwrap();
+            writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
         }
 
         DtalInstr::ConstraintAssert { constraint, msg } => {
             writeln!(
                 output,
-                "    ; assert {} ; {}",
+                "    .assert {} ; {}",
                 emit_constraint(constraint),
                 msg
             )

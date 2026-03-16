@@ -324,15 +324,25 @@ impl<'a> DtalParser<'a> {
     fn parse_instruction(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
         let trimmed = line.trim();
 
-        // Annotation instructions (comments with special meaning)
-        if trimmed.starts_with("; type ") {
+        // Annotation instructions as directives
+        if trimmed.starts_with(".type ") {
             return self.parse_type_annotation(trimmed);
         }
-        if trimmed.starts_with("; assume ") {
+        if trimmed.starts_with(".assume ") {
             return self.parse_constraint_assume(trimmed);
         }
-        if trimmed.starts_with("; assert ") {
+        if trimmed.starts_with(".assert ") {
             return self.parse_constraint_assert(trimmed);
+        }
+        // Legacy comment-style annotation instructions (backward compatibility)
+        if trimmed.starts_with("; type ") {
+            return self.parse_type_annotation_legacy(trimmed);
+        }
+        if trimmed.starts_with("; assume ") {
+            return self.parse_constraint_assume_legacy(trimmed);
+        }
+        if trimmed.starts_with("; assert ") {
+            return self.parse_constraint_assert_legacy(trimmed);
         }
         // Regular comments
         if trimmed.starts_with(';') {
@@ -368,8 +378,8 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_type_annotation(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // ; type v0: int
-        let rest = line.trim_start_matches("; type ").trim();
+        // .type v0: int
+        let rest = line.trim_start_matches(".type ").trim();
         let colon = rest
             .find(':')
             .ok_or_else(|| self.err("expected ':' in type annotation"))?;
@@ -382,16 +392,57 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_constraint_assume(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // ; assume <constraint>
-        let rest = line.trim_start_matches("; assume ").trim();
+        // .assume <constraint>
+        let rest = line.trim_start_matches(".assume ").trim();
         let constraint = parse_constraint_str(rest)?;
         Ok(Some(DtalInstr::ConstraintAssume { constraint }))
     }
 
     fn parse_constraint_assert(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // ; assert <constraint> ; <msg>
-        let rest = line.trim_start_matches("; assert ").trim();
+        // .assert <constraint> ; <msg>
+        let rest = line.trim_start_matches(".assert ").trim();
         // Split at " ; " to separate constraint from msg
+        let (constraint_str, msg) = if let Some(pos) = rest.find(" ; ") {
+            (&rest[..pos], rest[pos + 3..].to_string())
+        } else {
+            (rest, String::new())
+        };
+        let constraint = parse_constraint_str(constraint_str)?;
+        Ok(Some(DtalInstr::ConstraintAssert { constraint, msg }))
+    }
+
+    // Legacy comment-style annotation parsers (backward compatibility)
+
+    fn parse_type_annotation_legacy(
+        &self,
+        line: &str,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        let rest = line.trim_start_matches("; type ").trim();
+        let colon = rest
+            .find(':')
+            .ok_or_else(|| self.err("expected ':' in type annotation"))?;
+        let reg_str = rest[..colon].trim();
+        let ty_str = rest[colon + 1..].trim();
+        let reg = parse_reg(reg_str)
+            .ok_or_else(|| self.err(format!("invalid register '{}'", reg_str)))?;
+        let ty = parse_type_str(ty_str)?;
+        Ok(Some(DtalInstr::TypeAnnotation { reg, ty }))
+    }
+
+    fn parse_constraint_assume_legacy(
+        &self,
+        line: &str,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        let rest = line.trim_start_matches("; assume ").trim();
+        let constraint = parse_constraint_str(rest)?;
+        Ok(Some(DtalInstr::ConstraintAssume { constraint }))
+    }
+
+    fn parse_constraint_assert_legacy(
+        &self,
+        line: &str,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        let rest = line.trim_start_matches("; assert ").trim();
         let (constraint_str, msg) = if let Some(pos) = rest.find(" ; ") {
             (&rest[..pos], rest[pos + 3..].to_string())
         } else {
@@ -655,13 +706,15 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // call foo    ; -> int
+        // call foo    : int   (new syntax)
+        // call foo    ; -> int   (legacy)
         if tokens.len() < 2 {
             return Err(self.err("call requires target"));
         }
         let return_ty = ty_comment
             .and_then(|s| {
                 let s = s.trim();
+                // Legacy: strip "-> " prefix if present
                 if let Some(rest) = s.strip_prefix("-> ") {
                     parse_type_str(rest.trim()).ok()
                 } else {
@@ -790,21 +843,33 @@ fn parse_cmpop(s: &str) -> Option<CmpOp> {
 /// Split instruction text from trailing type comment
 /// e.g. "mov v0, 42    ; int" -> ("mov v0, 42", Some("int"))
 fn split_instruction_comment(line: &str) -> (&str, Option<&str>) {
-    // Find "    ;" separator (4 spaces + semicolon)
-    if let Some(pos) = line.find("    ;") {
+    // Find "    :" separator (4 spaces + colon) — type annotation syntax
+    if let Some(pos) = line.find("    : ") {
         let instr = line[..pos].trim();
-        let comment = line[pos + 5..].trim(); // skip "    ;"
-        (
+        let comment = line[pos + 6..].trim(); // skip "    : "
+        return (
             instr,
             if comment.is_empty() {
                 None
             } else {
                 Some(comment)
             },
-        )
-    } else {
-        (line.trim(), None)
+        );
     }
+    // Legacy: "    ;" separator (4 spaces + semicolon) — backward compatibility
+    if let Some(pos) = line.find("    ;") {
+        let instr = line[..pos].trim();
+        let comment = line[pos + 5..].trim(); // skip "    ;"
+        return (
+            instr,
+            if comment.is_empty() {
+                None
+            } else {
+                Some(comment)
+            },
+        );
+    }
+    (line.trim(), None)
 }
 
 /// Parse a type from a string
