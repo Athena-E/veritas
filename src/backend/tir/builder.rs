@@ -97,6 +97,7 @@ impl<'src> TirBuilder<'src> {
     }
 
     /// Build the function
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         self,
         name: String,

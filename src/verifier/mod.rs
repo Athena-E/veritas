@@ -112,7 +112,10 @@ fn verify_function(func: &DtalFunction, program: &DtalProgram) -> Result<(), Ver
 
     // If blocks have declared entry states, use derivation-based checking.
     // Otherwise, fall back to dataflow-based checking for backward compatibility.
-    let has_declared_states = func.blocks.iter().any(|b| !b.entry_state.register_types.is_empty());
+    let has_declared_states = func
+        .blocks
+        .iter()
+        .any(|b| !b.entry_state.register_types.is_empty());
 
     if has_declared_states {
         verify_function_derivation(func, program, &label_map)
@@ -132,7 +135,11 @@ fn verify_function_derivation(
         let entry_state = &entry_block.entry_state;
         for (reg, ty) in &func.params {
             if let Some(declared_ty) = entry_state.register_types.get(reg)
-                && !checker::types_compatible_with_constraints(declared_ty, ty, &entry_state.constraints)
+                && !checker::types_compatible_with_constraints(
+                    declared_ty,
+                    ty,
+                    &entry_state.constraints,
+                )
             {
                 return Err(VerifyError::TypeMismatch {
                     block: entry_block.label.clone(),
@@ -191,12 +198,7 @@ fn verify_block_derivation(
                     let mut taken_state = state.clone();
                     taken_state.constraints.push(pos_constraint);
                     if let Some(target_state) = label_map.get(target.as_str()) {
-                        verify_state_coercion(
-                            &taken_state,
-                            target_state,
-                            &block.label,
-                            target,
-                        )?;
+                        verify_state_coercion(&taken_state, target_state, &block.label, target)?;
                     }
                 }
 
@@ -210,12 +212,7 @@ fn verify_block_derivation(
                 if let Some(next_block) = func.blocks.get(block_idx + 1)
                     && let Some(next_state) = label_map.get(next_block.label.as_str())
                 {
-                    verify_state_coercion(
-                        &state,
-                        next_state,
-                        &block.label,
-                        &next_block.label,
-                    )?;
+                    verify_state_coercion(&state, next_state, &block.label, &next_block.label)?;
                 }
             }
             DtalInstr::Ret => {
@@ -231,10 +228,7 @@ fn verify_block_derivation(
 }
 
 /// Fallback: dataflow-based verification for programs without declared entry states
-fn verify_function_dataflow(
-    func: &DtalFunction,
-    program: &DtalProgram,
-) -> Result<(), VerifyError> {
+fn verify_function_dataflow(func: &DtalFunction, program: &DtalProgram) -> Result<(), VerifyError> {
     let dataflow = dataflow::analyze_function(func)?;
 
     for block in &func.blocks {
@@ -256,10 +250,7 @@ fn verify_function_dataflow(
 }
 
 /// Check return type and postcondition
-fn verify_return(
-    func: &DtalFunction,
-    state: &TypeState,
-) -> Result<(), VerifyError> {
+fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyError> {
     use crate::backend::dtal::regs::{PhysicalReg, Reg};
     use crate::backend::dtal::types::DtalType;
 
@@ -1670,10 +1661,7 @@ mod tests {
             "returns_bool",
             vec![],
             DtalType::Bool,
-            vec![make_block(
-                ".entry",
-                vec![DtalInstr::Ret],
-            )],
+            vec![make_block(".entry", vec![DtalInstr::Ret])],
         );
         let caller = make_func(
             "caller",

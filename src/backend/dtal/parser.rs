@@ -255,8 +255,9 @@ impl<'a> DtalParser<'a> {
                         if let Some(colon) = find_top_level_char(pair, ':') {
                             let reg_str = pair[..colon].trim();
                             let ty_str = pair[colon + 1..].trim();
-                            let reg = parse_reg(reg_str)
-                                .ok_or_else(|| self.err(format!("bad register in .entry: '{}'", reg_str)))?;
+                            let reg = parse_reg(reg_str).ok_or_else(|| {
+                                self.err(format!("bad register in .entry: '{}'", reg_str))
+                            })?;
                             let ty = parse_type_str(ty_str)?;
                             entry_state.register_types.insert(reg, ty);
                         }

@@ -213,13 +213,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::Call { target, return_ty } => {
-            writeln!(
-                output,
-                "    call {}    : {}",
-                target,
-                emit_type(return_ty)
-            )
-            .unwrap();
+            writeln!(output, "    call {}    : {}", target, emit_type(return_ty)).unwrap();
         }
 
         DtalInstr::Ret => {

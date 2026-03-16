@@ -46,7 +46,11 @@ macro_rules! expect_compile_error {
         fn $name() {
             let source = include_str!(concat!("../src/examples/errors/", $file));
             let result = compile_verbose(source);
-            assert!(result.is_err(), "{}: expected compilation error but succeeded", $file);
+            assert!(
+                result.is_err(),
+                "{}: expected compilation error but succeeded",
+                $file
+            );
         }
     };
 }
@@ -103,29 +107,71 @@ expect_compile_error!(e2e_err_01_type_mismatch, "01_type_mismatch.veri");
 expect_compile_error!(e2e_err_02_undefined_variable, "02_undefined_variable.veri");
 expect_compile_error!(e2e_err_03_undefined_function, "03_undefined_function.veri");
 expect_compile_error!(e2e_err_04_assign_immutable, "04_assign_immutable.veri");
-expect_compile_error!(e2e_err_05_return_type_mismatch, "05_return_type_mismatch.veri");
+expect_compile_error!(
+    e2e_err_05_return_type_mismatch,
+    "05_return_type_mismatch.veri"
+);
 expect_compile_error!(e2e_err_06_missing_return, "06_missing_return.veri");
 expect_compile_error!(e2e_err_07_not_an_array, "07_not_an_array.veri");
-expect_compile_error!(e2e_err_08_wrong_argument_count, "08_wrong_argument_count.veri");
-expect_compile_error!(e2e_err_09_argument_type_mismatch, "09_argument_type_mismatch.veri");
+expect_compile_error!(
+    e2e_err_08_wrong_argument_count,
+    "08_wrong_argument_count.veri"
+);
+expect_compile_error!(
+    e2e_err_09_argument_type_mismatch,
+    "09_argument_type_mismatch.veri"
+);
 expect_compile_error!(e2e_err_10_invalid_operation, "10_invalid_operation.veri");
 expect_compile_error!(e2e_err_11_bool_arithmetic, "11_bool_arithmetic.veri");
 expect_compile_error!(e2e_err_12_non_bool_condition, "12_non_bool_condition.veri");
 expect_compile_error!(e2e_err_13_array_index_type, "13_array_index_type.veri");
-expect_compile_error!(e2e_err_14_array_element_mismatch, "14_array_element_mismatch.veri");
+expect_compile_error!(
+    e2e_err_14_array_element_mismatch,
+    "14_array_element_mismatch.veri"
+);
 expect_compile_error!(e2e_err_15_logical_on_int, "15_logical_on_int.veri");
 expect_compile_error!(e2e_err_16_not_on_int, "16_not_on_int.veri");
 expect_compile_error!(e2e_err_17_for_loop_non_int, "17_for_loop_non_int.veri");
 expect_compile_error!(e2e_err_18_multiple_errors, "18_multiple_errors.veri");
-expect_compile_error!(e2e_err_19_array_out_of_bounds, "19_array_out_of_bounds.veri");
-expect_compile_error!(e2e_err_20_array_negative_index, "20_array_negative_index.veri");
-expect_compile_error!(e2e_err_21_precondition_violation, "21_precondition_violation.veri");
-expect_compile_error!(e2e_err_22_quantifier_non_bool_body, "22_quantifier_non_bool_body.veri");
-expect_compile_error!(e2e_err_23_quantifier_non_int_range, "23_quantifier_non_int_range.veri");
+expect_compile_error!(
+    e2e_err_19_array_out_of_bounds,
+    "19_array_out_of_bounds.veri"
+);
+expect_compile_error!(
+    e2e_err_20_array_negative_index,
+    "20_array_negative_index.veri"
+);
+expect_compile_error!(
+    e2e_err_21_precondition_violation,
+    "21_precondition_violation.veri"
+);
+expect_compile_error!(
+    e2e_err_22_quantifier_non_bool_body,
+    "22_quantifier_non_bool_body.veri"
+);
+expect_compile_error!(
+    e2e_err_23_quantifier_non_int_range,
+    "23_quantifier_non_int_range.veri"
+);
 expect_compile_error!(e2e_err_24_implies_non_bool, "24_implies_non_bool.veri");
-expect_compile_error!(e2e_err_25_precondition_quantifier_violation, "25_precondition_quantifier_violation.veri");
-expect_compile_error!(e2e_err_26_quantifier_in_runtime, "26_quantifier_in_runtime.veri");
-expect_compile_error!(e2e_err_27_invariant_not_preserved, "27_invariant_not_preserved.veri");
-expect_compile_error!(e2e_err_28_invariant_not_established, "28_invariant_not_established.veri");
+expect_compile_error!(
+    e2e_err_25_precondition_quantifier_violation,
+    "25_precondition_quantifier_violation.veri"
+);
+expect_compile_error!(
+    e2e_err_26_quantifier_in_runtime,
+    "26_quantifier_in_runtime.veri"
+);
+expect_compile_error!(
+    e2e_err_27_invariant_not_preserved,
+    "27_invariant_not_preserved.veri"
+);
+expect_compile_error!(
+    e2e_err_28_invariant_not_established,
+    "28_invariant_not_established.veri"
+);
 expect_compile_error!(e2e_err_division_by_zero, "division_by_zero.veri");
-expect_compile_error!(e2e_err_division_by_zero_symbolic, "division_by_zero_symbolic.veri");
+expect_compile_error!(
+    e2e_err_division_by_zero_symbolic,
+    "division_by_zero_symbolic.veri"
+);

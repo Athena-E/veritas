@@ -327,9 +327,9 @@ fn join_states(
         }
     }
 
-    for idx in 0..all_constraints.len() {
+    for (idx, constraint) in all_constraints.iter().enumerate() {
         if kept.contains(&idx) {
-            result.constraints.push(all_constraints[idx].clone());
+            result.constraints.push(constraint.clone());
         }
     }
 
@@ -447,8 +447,16 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::BinOp {
             op, dst, lhs, rhs, ..
         } => {
-            let lhs_ty = state.register_types.get(lhs).cloned().unwrap_or(DtalType::Int);
-            let rhs_ty = state.register_types.get(rhs).cloned().unwrap_or(DtalType::Int);
+            let lhs_ty = state
+                .register_types
+                .get(lhs)
+                .cloned()
+                .unwrap_or(DtalType::Int);
+            let rhs_ty = state
+                .register_types
+                .get(rhs)
+                .cloned()
+                .unwrap_or(DtalType::Int);
 
             let derived_ty = match op {
                 BinaryOp::And | BinaryOp::Or => DtalType::Bool,
@@ -468,16 +476,18 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.register_types.insert(*dst, derived_ty);
         }
         DtalInstr::AddImm { dst, src, imm, .. } => {
-            let src_ty = state.register_types.get(src).cloned().unwrap_or(DtalType::Int);
+            let src_ty = state
+                .register_types
+                .get(src)
+                .cloned()
+                .unwrap_or(DtalType::Int);
             let src_idx = extract_index(&src_ty, src);
             let result_idx = IndexExpr::Add(Box::new(src_idx), Box::new(IndexExpr::Const(*imm)));
             state
                 .register_types
                 .insert(*dst, DtalType::SingletonInt(result_idx));
         }
-        DtalInstr::Load {
-            dst, base, ty, ..
-        } => {
+        DtalInstr::Load { dst, base, ty, .. } => {
             // Derive element type from array base when available
             let derived_ty = if let Some(base_ty) = state.register_types.get(base)
                 && let DtalType::Array { element_type, .. } = base_ty
@@ -533,9 +543,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.constraints.push(constraint.clone());
             state.proven_assertions.push(constraint.clone());
         }
-        DtalInstr::Jmp { .. }
-        | DtalInstr::Branch { .. }
-        | DtalInstr::Ret => {}
+        DtalInstr::Jmp { .. } | DtalInstr::Branch { .. } | DtalInstr::Ret => {}
     }
 }
 

@@ -110,10 +110,7 @@ pub fn verify_instruction(
                     lower: IndexExpr::Const(0),
                     upper: size.clone(),
                     body: Box::new(Constraint::Eq(
-                        IndexExpr::Select(
-                            arr_name,
-                            Box::new(IndexExpr::Var("_k".to_string())),
-                        ),
+                        IndexExpr::Select(arr_name, Box::new(IndexExpr::Var("_k".to_string()))),
                         IndexExpr::Const(0),
                     )),
                 });
@@ -126,63 +123,60 @@ pub fn verify_instruction(
         } => {
             use crate::backend::dtal::regs::PhysicalReg;
 
-            let derived_return_ty =
-                if let Some(callee) = program.functions.iter().find(|f| &f.name == target) {
-                    // Check callee's precondition if available.
-                    // Substitute callee's virtual param registers with physical
-                    // param registers (r0, r1, ...) since the caller has placed
-                    // arguments there before the call.
-                    if let Some(precond) = &callee.precondition {
-                        let param_regs = PhysicalReg::param_regs();
-                        let param_subs: std::collections::HashMap<String, String> = callee
-                            .params
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| *i < param_regs.len())
-                            .map(|(i, (reg, _))| {
-                                (format!("{}", reg), format!("{}", param_regs[i]))
-                            })
-                            .collect();
-                        let mut substituted = substitute_select_names(precond, &param_subs);
-                        // Also substitute Var references for param registers
-                        substituted =
-                            substitute_var_names_in_constraint(&substituted, &param_subs);
-                        // Version-substitute array Select names
-                        substituted =
-                            version_substitute_constraint(&substituted, &state.array_versions);
+            let derived_return_ty = if let Some(callee) =
+                program.functions.iter().find(|f| &f.name == target)
+            {
+                // Check callee's precondition if available.
+                // Substitute callee's virtual param registers with physical
+                // param registers (r0, r1, ...) since the caller has placed
+                // arguments there before the call.
+                if let Some(precond) = &callee.precondition {
+                    let param_regs = PhysicalReg::param_regs();
+                    let param_subs: std::collections::HashMap<String, String> = callee
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i < param_regs.len())
+                        .map(|(i, (reg, _))| (format!("{}", reg), format!("{}", param_regs[i])))
+                        .collect();
+                    let mut substituted = substitute_select_names(precond, &param_subs);
+                    // Also substitute Var references for param registers
+                    substituted = substitute_var_names_in_constraint(&substituted, &param_subs);
+                    // Version-substitute array Select names
+                    substituted =
+                        version_substitute_constraint(&substituted, &state.array_versions);
 
-                        if !is_constraint_provable(&substituted, &state.constraints) {
-                            return Err(VerifyError::PreconditionFailed {
-                                block: block_label.to_string(),
-                                callee: target.clone(),
-                                constraint: precond.clone(),
-                                context: state.constraints.clone(),
-                            });
-                        }
+                    if !is_constraint_provable(&substituted, &state.constraints) {
+                        return Err(VerifyError::PreconditionFailed {
+                            block: block_label.to_string(),
+                            callee: target.clone(),
+                            constraint: precond.clone(),
+                            context: state.constraints.clone(),
+                        });
                     }
+                }
 
-                    // Propagate callee's postcondition to caller's constraint context.
-                    // Substitute "result" and callee param names with physical regs,
-                    // then version-substitute array names.
-                    if let Some(postcond) = &callee.postcondition {
-                        let r0_name = format!("{}", PhysicalReg::R0);
-                        let mut postcond_subs: std::collections::HashMap<String, String> =
-                            std::collections::HashMap::new();
-                        postcond_subs.insert("result".to_string(), r0_name);
-                        let mut substituted = substitute_select_names(postcond, &postcond_subs);
-                        substituted =
-                            substitute_var_names_in_constraint(&substituted, &postcond_subs);
-                        substituted =
-                            version_substitute_constraint(&substituted, &state.array_versions);
-                        state.constraints.push(substituted);
-                    }
+                // Propagate callee's postcondition to caller's constraint context.
+                // Substitute "result" and callee param names with physical regs,
+                // then version-substitute array names.
+                if let Some(postcond) = &callee.postcondition {
+                    let r0_name = format!("{}", PhysicalReg::R0);
+                    let mut postcond_subs: std::collections::HashMap<String, String> =
+                        std::collections::HashMap::new();
+                    postcond_subs.insert("result".to_string(), r0_name);
+                    let mut substituted = substitute_select_names(postcond, &postcond_subs);
+                    substituted = substitute_var_names_in_constraint(&substituted, &postcond_subs);
+                    substituted =
+                        version_substitute_constraint(&substituted, &state.array_versions);
+                    state.constraints.push(substituted);
+                }
 
-                    // Derive return type from callee's declared signature
-                    callee.return_type.clone()
-                } else {
-                    // External/unknown callee: trust the annotation
-                    return_ty.clone()
-                };
+                // Derive return type from callee's declared signature
+                callee.return_type.clone()
+            } else {
+                // External/unknown callee: trust the annotation
+                return_ty.clone()
+            };
 
             state
                 .register_types
@@ -333,18 +327,10 @@ fn verify_binop(
             let rhs_idx = extract_index(&rhs_ty, &rhs);
 
             let result_idx = match op {
-                BinaryOp::Add => {
-                    IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx))
-                }
-                BinaryOp::Sub => {
-                    IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx))
-                }
-                BinaryOp::Mul => {
-                    IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx))
-                }
-                BinaryOp::Div => {
-                    IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx))
-                }
+                BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
+                BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
+                BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
+                BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
                 _ => unreachable!(),
             };
 
@@ -409,11 +395,7 @@ fn verify_load(
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
     // If base has an array type, derive element type and perform bounds checking
-    if let DtalType::Array {
-        element_type,
-        size,
-    } = &base_ty
-    {
+    if let DtalType::Array { element_type, size } = &base_ty {
         let offset_expr = reg_to_index_expr(&offset);
 
         // Construct bounds constraint: 0 <= offset < size
@@ -468,11 +450,7 @@ fn verify_store(
     let src_ty = get_register_type(src, state, block_label)?;
 
     // If base has an array type, perform bounds checking and emit axioms
-    if let DtalType::Array {
-        element_type,
-        size,
-    } = &base_ty
-    {
+    if let DtalType::Array { element_type, size } = &base_ty {
         let offset_expr = reg_to_index_expr(&offset);
 
         // Construct bounds constraint: 0 <= offset < size
@@ -526,14 +504,8 @@ fn verify_store(
                     offset_expr,
                 )),
                 Box::new(Constraint::Eq(
-                    IndexExpr::Select(
-                        new_name,
-                        Box::new(IndexExpr::Var("_k".to_string())),
-                    ),
-                    IndexExpr::Select(
-                        old_name,
-                        Box::new(IndexExpr::Var("_k".to_string())),
-                    ),
+                    IndexExpr::Select(new_name, Box::new(IndexExpr::Var("_k".to_string()))),
+                    IndexExpr::Select(old_name, Box::new(IndexExpr::Var("_k".to_string()))),
                 )),
             )),
         });
@@ -739,10 +711,7 @@ pub fn types_compatible_with_constraints(
         ) => {
             types_compatible_with_constraints(e1.as_ref(), e2.as_ref(), constraints)
                 && (s1 == s2
-                    || is_constraint_provable(
-                        &Constraint::Eq(s1.clone(), s2.clone()),
-                        constraints,
-                    ))
+                    || is_constraint_provable(&Constraint::Eq(s1.clone(), s2.clone()), constraints))
         }
         (DtalType::Ref(a), DtalType::Ref(b)) => {
             types_compatible_with_constraints(a.as_ref(), b.as_ref(), constraints)

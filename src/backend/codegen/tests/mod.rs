@@ -251,7 +251,7 @@ fn test_pipeline_multi_function_program() {
                 }],
                 return_type: IType::Int,
                 precondition: None,
-            postcondition: None,
+                postcondition: None,
                 body: TFunctionBody {
                     statements: vec![],
                     trailing_expr: Some(Box::new(spanned(TExpr::BinOp {
@@ -274,7 +274,7 @@ fn test_pipeline_multi_function_program() {
                 parameters: vec![],
                 return_type: IType::Int,
                 precondition: None,
-            postcondition: None,
+                postcondition: None,
                 body: TFunctionBody {
                     statements: vec![spanned(TStmt::Let {
                         is_mut: false,

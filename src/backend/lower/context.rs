@@ -81,10 +81,7 @@ impl<'src> LoweringContext<'src> {
 
     /// Look up the type of a variable
     pub fn lookup_var_type(&self, name: &str) -> IType<'src> {
-        self.var_type_map
-            .get(name)
-            .cloned()
-            .unwrap_or(IType::Int)
+        self.var_type_map.get(name).cloned().unwrap_or(IType::Int)
     }
 
     /// Get a snapshot of the current variable map
@@ -195,6 +192,7 @@ impl<'src> LoweringContext<'src> {
     // ========================================================================
 
     /// Build the final TIR function
+    #[allow(clippy::too_many_arguments)]
     pub fn build_function(
         self,
         name: String,

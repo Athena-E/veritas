@@ -396,24 +396,30 @@ pub(crate) fn substitute_constraint_vars(
     match constraint {
         Constraint::True => Constraint::True,
         Constraint::False => Constraint::False,
-        Constraint::Eq(l, r) => {
-            Constraint::Eq(substitute_index_vars(l, subs), substitute_index_vars(r, subs))
-        }
-        Constraint::Lt(l, r) => {
-            Constraint::Lt(substitute_index_vars(l, subs), substitute_index_vars(r, subs))
-        }
-        Constraint::Le(l, r) => {
-            Constraint::Le(substitute_index_vars(l, subs), substitute_index_vars(r, subs))
-        }
-        Constraint::Gt(l, r) => {
-            Constraint::Gt(substitute_index_vars(l, subs), substitute_index_vars(r, subs))
-        }
-        Constraint::Ge(l, r) => {
-            Constraint::Ge(substitute_index_vars(l, subs), substitute_index_vars(r, subs))
-        }
-        Constraint::Ne(l, r) => {
-            Constraint::Ne(substitute_index_vars(l, subs), substitute_index_vars(r, subs))
-        }
+        Constraint::Eq(l, r) => Constraint::Eq(
+            substitute_index_vars(l, subs),
+            substitute_index_vars(r, subs),
+        ),
+        Constraint::Lt(l, r) => Constraint::Lt(
+            substitute_index_vars(l, subs),
+            substitute_index_vars(r, subs),
+        ),
+        Constraint::Le(l, r) => Constraint::Le(
+            substitute_index_vars(l, subs),
+            substitute_index_vars(r, subs),
+        ),
+        Constraint::Gt(l, r) => Constraint::Gt(
+            substitute_index_vars(l, subs),
+            substitute_index_vars(r, subs),
+        ),
+        Constraint::Ge(l, r) => Constraint::Ge(
+            substitute_index_vars(l, subs),
+            substitute_index_vars(r, subs),
+        ),
+        Constraint::Ne(l, r) => Constraint::Ne(
+            substitute_index_vars(l, subs),
+            substitute_index_vars(r, subs),
+        ),
         Constraint::And(l, r) => Constraint::And(
             Box::new(substitute_constraint_vars(l, subs)),
             Box::new(substitute_constraint_vars(r, subs)),

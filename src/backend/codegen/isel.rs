@@ -4,9 +4,9 @@
 //! At this stage, we use virtual registers (physical register allocation
 //! happens in a later phase).
 
+use crate::backend::dtal::constraints::IndexExpr;
 use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
 use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::constraints::IndexExpr;
 use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
