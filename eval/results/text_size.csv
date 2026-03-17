@@ -1,5 +1,5 @@
 program,veritas_text_bytes,gcc_O0_text_bytes,gcc_O2_text_bytes
-14_for_loops,979,443,265
+14_for_loops,955,445,265
 07_function_calls,454,391,311
 01_simple,192,295,265
-bubble_sort,926,613,496
+bubble_sort,906,613,496
