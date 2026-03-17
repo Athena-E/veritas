@@ -121,7 +121,6 @@ fn has_side_effects(instr: &DtalInstr) -> bool {
             | DtalInstr::Ret
             | DtalInstr::Push { .. }
             | DtalInstr::ConstraintAssert { .. }
-            | DtalInstr::ConstraintAssume { .. }
     )
 }
 

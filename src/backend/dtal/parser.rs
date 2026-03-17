@@ -329,18 +329,20 @@ impl<'a> DtalParser<'a> {
         if trimmed.starts_with(".type ") {
             return self.parse_type_annotation(trimmed);
         }
-        if trimmed.starts_with(".assume ") {
-            return self.parse_constraint_assume(trimmed);
-        }
         if trimmed.starts_with(".assert ") {
             return self.parse_constraint_assert(trimmed);
+        }
+        // .assume in instruction stream: skip (block-level .assume is handled
+        // in parse_block; instruction-level assumes are no longer emitted)
+        if trimmed.starts_with(".assume ") {
+            return Ok(None);
         }
         // Legacy comment-style annotation instructions (backward compatibility)
         if trimmed.starts_with("; type ") {
             return self.parse_type_annotation_legacy(trimmed);
         }
         if trimmed.starts_with("; assume ") {
-            return self.parse_constraint_assume_legacy(trimmed);
+            return Ok(None); // Legacy assume — skip
         }
         if trimmed.starts_with("; assert ") {
             return self.parse_constraint_assert_legacy(trimmed);
@@ -392,13 +394,6 @@ impl<'a> DtalParser<'a> {
         Ok(Some(DtalInstr::TypeAnnotation { reg, ty }))
     }
 
-    fn parse_constraint_assume(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // .assume <constraint>
-        let rest = line.trim_start_matches(".assume ").trim();
-        let constraint = parse_constraint_str(rest)?;
-        Ok(Some(DtalInstr::ConstraintAssume { constraint }))
-    }
-
     fn parse_constraint_assert(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
         // .assert <constraint>
         let rest = line.trim_start_matches(".assert ").trim();
@@ -428,15 +423,6 @@ impl<'a> DtalParser<'a> {
             .ok_or_else(|| self.err(format!("invalid register '{}'", reg_str)))?;
         let ty = parse_type_str(ty_str)?;
         Ok(Some(DtalInstr::TypeAnnotation { reg, ty }))
-    }
-
-    fn parse_constraint_assume_legacy(
-        &self,
-        line: &str,
-    ) -> Result<Option<DtalInstr>, DtalParseError> {
-        let rest = line.trim_start_matches("; assume ").trim();
-        let constraint = parse_constraint_str(rest)?;
-        Ok(Some(DtalInstr::ConstraintAssume { constraint }))
     }
 
     fn parse_constraint_assert_legacy(
@@ -910,6 +896,27 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
         _ if s.starts_with("master(") && s.ends_with(')') => {
             let inner = parse_type_str(&s[7..s.len() - 1])?;
             Ok(DtalType::Master(Arc::new(inner)))
+        }
+        _ if s.starts_with("exists ") => {
+            // exists n. int(n) where constraint
+            let rest = &s[7..]; // skip "exists "
+            let dot = rest
+                .find('.')
+                .ok_or_else(|| err_static(format!("expected '.' in existential type '{}'", s)))?;
+            let witness_var = rest[..dot].trim().to_string();
+            let after_dot = rest[dot + 1..].trim();
+            // Expect "int(<witness_var>) where <constraint>"
+            let where_pos = after_dot
+                .find(" where ")
+                .ok_or_else(|| {
+                    err_static(format!("expected 'where' in existential type '{}'", s))
+                })?;
+            let constraint_str = after_dot[where_pos + 7..].trim();
+            let constraint = parse_constraint_str(constraint_str)?;
+            Ok(DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            })
         }
         _ if s.starts_with('{') && s.ends_with('}') => {
             // {x: int | constraint }

@@ -43,6 +43,7 @@ pub(crate) mod smt;
 
 pub use error::VerifyError;
 
+use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use checker::verify_instruction;
 use std::collections::HashMap;
@@ -209,7 +210,10 @@ fn verify_block_derivation(
                 {
                     state.constraints.push(neg_constraint);
                 }
+                // Only check fall-through coercion if the next block in layout
+                // is NOT the branch target (otherwise the Jmp instruction handles it)
                 if let Some(next_block) = func.blocks.get(block_idx + 1)
+                    && next_block.label != *target
                     && let Some(next_state) = label_map.get(next_block.label.as_str())
                 {
                     verify_state_coercion(&state, next_state, &block.label, &next_block.label)?;
@@ -308,17 +312,24 @@ fn verify_return_if_present(
 /// Verify that `current` state coerces into `target` declared state.
 ///
 /// Xi & Harper's type-jmp rule: at a jump to label L, the current state
-/// must coerce into L's declared state. Checks register type subtyping
-/// at the edge. Constraints in the target's declared entry state serve as
-/// the block's initial context for derivation (not as coercion targets) —
-/// they are populated by the codegen's dataflow analysis and include
-/// branch-derived constraints from predecessor edges.
+/// must coerce into L's declared state. Checks:
+/// 1. Register type subtyping: for each register in the target, the
+///    current type must be a subtype
+/// 2. Constraint entailment: each constraint in the target's declared
+///    entry state must be provable from the current constraint context
 fn verify_state_coercion(
     current: &TypeState,
     target: &TypeState,
     source_block: &str,
     target_label: &str,
 ) -> Result<(), VerifyError> {
+    // If the current constraint context is unsatisfiable, the edge is
+    // unreachable (dead code). Unreachable code is trivially sound —
+    // no coercion check needed.
+    if checker::is_constraint_provable(&Constraint::False, &current.constraints) {
+        return Ok(());
+    }
+
     // Check register types: each register in the target must be a supertype
     // of the corresponding register in the current state
     for (reg, target_ty) in &target.register_types {
@@ -335,6 +346,23 @@ fn verify_state_coercion(
                 expected: target_ty.clone(),
                 actual: current_ty.clone(),
                 from_block: source_block.to_string(),
+            });
+        }
+    }
+
+    // Check constraint entailment: each constraint declared in the target's
+    // entry state must be provable from the current state's constraints.
+    // This eliminates trust on .assume directives — they become verified
+    // properties of the program, not compiler assertions.
+    for target_constraint in &target.constraints {
+        if !checker::is_constraint_provable(target_constraint, &current.constraints) {
+            return Err(VerifyError::UnprovableConstraint {
+                constraint: target_constraint.clone(),
+                context: current.constraints.clone(),
+                block: format!(
+                    "{} (edge {} → {})",
+                    target_label, source_block, target_label
+                ),
             });
         }
     }
@@ -356,17 +384,28 @@ fn seed_register_constraints(state: &mut TypeState) {
     let new_constraints: Vec<Constraint> = state
         .register_types
         .iter()
-        .filter_map(|(reg, ty)| {
-            if let DtalType::SingletonInt(idx) = ty {
+        .filter_map(|(reg, ty)| match ty {
+            DtalType::SingletonInt(idx) => {
                 let reg_expr = checker::reg_to_index_expr(reg);
                 if *idx != reg_expr {
                     Some(Constraint::Eq(reg_expr, idx.clone()))
                 } else {
                     None
                 }
-            } else {
-                None
             }
+            DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            } => {
+                // Open the existential: substitute witness_var with the register name
+                let reg_name = format!("{}", reg);
+                let subs = std::collections::HashMap::from([(witness_var.clone(), reg_name)]);
+                let mut opened =
+                    checker::substitute_var_names_in_constraint(constraint, &subs);
+                opened = checker::substitute_select_names(&opened, &subs);
+                Some(opened)
+            }
+            _ => None,
         })
         .collect();
 
@@ -425,6 +464,27 @@ mod tests {
             label: label.to_string(),
             entry_state: TypeState::new(),
             instructions,
+        }
+    }
+
+    fn make_func_with_entry_state(
+        name: &str,
+        params: Vec<(Reg, DtalType)>,
+        return_type: DtalType,
+        entry_state: TypeState,
+        instructions: Vec<DtalInstr>,
+    ) -> DtalFunction {
+        DtalFunction {
+            name: name.to_string(),
+            params,
+            return_type,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![DtalBlock {
+                label: ".entry".to_string(),
+                entry_state,
+                instructions,
+            }],
         }
     }
 
@@ -521,38 +581,34 @@ mod tests {
     }
 
     // ========================================================================
-    // Phase 3: ConstraintAssume is ignored
+    // Phase 3: Entry state constraints feed into verification context
     // ========================================================================
 
     #[test]
-    fn test_constraint_assume_adds_to_context() {
-        // ConstraintAssume adds the constraint to the context,
-        // so a subsequent ConstraintAssert can prove it
-        let program = make_program(vec![make_func(
+    fn test_entry_state_constraint_feeds_context() {
+        // Entry state .assume constraints are available in the block's
+        // constraint context, so a ConstraintAssert can prove them
+        let mut entry_state = TypeState::new();
+        entry_state.register_types.insert(v(0), DtalType::Int);
+        entry_state.constraints.push(Constraint::Lt(
+            IndexExpr::Var("v0".to_string()),
+            IndexExpr::Const(10),
+        ));
+        let program = make_program(vec![make_func_with_entry_state(
             "ok",
             vec![],
             DtalType::Int,
-            vec![make_block(
-                ".entry",
-                vec![
-                    DtalInstr::ConstraintAssume {
-                        constraint: Constraint::Lt(
-                            IndexExpr::Var("v0".to_string()),
-                            IndexExpr::Const(10),
-                        ),
-                    },
-                    DtalInstr::ConstraintAssert {
-                        constraint: Constraint::Lt(
-                            IndexExpr::Var("v0".to_string()),
-                            IndexExpr::Const(10),
-                        ),
-                    },
-                ],
-            )],
+            entry_state,
+            vec![DtalInstr::ConstraintAssert {
+                constraint: Constraint::Lt(
+                    IndexExpr::Var("v0".to_string()),
+                    IndexExpr::Const(10),
+                ),
+            }],
         )]);
         assert!(
             verify_dtal(&program).is_ok(),
-            "ConstraintAssume should add constraint to context"
+            "Entry state constraint should be available in verification context"
         );
     }
 

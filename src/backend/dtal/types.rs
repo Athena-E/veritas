@@ -38,6 +38,12 @@ pub enum DtalType {
         constraint: Constraint,
     },
     Master(Arc<Self>),
+    /// ∃witness_var. int(witness_var) where constraint
+    /// The constraint may reference witness_var.
+    ExistentialInt {
+        witness_var: String,
+        constraint: Constraint,
+    },
 }
 
 impl PartialEq for DtalType {
@@ -72,6 +78,16 @@ impl PartialEq for DtalType {
                 },
             ) => b1 == b2 && v1 == v2 && c1 == c2,
             (DtalType::Master(a), DtalType::Master(b)) => a == b,
+            (
+                DtalType::ExistentialInt {
+                    witness_var: w1,
+                    constraint: c1,
+                },
+                DtalType::ExistentialInt {
+                    witness_var: w2,
+                    constraint: c2,
+                },
+            ) => w1 == w2 && c1 == c2,
             _ => false,
         }
     }
@@ -101,6 +117,13 @@ impl std::hash::Hash for DtalType {
                 var.hash(state);
                 format!("{}", constraint).hash(state);
             }
+            DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            } => {
+                witness_var.hash(state);
+                format!("{}", constraint).hash(state);
+            }
         }
     }
 }
@@ -127,6 +150,16 @@ impl fmt::Display for DtalType {
                 write!(f, "{{{}: int | {} }}", var, constraint)
             }
             DtalType::Master(inner) => write!(f, "master({})", inner),
+            DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            } => {
+                write!(
+                    f,
+                    "exists {}. int({}) where {}",
+                    witness_var, witness_var, constraint
+                )
+            }
         }
     }
 }

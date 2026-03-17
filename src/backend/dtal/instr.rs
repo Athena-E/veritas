@@ -207,8 +207,6 @@ pub enum DtalInstr {
     // Annotations (for verification)
     /// Type annotation for a register
     TypeAnnotation { reg: Reg, ty: DtalType },
-    /// Assume a constraint
-    ConstraintAssume { constraint: Constraint },
-    /// Assert a constraint (for bounds checks)
+    /// Assert a constraint (for bounds checks and loop invariants)
     ConstraintAssert { constraint: Constraint },
 }
