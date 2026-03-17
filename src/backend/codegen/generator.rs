@@ -194,11 +194,8 @@ fn codegen_block<'src>(
     // 4. Substitute source-level variable names with register names in constraints
     if !ctx.var_subs.is_empty() {
         for instr in &mut instructions {
-            match instr {
-                DtalInstr::ConstraintAssert { constraint, .. } => {
-                    *constraint = substitute_constraint_vars(constraint, &ctx.var_subs);
-                }
-                _ => {}
+            if let DtalInstr::ConstraintAssert { constraint, .. } = instr {
+                *constraint = substitute_constraint_vars(constraint, &ctx.var_subs);
             }
         }
     }

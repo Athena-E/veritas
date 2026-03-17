@@ -400,8 +400,7 @@ fn seed_register_constraints(state: &mut TypeState) {
                 // Open the existential: substitute witness_var with the register name
                 let reg_name = format!("{}", reg);
                 let subs = std::collections::HashMap::from([(witness_var.clone(), reg_name)]);
-                let mut opened =
-                    checker::substitute_var_names_in_constraint(constraint, &subs);
+                let mut opened = checker::substitute_var_names_in_constraint(constraint, &subs);
                 opened = checker::substitute_select_names(&opened, &subs);
                 Some(opened)
             }
@@ -600,10 +599,7 @@ mod tests {
             DtalType::Int,
             entry_state,
             vec![DtalInstr::ConstraintAssert {
-                constraint: Constraint::Lt(
-                    IndexExpr::Var("v0".to_string()),
-                    IndexExpr::Const(10),
-                ),
+                constraint: Constraint::Lt(IndexExpr::Var("v0".to_string()), IndexExpr::Const(10)),
             }],
         )]);
         assert!(

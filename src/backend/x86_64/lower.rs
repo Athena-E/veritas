@@ -506,8 +506,7 @@ impl<'a> FunctionLowerer<'a> {
             }
 
             // Annotations don't generate code
-            DtalInstr::TypeAnnotation { .. }
-            | DtalInstr::ConstraintAssert { .. } => {}
+            DtalInstr::TypeAnnotation { .. } | DtalInstr::ConstraintAssert { .. } => {}
         }
     }
 

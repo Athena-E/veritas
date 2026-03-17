@@ -777,10 +777,8 @@ pub fn types_compatible_with_constraints(
             DtalType::SingletonInt(k),
         ) => {
             let eq_constraint = Constraint::Eq(IndexExpr::Var(witness_var.clone()), k.clone());
-            let implication = Constraint::Implies(
-                Box::new(constraint.clone()),
-                Box::new(eq_constraint),
-            );
+            let implication =
+                Constraint::Implies(Box::new(constraint.clone()), Box::new(eq_constraint));
             is_constraint_provable(&implication, constraints)
         }
         // Int <: ExistentialInt — false (cannot satisfy non-trivial constraint)

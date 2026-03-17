@@ -249,7 +249,6 @@ fn lower_comparison(
         reg: Reg::Virtual(dst),
         ty: DtalType::Bool,
     });
-
 }
 
 /// Lower a unary operation

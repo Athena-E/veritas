@@ -906,11 +906,9 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
             let witness_var = rest[..dot].trim().to_string();
             let after_dot = rest[dot + 1..].trim();
             // Expect "int(<witness_var>) where <constraint>"
-            let where_pos = after_dot
-                .find(" where ")
-                .ok_or_else(|| {
-                    err_static(format!("expected 'where' in existential type '{}'", s))
-                })?;
+            let where_pos = after_dot.find(" where ").ok_or_else(|| {
+                err_static(format!("expected 'where' in existential type '{}'", s))
+            })?;
             let constraint_str = after_dot[where_pos + 7..].trim();
             let constraint = parse_constraint_str(constraint_str)?;
             Ok(DtalType::ExistentialInt {
