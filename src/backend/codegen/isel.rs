@@ -120,11 +120,9 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             });
         }
 
-        TirInstr::AssumeConstraint { constraint } => {
-            instrs.push(DtalInstr::ConstraintAssume {
-                constraint: constraint.clone(),
-            });
-        }
+        // AssumeConstraint: the verifier derives constraints independently
+        // from branch conditions and existential types — no need to emit.
+        TirInstr::AssumeConstraint { .. } => {}
 
         TirInstr::AssertConstraint { constraint } => {
             instrs.push(DtalInstr::ConstraintAssert {
@@ -252,39 +250,6 @@ fn lower_comparison(
         ty: DtalType::Bool,
     });
 
-    // Preserve constraint for verifier
-    use crate::backend::dtal::Constraint;
-    use crate::backend::dtal::IndexExpr;
-
-    let constraint = match cmp_kind {
-        "eq" => Constraint::Eq(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "ne" => Constraint::Ne(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "lt" => Constraint::Lt(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "le" => Constraint::Le(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "gt" => Constraint::Gt(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "ge" => Constraint::Ge(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        _ => Constraint::True,
-    };
-
-    instrs.push(DtalInstr::ConstraintAssume { constraint });
 }
 
 /// Lower a unary operation

@@ -74,13 +74,6 @@ pub fn verify_instruction(
             verify_type_annotation(*reg, ty, state, block_label)?;
         }
 
-        DtalInstr::ConstraintAssume { constraint } => {
-            // Add compiler-emitted constraint assumptions to the context.
-            // These provide structural information the verifier can't derive
-            // from Cmp+Branch alone (e.g., loop counter lower bounds).
-            state.constraints.push(constraint.clone());
-        }
-
         DtalInstr::ConstraintAssert { constraint } => {
             verify_constraint_assert(constraint, state, block_label)?;
         }
@@ -399,7 +392,7 @@ fn verify_load(
     dst: Reg,
     base: Reg,
     offset: Reg,
-    ty: &DtalType,
+    _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
@@ -438,8 +431,17 @@ fn verify_load(
             IndexExpr::Select(arr_name, Box::new(offset_expr)),
         ));
     } else {
-        // Non-array base: no element type to derive from, trust annotation
-        state.register_types.insert(dst, ty.clone());
+        // Non-array base: reject — the verifier requires typed array bases
+        // to derive element types independently.
+        return Err(VerifyError::TypeMismatch {
+            block: block_label.to_string(),
+            instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
+            expected: DtalType::Array {
+                element_type: std::sync::Arc::new(DtalType::Int),
+                size: IndexExpr::Var("?".to_string()),
+            },
+            actual: base_ty,
+        });
     }
 
     Ok(())

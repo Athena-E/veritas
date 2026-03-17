@@ -195,9 +195,6 @@ fn codegen_block<'src>(
     if !ctx.var_subs.is_empty() {
         for instr in &mut instructions {
             match instr {
-                DtalInstr::ConstraintAssume { constraint } => {
-                    *constraint = substitute_constraint_vars(constraint, &ctx.var_subs);
-                }
                 DtalInstr::ConstraintAssert { constraint, .. } => {
                     *constraint = substitute_constraint_vars(constraint, &ctx.var_subs);
                 }
@@ -257,7 +254,7 @@ fn lower_terminator<'src>(
             cond,
             true_target,
             false_target,
-            true_constraint,
+            true_constraint: _,
             false_constraint: _,
         } => {
             let true_label = ctx.label_for_block(*true_target);
@@ -288,25 +285,8 @@ fn lower_terminator<'src>(
                 });
             }
 
-            // Emit the true_constraint as ConstraintAssume unless the current block
-            // (loop header) has a phi node with an existential type. The existential
-            // provides the same bound info via seed_register_constraints, making
-            // the ConstraintAssume redundant (and untrusted).
-            let current_block_has_existential = func
-                .blocks
-                .get(&current_block)
-                .map(|b| {
-                    b.phi_nodes
-                        .iter()
-                        .any(|phi| phi.existential_constraint.is_some())
-                })
-                .unwrap_or(false);
-
-            if !current_block_has_existential {
-                instrs.push(DtalInstr::ConstraintAssume {
-                    constraint: *true_constraint.clone(),
-                });
-            }
+            // Branch constraints are derived independently by the verifier
+            // from Cmp+Branch and existential types — no ConstraintAssume needed.
 
             // Emit phi moves for the false target (we're falling through to it)
             emit_phi_moves(instrs, *false_target, current_block, func);

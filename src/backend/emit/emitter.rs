@@ -243,10 +243,6 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             writeln!(output, "    .type {}: {}", emit_reg(reg), emit_type(ty)).unwrap();
         }
 
-        DtalInstr::ConstraintAssume { constraint } => {
-            writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
-        }
-
         DtalInstr::ConstraintAssert { constraint } => {
             writeln!(output, "    .assert {}", emit_constraint(constraint)).unwrap();
         }

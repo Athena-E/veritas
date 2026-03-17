@@ -533,9 +533,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::TypeAnnotation { reg, ty } => {
             state.register_types.insert(*reg, ty.clone());
         }
-        DtalInstr::ConstraintAssume { constraint } => {
-            state.constraints.push(constraint.clone());
-        }
         DtalInstr::Pop { dst, .. } => {
             let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, popped_ty);
