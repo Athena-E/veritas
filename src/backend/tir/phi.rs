@@ -4,6 +4,7 @@
 //! at control flow join points.
 
 use crate::backend::dtal::VirtualReg;
+use crate::backend::dtal::constraints::Constraint;
 use crate::backend::tir::types::BlockId;
 use crate::common::types::IType;
 
@@ -16,6 +17,10 @@ pub struct PhiNode<'src> {
     pub ty: IType<'src>,
     /// Incoming values: (predecessor block, SSA variable from that block)
     pub incoming: Vec<(BlockId, VirtualReg)>,
+    /// Optional existential constraint for loop counter phi nodes.
+    /// When set, codegen emits `ExistentialInt { witness_var, constraint }`
+    /// instead of `DtalType::from_itype(ty)`.
+    pub existential_constraint: Option<(String, Constraint)>,
 }
 
 impl<'src> PhiNode<'src> {
@@ -25,6 +30,7 @@ impl<'src> PhiNode<'src> {
             dst,
             ty,
             incoming: Vec::new(),
+            existential_constraint: None,
         }
     }
 

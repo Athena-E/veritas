@@ -911,6 +911,27 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
             let inner = parse_type_str(&s[7..s.len() - 1])?;
             Ok(DtalType::Master(Arc::new(inner)))
         }
+        _ if s.starts_with("exists ") => {
+            // exists n. int(n) where constraint
+            let rest = &s[7..]; // skip "exists "
+            let dot = rest
+                .find('.')
+                .ok_or_else(|| err_static(format!("expected '.' in existential type '{}'", s)))?;
+            let witness_var = rest[..dot].trim().to_string();
+            let after_dot = rest[dot + 1..].trim();
+            // Expect "int(<witness_var>) where <constraint>"
+            let where_pos = after_dot
+                .find(" where ")
+                .ok_or_else(|| {
+                    err_static(format!("expected 'where' in existential type '{}'", s))
+                })?;
+            let constraint_str = after_dot[where_pos + 7..].trim();
+            let constraint = parse_constraint_str(constraint_str)?;
+            Ok(DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            })
+        }
         _ if s.starts_with('{') && s.ends_with('}') => {
             // {x: int | constraint }
             let inner = &s[1..s.len() - 1].trim();

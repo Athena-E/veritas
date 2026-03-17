@@ -356,17 +356,28 @@ fn seed_register_constraints(state: &mut TypeState) {
     let new_constraints: Vec<Constraint> = state
         .register_types
         .iter()
-        .filter_map(|(reg, ty)| {
-            if let DtalType::SingletonInt(idx) = ty {
+        .filter_map(|(reg, ty)| match ty {
+            DtalType::SingletonInt(idx) => {
                 let reg_expr = checker::reg_to_index_expr(reg);
                 if *idx != reg_expr {
                     Some(Constraint::Eq(reg_expr, idx.clone()))
                 } else {
                     None
                 }
-            } else {
-                None
             }
+            DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            } => {
+                // Open the existential: substitute witness_var with the register name
+                let reg_name = format!("{}", reg);
+                let subs = std::collections::HashMap::from([(witness_var.clone(), reg_name)]);
+                let mut opened =
+                    checker::substitute_var_names_in_constraint(constraint, &subs);
+                opened = checker::substitute_select_names(&opened, &subs);
+                Some(opened)
+            }
+            _ => None,
         })
         .collect();
 

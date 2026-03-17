@@ -377,6 +377,29 @@ fn join_types(types: &[DtalType]) -> DtalType {
         return first.clone();
     }
 
+    // If any type is an existential, try to preserve it.
+    // ExistentialInt + SingletonInt → ExistentialInt (singleton is a subtype)
+    // ExistentialInt + ExistentialInt (same) → keep as-is
+    // ExistentialInt + Int → Int (conservative widening)
+    if let Some(existential) = types
+        .iter()
+        .find(|t| matches!(t, DtalType::ExistentialInt { .. }))
+    {
+        let all_compatible = types.iter().all(|t| {
+            matches!(
+                t,
+                DtalType::ExistentialInt { .. } | DtalType::SingletonInt(_) | DtalType::Int
+            )
+        });
+        if all_compatible {
+            let has_plain_int = types.iter().any(|t| matches!(t, DtalType::Int));
+            if has_plain_int {
+                return DtalType::Int;
+            }
+            return existential.clone();
+        }
+    }
+
     // If different singleton ints, generalize to int
     let all_singleton_ints = types
         .iter()
@@ -389,7 +412,10 @@ fn join_types(types: &[DtalType]) -> DtalType {
     let all_numeric = types.iter().all(|t| {
         matches!(
             t,
-            DtalType::Int | DtalType::SingletonInt(_) | DtalType::RefinedInt { .. }
+            DtalType::Int
+                | DtalType::SingletonInt(_)
+                | DtalType::RefinedInt { .. }
+                | DtalType::ExistentialInt { .. }
         )
     });
     if all_numeric {

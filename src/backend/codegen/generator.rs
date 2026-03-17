@@ -220,9 +220,17 @@ fn lower_phi_node<'src>(
     _block: &BasicBlock<'src>,
     _ctx: &CodegenContext,
 ) {
+    let ty = if let Some((witness_var, constraint)) = &phi.existential_constraint {
+        DtalType::ExistentialInt {
+            witness_var: witness_var.clone(),
+            constraint: constraint.clone(),
+        }
+    } else {
+        DtalType::from_itype(&phi.ty)
+    };
     instrs.push(DtalInstr::TypeAnnotation {
         reg: Reg::Virtual(phi.dst),
-        ty: DtalType::from_itype(&phi.ty),
+        ty,
     });
 }
 
@@ -280,13 +288,25 @@ fn lower_terminator<'src>(
                 });
             }
 
-            // Emit the true_constraint as ConstraintAssume for the false path.
-            // (On the false path, the condition is negated — emit the original
-            // constraint so the verifier has it. Substitution to register names
-            // happens in the post-processing step.)
-            instrs.push(DtalInstr::ConstraintAssume {
-                constraint: *true_constraint.clone(),
-            });
+            // Emit the true_constraint as ConstraintAssume unless the current block
+            // (loop header) has a phi node with an existential type. The existential
+            // provides the same bound info via seed_register_constraints, making
+            // the ConstraintAssume redundant (and untrusted).
+            let current_block_has_existential = func
+                .blocks
+                .get(&current_block)
+                .map(|b| {
+                    b.phi_nodes
+                        .iter()
+                        .any(|phi| phi.existential_constraint.is_some())
+                })
+                .unwrap_or(false);
+
+            if !current_block_has_existential {
+                instrs.push(DtalInstr::ConstraintAssume {
+                    constraint: *true_constraint.clone(),
+                });
+            }
 
             // Emit phi moves for the false target (we're falling through to it)
             emit_phi_moves(instrs, *false_target, current_block, func);

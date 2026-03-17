@@ -243,6 +243,17 @@ fn verify_mov_reg(
             let src_idx = extract_index(&derived_ty, &src);
             add_register_index_constraint(dst, &src_idx, state);
         }
+        // Existential: open the existential for the destination register
+        DtalType::ExistentialInt {
+            witness_var,
+            constraint,
+        } => {
+            let dst_name = format!("{}", dst);
+            let subs = std::collections::HashMap::from([(witness_var.clone(), dst_name)]);
+            let opened = substitute_var_names_in_constraint(constraint, &subs);
+            let opened = substitute_select_names(&opened, &subs);
+            state.constraints.push(opened);
+        }
         // Array: copy version and emit linking constraint
         DtalType::Array { size, .. } => {
             let src_version = state.array_versions.get(&src).copied().unwrap_or(0);
@@ -275,6 +286,7 @@ pub fn extract_index(ty: &DtalType, reg: &Reg) -> IndexExpr {
     match ty {
         DtalType::SingletonInt(idx) => idx.clone(),
         DtalType::RefinedInt { var, .. } => IndexExpr::Var(var.clone()),
+        DtalType::ExistentialInt { .. } => reg_to_index_expr(reg),
         _ => reg_to_index_expr(reg),
     }
 }
@@ -567,8 +579,18 @@ fn verify_type_annotation(
     block_label: &str,
 ) -> Result<(), VerifyError> {
     if let Some(existing_ty) = state.register_types.get(&reg) {
-        // Register already has a type -- verify compatibility with constraint context
-        if !types_compatible_with_constraints(existing_ty, ty, &state.constraints) {
+        // ExistentialInt annotations serve as phi declarations — the type
+        // narrows from the widened join (Int) to a bounded existential.
+        // Correctness of each incoming edge is verified by verify_state_coercion.
+        let is_existential_narrowing = matches!(ty, DtalType::ExistentialInt { .. })
+            && matches!(
+                existing_ty,
+                DtalType::Int | DtalType::SingletonInt(_) | DtalType::ExistentialInt { .. }
+            );
+
+        if !is_existential_narrowing
+            && !types_compatible_with_constraints(existing_ty, ty, &state.constraints)
+        {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("type_annotation {:?} : {}", reg, ty),
@@ -639,7 +661,10 @@ fn check_register_defined(
 fn is_numeric_type(ty: &DtalType) -> bool {
     matches!(
         ty,
-        DtalType::Int | DtalType::SingletonInt(_) | DtalType::RefinedInt { .. }
+        DtalType::Int
+            | DtalType::SingletonInt(_)
+            | DtalType::RefinedInt { .. }
+            | DtalType::ExistentialInt { .. }
     )
 }
 
@@ -697,6 +722,67 @@ pub fn types_compatible_with_constraints(
             (v1 == v2 && c1 == c2 && types_compatible_with_constraints(b1, b2, constraints))
                 || types_compatible_with_constraints(b1, b2, constraints)
         }
+        // SingletonInt(k) <: ExistentialInt { n | φ(n) } — substitute n := k, check φ(k)
+        (
+            DtalType::SingletonInt(idx),
+            DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            },
+        ) => {
+            let subs: std::collections::HashMap<String, String> =
+                std::collections::HashMap::from([(witness_var.clone(), format!("{}", idx))]);
+            let substituted = substitute_var_names_in_constraint(constraint, &subs);
+            let substituted = substitute_select_names(&substituted, &subs);
+            is_constraint_provable(&substituted, constraints)
+        }
+        // ExistentialInt <: Int — always true (erasure)
+        (DtalType::ExistentialInt { .. }, DtalType::Int) => true,
+        // ExistentialInt <: ExistentialInt — check constraint implication
+        (
+            DtalType::ExistentialInt {
+                witness_var: w1,
+                constraint: c1,
+            },
+            DtalType::ExistentialInt {
+                witness_var: w2,
+                constraint: c2,
+            },
+        ) => {
+            // If structurally equal, trivially compatible
+            if w1 == w2 && c1 == c2 {
+                return true;
+            }
+            // Check ∀x. c1(x) ⟹ c2(x) by renaming w1 to a fresh var and checking implication
+            let fresh = "_existential_check".to_string();
+            let subs1: std::collections::HashMap<String, String> =
+                std::collections::HashMap::from([(w1.clone(), fresh.clone())]);
+            let subs2: std::collections::HashMap<String, String> =
+                std::collections::HashMap::from([(w2.clone(), fresh.clone())]);
+            let c1_sub = substitute_var_names_in_constraint(c1, &subs1);
+            let c2_sub = substitute_var_names_in_constraint(c2, &subs2);
+            is_constraint_provable(
+                &Constraint::Implies(Box::new(c1_sub), Box::new(c2_sub)),
+                constraints,
+            )
+        }
+        // ExistentialInt <: SingletonInt — only if constraint forces n = k
+        (
+            DtalType::ExistentialInt {
+                witness_var,
+                constraint,
+            },
+            DtalType::SingletonInt(k),
+        ) => {
+            let eq_constraint = Constraint::Eq(IndexExpr::Var(witness_var.clone()), k.clone());
+            let implication = Constraint::Implies(
+                Box::new(constraint.clone()),
+                Box::new(eq_constraint),
+            );
+            is_constraint_provable(&implication, constraints)
+        }
+        // Int <: ExistentialInt — false (cannot satisfy non-trivial constraint)
+        (DtalType::Int, DtalType::ExistentialInt { .. }) => false,
         (DtalType::Int, DtalType::SingletonInt(_)) => false,
         (DtalType::Int, DtalType::RefinedInt { .. }) => false,
         (
@@ -815,7 +901,7 @@ pub fn version_substitute_constraint(
 }
 
 /// Recursively substitute Select names in a constraint
-fn substitute_select_names(
+pub fn substitute_select_names(
     constraint: &Constraint,
     subs: &std::collections::HashMap<String, String>,
 ) -> Constraint {
@@ -914,7 +1000,7 @@ fn substitute_select_in_index(
 }
 
 /// Substitute Var names in a constraint (for register name remapping)
-fn substitute_var_names_in_constraint(
+pub fn substitute_var_names_in_constraint(
     constraint: &Constraint,
     subs: &std::collections::HashMap<String, String>,
 ) -> Constraint {

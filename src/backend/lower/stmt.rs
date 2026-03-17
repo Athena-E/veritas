@@ -195,6 +195,24 @@ fn lower_for_loop<'src>(
     let i_phi_reg = ctx.fresh_reg();
     let mut i_phi = PhiNode::new(i_phi_reg, var_ty.clone());
     i_phi.add_incoming(entry_block, start_reg);
+
+    // Attach existential constraint: ∃n. int(n) where (n >= start ∧ n < end)
+    // The witness variable uses the register name so codegen can emit it directly.
+    let phi_witness = format!("v{}", i_phi_reg.0);
+    let phi_start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
+    let phi_end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX));
+    let existential_constraint = Constraint::And(
+        Box::new(Constraint::Ge(
+            IndexExpr::Var(phi_witness.clone()),
+            phi_start_idx,
+        )),
+        Box::new(Constraint::Lt(
+            IndexExpr::Var(phi_witness.clone()),
+            phi_end_idx,
+        )),
+    );
+    i_phi.existential_constraint = Some((phi_witness, existential_constraint));
+
     ctx.emit_phi(i_phi);
 
     // Bind the loop variable to the phi result
