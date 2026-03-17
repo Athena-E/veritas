@@ -25,6 +25,4 @@ pub use builder::{
 pub use instr::{Terminator, TirInstr};
 pub use phi::PhiNode;
 pub use program::{BasicBlock, TirFunction, TirProgram};
-pub use types::{
-    BinaryOp, BlockId, BlockIdAllocator, BoundsProof, ProofJustification, RegisterState, UnaryOp,
-};
+pub use types::{BinaryOp, BlockId, BlockIdAllocator, RegisterState, UnaryOp};

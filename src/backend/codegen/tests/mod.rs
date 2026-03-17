@@ -27,6 +27,7 @@ fn test_pipeline_identity_function() {
                 ty: IType::Int,
             }],
             return_type: IType::Int,
+            precondition: None,
             postcondition: None,
             body: TFunctionBody {
                 statements: vec![],
@@ -75,6 +76,7 @@ fn test_pipeline_add_function() {
                 },
             ],
             return_type: IType::Int,
+            precondition: None,
             postcondition: None,
             body: TFunctionBody {
                 statements: vec![spanned(TStmt::Let {
@@ -128,6 +130,7 @@ fn test_pipeline_constant_function() {
             name: "const_five".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            precondition: None,
             postcondition: None,
             body: TFunctionBody {
                 statements: vec![],
@@ -164,6 +167,7 @@ fn test_pipeline_conditional_function() {
                 ty: IType::Int,
             }],
             return_type: IType::Int,
+            precondition: None,
             postcondition: None,
             body: TFunctionBody {
                 statements: vec![],
@@ -220,7 +224,14 @@ fn test_pipeline_conditional_function() {
     // Should have multiple blocks with branches
     assert!(output.contains(".function abs"));
     assert!(output.contains("cmp")); // Comparison
-    assert!(output.contains("bne") || output.contains("beq")); // Branch
+    assert!(
+        output.contains("bne")
+            || output.contains("beq")
+            || output.contains("blt")
+            || output.contains("bge")
+            || output.contains("ble")
+            || output.contains("bgt")
+    ); // Branch
     assert!(output.contains("jmp")); // Jump
     assert!(output.contains("ret"));
 
@@ -239,6 +250,7 @@ fn test_pipeline_multi_function_program() {
                     ty: IType::Int,
                 }],
                 return_type: IType::Int,
+                precondition: None,
                 postcondition: None,
                 body: TFunctionBody {
                     statements: vec![],
@@ -261,6 +273,7 @@ fn test_pipeline_multi_function_program() {
                 name: "main".to_string(),
                 parameters: vec![],
                 return_type: IType::Int,
+                precondition: None,
                 postcondition: None,
                 body: TFunctionBody {
                     statements: vec![spanned(TStmt::Let {
@@ -327,6 +340,7 @@ fn test_pipeline_function_with_postcondition() {
             name: "five".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            precondition: None,
             postcondition: Some(postcondition),
             body: TFunctionBody {
                 statements: vec![],
@@ -392,6 +406,7 @@ fn test_pipeline_function_with_inequality_postcondition() {
             name: "positive".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            precondition: None,
             postcondition: Some(postcondition),
             body: TFunctionBody {
                 statements: vec![],
@@ -414,8 +429,8 @@ fn test_pipeline_function_with_inequality_postcondition() {
         "DTAL output should contain .postcondition directive"
     );
     assert!(
-        output.contains("result > 0"),
-        "Postcondition should show result > 0"
+        output.contains("> 0"),
+        "Postcondition should show > 0 (result substituted with register name)"
     );
 
     println!(

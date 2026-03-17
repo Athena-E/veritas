@@ -590,7 +590,7 @@ pub fn check_stmt<'src>(
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
                 // Convert invariant to Constraint for lowering
-                crate::backend::lower::function::expr_to_constraint(&inv_expr.0)
+                crate::backend::dtal::convert::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };
@@ -833,8 +833,13 @@ fn check_block_as_stmt<'src>(
                 then_block,
                 else_block,
             } => {
-                let (if_tstmt, final_ctx) =
-                    check_if_stmt(&stmts_ctx, cond, then_block, else_block.as_ref(), trailing.1)?;
+                let (if_tstmt, final_ctx) = check_if_stmt(
+                    &stmts_ctx,
+                    cond,
+                    then_block,
+                    else_block.as_ref(),
+                    trailing.1,
+                )?;
                 // Wrap the if-statement result back into the block's statements
                 let mut all_stmts = typed_stmts;
                 all_stmts.push(if_tstmt);
@@ -1005,10 +1010,15 @@ pub fn check_function<'src>(
         })
         .collect();
 
+    let precondition = global_ctx
+        .lookup_function(func_inner.name)
+        .and_then(|sig| sig.precondition.clone());
+
     let tfunc = TFunction {
         name: func_inner.name.to_string(),
         parameters: tparams,
         return_type,
+        precondition,
         postcondition,
         body: TFunctionBody {
             statements: tbody,

@@ -49,6 +49,7 @@ fn main() {
         eprintln!("  --tir            Show TIR (SSA form)");
         eprintln!("  --verify         Verify DTAL output");
         eprintln!("  --verify-only    Verify DTAL and exit (no output)");
+        eprintln!("  --verify-dtal    Verify a standalone .dtal file");
         eprintln!("  -o <file>        Output native executable (ELF)");
         eprintln!("  --native         Generate native x86-64 code (to stdout)");
         eprintln!();
@@ -58,12 +59,37 @@ fn main() {
         eprintln!("  --dce            Enable dead code elimination only");
         eprintln!();
         eprintln!("Environment variables:");
-        eprintln!("  VERITAS_LS=1           Use linear scan register allocator (default: graph coloring)");
+        eprintln!(
+            "  VERITAS_LS=1           Use linear scan register allocator (default: graph coloring)"
+        );
         eprintln!("  VERITAS_DEBUG_ALLOC=1  Dump register allocation details to stderr");
         std::process::exit(if show_help { 0 } else { 1 });
     }
 
     let file_path = &args[1];
+
+    // Handle --verify-dtal mode: standalone DTAL verification
+    if args.iter().any(|a| a == "--verify-dtal") {
+        let src = match fs::read_to_string(file_path) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }
+        };
+
+        match veritas::verifier::verify_dtal_text(&src) {
+            Ok(()) => {
+                println!("Verification passed!");
+            }
+            Err(e) => {
+                eprintln!("Verification FAILED: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
     let quiet = args.iter().any(|a| a == "--quiet" || a == "-q");
     let bench = args.iter().any(|a| a == "--bench");

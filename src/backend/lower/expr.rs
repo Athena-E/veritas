@@ -5,10 +5,9 @@
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::backend::lower::context::LoweringContext;
+use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
-use crate::backend::tir::{
-    BinaryOp, BlockId, BoundsProof, PhiNode, ProofJustification, Terminator, TirInstr, UnaryOp,
-};
+use crate::backend::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
@@ -344,19 +343,12 @@ fn lower_index<'src>(
     let index_reg = lower_expr(ctx, index);
     let dst = ctx.fresh_reg();
 
-    // Create a bounds proof - in the frontend, bounds have already been verified
-    // We trust the frontend's type checking here
-    let bounds_proof = BoundsProof {
-        constraint: Constraint::True, // Placeholder - frontend verified
-        justification: ProofJustification::FromFrontend,
-    };
-
     ctx.emit(TirInstr::ArrayLoad {
         dst,
         base: base_reg,
         index: index_reg,
         element_ty: ty.clone(),
-        bounds_proof,
+        bounds_constraint: Constraint::True,
     });
 
     dst
@@ -406,19 +398,14 @@ fn lower_array_init<'src>(
             ty: IType::Int,
         });
 
-        let bounds_proof = BoundsProof {
-            constraint: Constraint::And(
-                Box::new(Constraint::Ge(IndexExpr::Const(i), IndexExpr::Const(0))),
-                Box::new(Constraint::Lt(IndexExpr::Const(i), IndexExpr::Const(size))),
-            ),
-            justification: ProofJustification::FromFrontend,
-        };
-
         ctx.emit(TirInstr::ArrayStore {
             base: arr_reg,
             index: idx_reg,
             value: init_val_reg,
-            bounds_proof,
+            bounds_constraint: Constraint::And(
+                Box::new(Constraint::Ge(IndexExpr::Const(i), IndexExpr::Const(0))),
+                Box::new(Constraint::Lt(IndexExpr::Const(i), IndexExpr::Const(size))),
+            ),
         });
     }
 
@@ -534,9 +521,11 @@ pub fn lower_if_expr<'src>(
     // 6. Create merge block with phi nodes
     ctx.start_block(merge_block);
 
-    // Create phi node for the result value
+    // Create phi node for the result value.
+    // Widen the type for join points (e.g., Unit → Int when branches
+    // produce different value types).
     let result_reg = ctx.fresh_reg();
-    let mut result_phi = PhiNode::new(result_reg, ty.clone());
+    let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
     result_phi.add_incoming(then_end_block, then_result);
     result_phi.add_incoming(else_end_block, else_result);
     ctx.emit_phi(result_phi);
@@ -581,12 +570,11 @@ fn lower_block_with_result<'src>(
     // value we need (backward compat for blocks that use the last statement as
     // their value). Skip for Unit-typed blocks to avoid double-lowering
     // if-else statements that are used purely for side effects.
-    if !matches!(ty, IType::Unit) {
-        if let Some(last) = block.statements.last()
-            && let TStmt::Expr(expr) = &last.0
-        {
-            return lower_expr(ctx, expr);
-        }
+    if !matches!(ty, IType::Unit)
+        && let Some(last) = block.statements.last()
+        && let TStmt::Expr(expr) = &last.0
+    {
+        return lower_expr(ctx, expr);
     }
 
     // No value - emit default
@@ -617,18 +605,18 @@ fn create_phi_nodes_for_modified_vars<'src>(
         if then_reg != else_reg {
             // Need a phi node
             let phi_dst = ctx.fresh_reg();
-            // We don't have type info here - use Int as placeholder
-            // In a production compiler, we'd track types in the var_map
-            let mut phi = PhiNode::new(phi_dst, IType::Int);
+            let var_ty = widen_itype(ctx.lookup_var_type(name));
+            let mut phi = PhiNode::new(phi_dst, var_ty.clone());
             phi.add_incoming(then_block, then_reg);
             phi.add_incoming(else_block, else_reg);
             ctx.emit_phi(phi);
 
             // Update var_map to point to the phi result
-            ctx.bind_var(name, phi_dst);
+            ctx.bind_var_typed(name, phi_dst, var_ty);
         } else if then_reg != before_reg {
             // Both branches modified it the same way - just update binding
-            ctx.bind_var(name, then_reg);
+            let var_ty = ctx.lookup_var_type(name);
+            ctx.bind_var_typed(name, then_reg, var_ty);
         }
     }
 }

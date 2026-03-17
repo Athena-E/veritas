@@ -66,10 +66,14 @@ fn lower_function(func: &DtalFunction) -> X86Function {
         for &node in &graph.nodes {
             if let Some(Location::Reg(r1)) = allocation.allocation.get(&node) {
                 for neighbor in graph.neighbors(node) {
-                    if let Some(Location::Reg(r2)) = allocation.allocation.get(&neighbor) {
-                        if r1 == r2 && node.0 < neighbor.0 {
-                            eprintln!("  CONFLICT: v{} and v{} both in {:?}", node.0, neighbor.0, r1);
-                        }
+                    if let Some(Location::Reg(r2)) = allocation.allocation.get(&neighbor)
+                        && r1 == r2
+                        && node.0 < neighbor.0
+                    {
+                        eprintln!(
+                            "  CONFLICT: v{} and v{} both in {:?}",
+                            node.0, neighbor.0, r1
+                        );
                     }
                 }
             }
@@ -81,8 +85,8 @@ fn lower_function(func: &DtalFunction) -> X86Function {
 }
 
 /// Function lowering context
-struct FunctionLowerer<'a, 'src> {
-    func: &'a DtalFunction<'src>,
+struct FunctionLowerer<'a> {
+    func: &'a DtalFunction,
     allocation: AllocationResult,
     instructions: Vec<X86Instr>,
     /// Stack frame size (for locals and spills)
@@ -92,8 +96,8 @@ struct FunctionLowerer<'a, 'src> {
     return_value_in_rax: bool,
 }
 
-impl<'a, 'src> FunctionLowerer<'a, 'src> {
-    fn new(func: &'a DtalFunction<'src>, allocation: &AllocationResult) -> Self {
+impl<'a> FunctionLowerer<'a> {
+    fn new(func: &'a DtalFunction, allocation: &AllocationResult) -> Self {
         // Callee-saved registers are pushed between rbp and the spill
         // frame, so spill slot offsets must be shifted down to avoid
         // overlapping with the callee-saved save area.
@@ -238,14 +242,13 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let mut pending: Vec<(X86Reg, Location)> = Vec::new();
 
         for (i, (param_reg, _ty)) in self.func.params.iter().enumerate() {
-            if let Reg::Virtual(vreg) = param_reg {
-                if let Some(&src_reg) = X86Reg::ARG_REGS.get(i) {
-                    if let Some(&dst_loc) = self.allocation.allocation.get(vreg) {
-                        // Skip no-op moves (src == dst)
-                        if dst_loc != Location::Reg(src_reg) {
-                            pending.push((src_reg, dst_loc));
-                        }
-                    }
+            if let Reg::Virtual(vreg) = param_reg
+                && let Some(&src_reg) = X86Reg::ARG_REGS.get(i)
+                && let Some(&dst_loc) = self.allocation.allocation.get(vreg)
+            {
+                // Skip no-op moves (src == dst)
+                if dst_loc != Location::Reg(src_reg) {
+                    pending.push((src_reg, dst_loc));
                 }
             }
         }
@@ -287,7 +290,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
     }
 
     /// Lower a single DTAL instruction
-    fn lower_instruction(&mut self, instr: &DtalInstr<'src>) {
+    fn lower_instruction(&mut self, instr: &DtalInstr) {
         match instr {
             DtalInstr::MovImm { dst, imm, .. } => {
                 self.lower_mov_imm(*dst, *imm);
@@ -503,9 +506,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             }
 
             // Annotations don't generate code
-            DtalInstr::TypeAnnotation { .. }
-            | DtalInstr::ConstraintAssume { .. }
-            | DtalInstr::ConstraintAssert { .. } => {}
+            DtalInstr::TypeAnnotation { .. } | DtalInstr::ConstraintAssert { .. } => {}
         }
     }
 
@@ -608,7 +609,11 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
                 // If rhs was loaded into Rax (because it was allocated
                 // there before we reclaim it — not currently possible,
                 // but defensive), we need rhs in a different register.
-                let divisor = if rhs_reg == X86Reg::Rax { X86Reg::R11 } else { rhs_reg };
+                let divisor = if rhs_reg == X86Reg::Rax {
+                    X86Reg::R11
+                } else {
+                    rhs_reg
+                };
                 if divisor == X86Reg::Rax {
                     self.instructions.push(X86Instr::MovRR {
                         dst: X86Reg::R11,
@@ -711,9 +716,7 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
         let result_reg = match dst_loc {
             Location::Reg(r) => r,
-            Location::Stack(_) => {
-                Self::pick_scratch(&[base_reg, offset_reg])
-            }
+            Location::Stack(_) => Self::pick_scratch(&[base_reg, offset_reg]),
         };
 
         self.instructions.push(X86Instr::MovRM {
@@ -788,10 +791,8 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
         } else {
             // Large immediate: pick scratch that doesn't collide with lhs
             let scratch = Self::pick_scratch(&[lhs_reg]);
-            self.instructions.push(X86Instr::MovRI {
-                dst: scratch,
-                imm,
-            });
+            self.instructions
+                .push(X86Instr::MovRI { dst: scratch, imm });
             self.instructions.push(X86Instr::CmpRR {
                 lhs: lhs_reg,
                 rhs: scratch,
@@ -910,14 +911,13 @@ impl<'a, 'src> FunctionLowerer<'a, 'src> {
             }
         }
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::dtal::instr::{DtalBlock, TypeState};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
     #[test]
     fn test_lower_simple_function() {
@@ -928,7 +928,7 @@ mod tests {
         let func = DtalFunction {
             name: "add".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -938,19 +938,19 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 10,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v1,
                         imm: 20,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v2,
                         lhs: v0,
                         rhs: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -985,7 +985,7 @@ mod tests {
         let func = DtalFunction {
             name: "branch_test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![
@@ -996,7 +996,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 5,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::CmpImm { lhs: v0, imm: 10 },
                         DtalInstr::Branch {
@@ -1012,7 +1012,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 1,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Jmp {
                             target: "exit".to_string(),
@@ -1026,7 +1026,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 0,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Jmp {
                             target: "exit".to_string(),

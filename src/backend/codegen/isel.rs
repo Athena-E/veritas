@@ -4,22 +4,23 @@
 //! At this stage, we use virtual registers (physical register allocation
 //! happens in a later phase).
 
+use crate::backend::dtal::constraints::IndexExpr;
 use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
 use crate::backend::dtal::regs::Reg;
+use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
-use crate::common::types::IType;
 
 /// Lower a TIR instruction to DTAL instructions
 ///
 /// May emit multiple DTAL instructions for a single TIR instruction.
-pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &TirInstr<'src>) {
+pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr<'src>) {
     match tir_instr {
         TirInstr::LoadImm { dst, value, ty } => {
             instrs.push(DtalInstr::MovImm {
                 dst: Reg::Virtual(*dst),
                 imm: *value,
-                ty: ty.clone(),
+                ty: DtalType::from_itype(ty),
             });
         }
 
@@ -27,7 +28,7 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
             instrs.push(DtalInstr::MovReg {
                 dst: Reg::Virtual(*dst),
                 src: Reg::Virtual(*src),
-                ty: ty.clone(),
+                ty: DtalType::from_itype(ty),
             });
         }
 
@@ -55,20 +56,16 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
             base,
             index,
             element_ty,
-            bounds_proof,
+            bounds_constraint,
         } => {
-            // Emit bounds proof as a constraint assertion
             instrs.push(DtalInstr::ConstraintAssert {
-                constraint: bounds_proof.constraint.clone(),
-                msg: format!("array bounds check: {:?}", bounds_proof.justification),
+                constraint: bounds_constraint.clone(),
             });
-
-            // Emit load instruction
             instrs.push(DtalInstr::Load {
                 dst: Reg::Virtual(*dst),
                 base: Reg::Virtual(*base),
                 offset: Reg::Virtual(*index),
-                ty: element_ty.clone(),
+                ty: DtalType::from_itype(element_ty),
             });
         }
 
@@ -76,15 +73,11 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
             base,
             index,
             value,
-            bounds_proof,
+            bounds_constraint,
         } => {
-            // Emit bounds proof as a constraint assertion
             instrs.push(DtalInstr::ConstraintAssert {
-                constraint: bounds_proof.constraint.clone(),
-                msg: format!("array bounds check: {:?}", bounds_proof.justification),
+                constraint: bounds_constraint.clone(),
             });
-
-            // Emit store instruction
             instrs.push(DtalInstr::Store {
                 base: Reg::Virtual(*base),
                 offset: Reg::Virtual(*index),
@@ -106,17 +99,18 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
             element_ty,
             size,
         } => {
-            use crate::common::types::IValue;
             use std::sync::Arc;
 
             // Calculate total size in bytes (assuming 8 bytes per element)
             let element_size = 8u32; // Simplified: all elements are 8 bytes
             let total_size = element_size * (*size as u32);
 
-            // Create array type for annotation
-            let array_ty = IType::Array {
-                element_type: Arc::new(element_ty.clone()),
-                size: IValue::Int(*size),
+            // Create array type — widen element type to base (Int/Bool)
+            // since different values will be stored into the array.
+            let element_dtal_ty = widen_to_base(DtalType::from_itype(element_ty));
+            let array_ty = DtalType::Array {
+                element_type: Arc::new(element_dtal_ty),
+                size: IndexExpr::Const(*size),
             };
 
             instrs.push(DtalInstr::Alloca {
@@ -126,16 +120,13 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
             });
         }
 
-        TirInstr::AssumeConstraint { constraint } => {
-            instrs.push(DtalInstr::ConstraintAssume {
-                constraint: constraint.clone(),
-            });
-        }
+        // AssumeConstraint: the verifier derives constraints independently
+        // from branch conditions and existential types — no need to emit.
+        TirInstr::AssumeConstraint { .. } => {}
 
-        TirInstr::AssertConstraint { constraint, msg } => {
+        TirInstr::AssertConstraint { constraint } => {
             instrs.push(DtalInstr::ConstraintAssert {
                 constraint: constraint.clone(),
-                msg: msg.clone(),
             });
         }
     }
@@ -143,13 +134,14 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr<'src>>, tir_instr: &Ti
 
 /// Lower a binary operation
 fn lower_binop<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+    instrs: &mut Vec<DtalInstr>,
     dst: crate::backend::dtal::VirtualReg,
     op: TirBinaryOp,
     lhs: crate::backend::dtal::VirtualReg,
     rhs: crate::backend::dtal::VirtualReg,
-    ty: &IType<'src>,
+    ty: &crate::common::types::IType<'src>,
 ) {
+    let dtal_ty = DtalType::from_itype(ty);
     match op {
         // Arithmetic operations map directly
         TirBinaryOp::Add => {
@@ -158,7 +150,7 @@ fn lower_binop<'src>(
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
         TirBinaryOp::Sub => {
@@ -167,7 +159,7 @@ fn lower_binop<'src>(
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
         TirBinaryOp::Mul => {
@@ -176,7 +168,7 @@ fn lower_binop<'src>(
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
         TirBinaryOp::Div => {
@@ -185,30 +177,17 @@ fn lower_binop<'src>(
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
 
-        // Comparison operations: emit cmp followed by set (using branch pattern)
-        // For simplicity, we set the result based on comparison
-        TirBinaryOp::Eq => {
-            lower_comparison(instrs, dst, lhs, rhs, ty, "eq");
-        }
-        TirBinaryOp::Ne => {
-            lower_comparison(instrs, dst, lhs, rhs, ty, "ne");
-        }
-        TirBinaryOp::Lt => {
-            lower_comparison(instrs, dst, lhs, rhs, ty, "lt");
-        }
-        TirBinaryOp::Le => {
-            lower_comparison(instrs, dst, lhs, rhs, ty, "le");
-        }
-        TirBinaryOp::Gt => {
-            lower_comparison(instrs, dst, lhs, rhs, ty, "gt");
-        }
-        TirBinaryOp::Ge => {
-            lower_comparison(instrs, dst, lhs, rhs, ty, "ge");
-        }
+        // Comparison operations
+        TirBinaryOp::Eq => lower_comparison(instrs, dst, lhs, rhs, "eq"),
+        TirBinaryOp::Ne => lower_comparison(instrs, dst, lhs, rhs, "ne"),
+        TirBinaryOp::Lt => lower_comparison(instrs, dst, lhs, rhs, "lt"),
+        TirBinaryOp::Le => lower_comparison(instrs, dst, lhs, rhs, "le"),
+        TirBinaryOp::Gt => lower_comparison(instrs, dst, lhs, rhs, "gt"),
+        TirBinaryOp::Ge => lower_comparison(instrs, dst, lhs, rhs, "ge"),
 
         // Logical operations
         TirBinaryOp::And => {
@@ -217,7 +196,7 @@ fn lower_binop<'src>(
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
         TirBinaryOp::Or => {
@@ -226,22 +205,18 @@ fn lower_binop<'src>(
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
     }
 }
 
 /// Lower a comparison operation
-///
-/// Compares lhs and rhs, then sets dst to 1 if condition is true, else 0.
-/// Uses: cmp lhs, rhs; setcc dst
-fn lower_comparison<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+fn lower_comparison(
+    instrs: &mut Vec<DtalInstr>,
     dst: crate::backend::dtal::VirtualReg,
     lhs: crate::backend::dtal::VirtualReg,
     rhs: crate::backend::dtal::VirtualReg,
-    _ty: &IType<'src>,
     cmp_kind: &str,
 ) {
     use crate::backend::dtal::instr::CmpOp;
@@ -272,76 +247,39 @@ fn lower_comparison<'src>(
     // Type annotation for verification
     instrs.push(DtalInstr::TypeAnnotation {
         reg: Reg::Virtual(dst),
-        ty: IType::Bool,
+        ty: DtalType::Bool,
     });
-
-    // Preserve constraint for verifier
-    use crate::backend::dtal::Constraint;
-    use crate::backend::dtal::IndexExpr;
-
-    let constraint = match cmp_kind {
-        "eq" => Constraint::Eq(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "ne" => Constraint::Ne(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "lt" => Constraint::Lt(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "le" => Constraint::Le(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "gt" => Constraint::Gt(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        "ge" => Constraint::Ge(
-            IndexExpr::Var(format!("v{}", lhs.0)),
-            IndexExpr::Var(format!("v{}", rhs.0)),
-        ),
-        _ => Constraint::True,
-    };
-
-    instrs.push(DtalInstr::ConstraintAssume { constraint });
 }
 
 /// Lower a unary operation
 fn lower_unaryop<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+    instrs: &mut Vec<DtalInstr>,
     dst: crate::backend::dtal::VirtualReg,
     op: TirUnaryOp,
     operand: crate::backend::dtal::VirtualReg,
-    ty: &IType<'src>,
+    ty: &crate::common::types::IType<'src>,
 ) {
+    let dtal_ty = DtalType::from_itype(ty);
     match op {
         TirUnaryOp::Not => {
             instrs.push(DtalInstr::Not {
                 dst: Reg::Virtual(dst),
                 src: Reg::Virtual(operand),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
         TirUnaryOp::Neg => {
-            // Negate: dst = 0 - operand
-            // First load 0, then subtract
-            // For simplicity, we emit: dst = 0 - operand as sub instruction
-            // This requires a temporary, but we can use the destination
             instrs.push(DtalInstr::MovImm {
                 dst: Reg::Virtual(dst),
                 imm: 0,
-                ty: ty.clone(),
+                ty: dtal_ty.clone(),
             });
             instrs.push(DtalInstr::BinOp {
                 op: DtalBinaryOp::Sub,
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(dst),
                 rhs: Reg::Virtual(operand),
-                ty: ty.clone(),
+                ty: dtal_ty,
             });
         }
     }
@@ -349,13 +287,15 @@ fn lower_unaryop<'src>(
 
 /// Lower a function call
 fn lower_call<'src>(
-    instrs: &mut Vec<DtalInstr<'src>>,
+    instrs: &mut Vec<DtalInstr>,
     dst: Option<crate::backend::dtal::VirtualReg>,
     func: &str,
     args: &[crate::backend::dtal::VirtualReg],
-    result_ty: &IType<'src>,
+    result_ty: &crate::common::types::IType<'src>,
 ) {
     use crate::backend::dtal::regs::PhysicalReg;
+
+    let dtal_result_ty = DtalType::from_itype(result_ty);
 
     // Move arguments to parameter registers (r0, r1, r2, ...)
     for (i, arg) in args.iter().enumerate() {
@@ -375,13 +315,13 @@ fn lower_call<'src>(
             instrs.push(DtalInstr::MovReg {
                 dst: Reg::Physical(param_reg),
                 src: Reg::Virtual(*arg),
-                ty: IType::Int, // TODO: track actual argument types
+                ty: DtalType::Int, // TODO: track actual argument types
             });
         } else {
             // Push extra arguments onto stack (not implemented yet)
             instrs.push(DtalInstr::Push {
                 src: Reg::Virtual(*arg),
-                ty: IType::Int,
+                ty: DtalType::Int,
             });
         }
     }
@@ -389,7 +329,7 @@ fn lower_call<'src>(
     // Emit call instruction
     instrs.push(DtalInstr::Call {
         target: func.to_string(),
-        return_ty: result_ty.clone(),
+        return_ty: dtal_result_ty.clone(),
     });
 
     // Move result from r0 to destination
@@ -397,7 +337,19 @@ fn lower_call<'src>(
         instrs.push(DtalInstr::MovReg {
             dst: Reg::Virtual(dst_reg),
             src: Reg::Physical(PhysicalReg::R0),
-            ty: result_ty.clone(),
+            ty: dtal_result_ty,
         });
+    }
+}
+
+/// Widen a type to its base form for array element types.
+///
+/// `SingletonInt(n)` → `Int`. Refined types are preserved since they
+/// carry meaningful constraints (e.g., `{v: int | v > 0}` for positive arrays).
+/// Other types are returned unchanged.
+fn widen_to_base(ty: DtalType) -> DtalType {
+    match ty {
+        DtalType::SingletonInt(_) => DtalType::Int,
+        other => other,
     }
 }

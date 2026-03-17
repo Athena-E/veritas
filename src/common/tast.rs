@@ -129,6 +129,7 @@ pub struct TFunction<'src> {
     pub name: String,
     pub parameters: Vec<TParameter<'src>>,
     pub return_type: IType<'src>,
+    pub precondition: Option<IProposition<'src>>,
     pub postcondition: Option<IProposition<'src>>,
     pub body: TFunctionBody<'src>,
     #[allow(dead_code)]

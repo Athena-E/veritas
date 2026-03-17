@@ -13,7 +13,7 @@
 //! At this stage, we still use virtual registers. Physical register
 //! allocation is a separate phase (Phase 5).
 
-mod generator;
+pub(crate) mod generator;
 pub mod isel;
 
 #[cfg(test)]

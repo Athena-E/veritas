@@ -97,10 +97,12 @@ impl<'src> TirBuilder<'src> {
     }
 
     /// Build the function
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         self,
         name: String,
         params: Vec<(VirtualReg, IType<'src>)>,
+        param_names: Vec<String>,
         return_type: IType<'src>,
         precondition: Option<Constraint>,
         postcondition: Option<Constraint>,
@@ -109,6 +111,7 @@ impl<'src> TirBuilder<'src> {
         TirFunction {
             name,
             params,
+            param_names,
             return_type,
             precondition,
             postcondition,

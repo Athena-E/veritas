@@ -367,9 +367,9 @@ impl InterferenceGraph {
 mod tests {
     use super::*;
     use crate::backend::dtal::instr::{BinaryOp, TypeState};
-    use crate::common::types::IType;
+    use crate::backend::dtal::types::DtalType;
 
-    fn make_test_function() -> DtalFunction<'static> {
+    fn make_test_function() -> DtalFunction {
         // Simple function: result = a + b
         // Block 0:
         //   v0 = 10        ; a
@@ -383,7 +383,7 @@ mod tests {
         DtalFunction {
             name: "test".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![DtalBlock {
@@ -393,19 +393,19 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: v0,
                         imm: 10,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::MovImm {
                         dst: v1,
                         imm: 20,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
                         op: BinaryOp::Add,
                         dst: v2,
                         lhs: v0,
                         rhs: v1,
-                        ty: IType::Int,
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -475,7 +475,7 @@ mod tests {
         }
     }
 
-    fn make_branching_function() -> DtalFunction<'static> {
+    fn make_branching_function() -> DtalFunction {
         // Function with control flow:
         // entry:
         //   v0 = 1
@@ -498,7 +498,7 @@ mod tests {
         DtalFunction {
             name: "branching".to_string(),
             params: vec![],
-            return_type: IType::Int,
+            return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
             blocks: vec![
@@ -509,7 +509,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v0,
                             imm: 1,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Branch {
                             cond: CmpOp::Eq,
@@ -524,7 +524,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v1,
                             imm: 2,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Jmp {
                             target: "exit".to_string(),
@@ -538,7 +538,7 @@ mod tests {
                         DtalInstr::MovImm {
                             dst: v1,
                             imm: 3,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Jmp {
                             target: "exit".to_string(),
@@ -554,7 +554,7 @@ mod tests {
                             dst: v2,
                             lhs: v0,
                             rhs: v1,
-                            ty: IType::Int,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::Ret,
                     ],
