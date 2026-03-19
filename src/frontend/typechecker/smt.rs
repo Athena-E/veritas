@@ -4,8 +4,28 @@ use crate::frontend::typechecker::context::TypingContext;
 use crate::frontend::typechecker::helpers::{rename_expr_var, substitute_expr_for_var};
 use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use z3::ast::{Array as Z3Array, Bool, Int};
 use z3::{SatResult, Solver, Sort};
+
+// Global counters for SMT query instrumentation
+static FRONTEND_SMT_QUERIES: AtomicU64 = AtomicU64::new(0);
+static FRONTEND_SMT_TIME_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Reset frontend SMT counters (call before compilation)
+pub fn reset_frontend_smt_stats() {
+    FRONTEND_SMT_QUERIES.store(0, Ordering::Relaxed);
+    FRONTEND_SMT_TIME_NS.store(0, Ordering::Relaxed);
+}
+
+/// Get (query_count, total_time_ns) for frontend SMT queries
+pub fn get_frontend_smt_stats() -> (u64, u64) {
+    (
+        FRONTEND_SMT_QUERIES.load(Ordering::Relaxed),
+        FRONTEND_SMT_TIME_NS.load(Ordering::Relaxed),
+    )
+}
 
 pub struct SmtOracle;
 
@@ -173,6 +193,8 @@ impl SmtOracle {
     }
 
     pub fn is_provable(&self, typing_ctx: &TypingContext, goal: &IProposition) -> bool {
+        let start = Instant::now();
+
         let solver = Solver::new();
 
         // Add all context propositions as assumptions
@@ -195,11 +217,17 @@ impl SmtOracle {
         let negated_goal = goal_formula.not();
         solver.assert(&negated_goal);
 
-        match solver.check() {
+        let result = match solver.check() {
             SatResult::Unsat => true,    // Goal is provable
             SatResult::Sat => false,     // Counterexample exists
             SatResult::Unknown => false, // Solver couldn't determine
-        }
+        };
+
+        let elapsed = start.elapsed().as_nanos() as u64;
+        FRONTEND_SMT_QUERIES.fetch_add(1, Ordering::Relaxed);
+        FRONTEND_SMT_TIME_NS.fetch_add(elapsed, Ordering::Relaxed);
+
+        result
     }
 
     /// Extract a proposition from a refined type by substituting the variable name

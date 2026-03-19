@@ -4,8 +4,28 @@
 //! replacing the permissive syntactic fallback with a sound decision procedure.
 
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use z3::ast::{Bool, Int};
 use z3::{FuncDecl, SatResult, Solver, Sort};
+
+// Global counters for verifier SMT query instrumentation
+static VERIFIER_SMT_QUERIES: AtomicU64 = AtomicU64::new(0);
+static VERIFIER_SMT_TIME_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Reset verifier SMT counters
+pub fn reset_verifier_smt_stats() {
+    VERIFIER_SMT_QUERIES.store(0, Ordering::Relaxed);
+    VERIFIER_SMT_TIME_NS.store(0, Ordering::Relaxed);
+}
+
+/// Get (query_count, total_time_ns) for verifier SMT queries
+pub fn get_verifier_smt_stats() -> (u64, u64) {
+    (
+        VERIFIER_SMT_QUERIES.load(Ordering::Relaxed),
+        VERIFIER_SMT_TIME_NS.load(Ordering::Relaxed),
+    )
+}
 
 /// Z3-based constraint oracle for the verifier
 pub struct ConstraintOracle;
@@ -115,6 +135,8 @@ impl ConstraintOracle {
     /// Uses the standard "negate and check unsatisfiability" pattern:
     /// if context /\ !goal is UNSAT, then context |= goal (the goal is provable).
     pub fn is_provable(goal: &Constraint, context: &[Constraint]) -> bool {
+        let start = Instant::now();
+
         let solver = Solver::new();
 
         // Assert all context constraints
@@ -128,10 +150,16 @@ impl ConstraintOracle {
         let negated_goal = goal_formula.not();
         solver.assert(&negated_goal);
 
-        match solver.check() {
+        let result = match solver.check() {
             SatResult::Unsat => true,    // Goal is provable
             SatResult::Sat => false,     // Counterexample exists
             SatResult::Unknown => false, // Solver couldn't determine
-        }
+        };
+
+        let elapsed = start.elapsed().as_nanos() as u64;
+        VERIFIER_SMT_QUERIES.fetch_add(1, Ordering::Relaxed);
+        VERIFIER_SMT_TIME_NS.fetch_add(elapsed, Ordering::Relaxed);
+
+        result
     }
 }

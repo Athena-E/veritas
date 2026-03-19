@@ -1,0 +1,5 @@
+program,veritas_exit,gcc_O0_exit,gcc_O2_exit,note
+14_for_loops,10,0,0,MISMATCH
+07_function_calls,0,0,0,MATCH
+01_simple,0,0,0,MATCH
+bubble_sort,1,3,3,MISMATCH

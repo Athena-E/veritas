@@ -1,0 +1,5 @@
+program,veritas_bytes,gcc_O0_bytes,gcc_O2_bytes
+14_for_loops,955,15912,15712
+07_function_calls,454,15816,15816
+01_simple,192,15720,15720
+bubble_sort,906,15944,15944

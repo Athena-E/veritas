@@ -1,11 +1,36 @@
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::time::Instant;
 use veritas::backend::elf::generate_elf;
 use veritas::backend::optimise::OptConfig;
 use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
+use veritas::frontend::typechecker::smt::{get_frontend_smt_stats, reset_frontend_smt_stats};
 use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_optimized};
+use veritas::verifier::smt::{get_verifier_smt_stats, reset_verifier_smt_stats};
 use veritas::verifier::verify_dtal;
+
+fn print_bench_json(
+    file: &str,
+    compile_time: &std::time::Duration,
+    verify_time: Option<&std::time::Duration>,
+    binary_size: Option<usize>,
+) {
+    let (fe_queries, fe_time_ns) = get_frontend_smt_stats();
+    let (ver_queries, ver_time_ns) = get_verifier_smt_stats();
+    let verify_ms = verify_time.map(|d| d.as_secs_f64() * 1000.0);
+    println!(
+        r#"{{"file":"{}","compile_ms":{:.3},"verify_ms":{},"binary_bytes":{},"frontend_smt_queries":{},"frontend_smt_ms":{:.3},"verifier_smt_queries":{},"verifier_smt_ms":{:.3}}}"#,
+        file,
+        compile_time.as_secs_f64() * 1000.0,
+        verify_ms.map_or("null".to_string(), |v| format!("{:.3}", v)),
+        binary_size.map_or("null".to_string(), |v| v.to_string()),
+        fe_queries,
+        fe_time_ns as f64 / 1_000_000.0,
+        ver_queries,
+        ver_time_ns as f64 / 1_000_000.0,
+    );
+}
 
 fn main() {
     // Parse command line arguments
@@ -66,6 +91,8 @@ fn main() {
     }
 
     let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
+    let quiet = args.iter().any(|a| a == "--quiet" || a == "-q");
+    let bench = args.iter().any(|a| a == "--bench");
     let show_tokens = args.iter().any(|a| a == "--tokens");
     let show_ast = args.iter().any(|a| a == "--ast");
     let show_tir = args.iter().any(|a| a == "--tir");
@@ -93,8 +120,10 @@ fn main() {
         }
     };
 
-    println!("\n{}", file_path);
-    println!("{}", "=".repeat(60));
+    if !quiet && !bench {
+        println!("\n{}", file_path);
+        println!("{}", "=".repeat(60));
+    }
 
     // Read the source file
     let src = match fs::read_to_string(file_path) {
@@ -105,16 +134,24 @@ fn main() {
         }
     };
 
-    // Print the source code
-    println!("\nSource code:");
-    println!("{}", "-".repeat(60));
-    println!("{}", src);
-    println!("{}", "-".repeat(60));
+    if !quiet && !bench {
+        // Print the source code
+        println!("\nSource code:");
+        println!("{}", "-".repeat(60));
+        println!("{}", src);
+        println!("{}", "-".repeat(60));
+    }
+
+    // Reset SMT stats before compilation
+    reset_frontend_smt_stats();
+    reset_verifier_smt_stats();
 
     // Run the full compilation pipeline
     if verbose {
         println!("\n[1] Lexing...");
     }
+
+    let compile_start = Instant::now();
 
     // Use optimized compilation if any optimizations are enabled
     let compile_result = if opt_config.any_enabled() {
@@ -122,6 +159,8 @@ fn main() {
     } else {
         compile_verbose(&src)
     };
+
+    let compile_elapsed = compile_start.elapsed();
 
     match compile_result {
         Ok(output) => {
@@ -152,17 +191,24 @@ fn main() {
                 } else {
                     ""
                 };
-                println!("\nCompilation successful!{}", opt_status);
+                if !quiet && !bench {
+                    println!("\nCompilation successful!{}", opt_status);
+                }
             }
 
             // Verify DTAL if requested
+            let mut verify_elapsed = std::time::Duration::ZERO;
             if verify {
                 if verbose {
                     println!("\n[7] Verifying DTAL...");
                 }
+                let verify_start = Instant::now();
                 match verify_dtal(&output.dtal_program) {
                     Ok(()) => {
-                        println!("\nVerification passed!");
+                        verify_elapsed = verify_start.elapsed();
+                        if !quiet && !bench {
+                            println!("\nVerification passed!");
+                        }
                     }
                     Err(e) => {
                         eprintln!("\nVerification FAILED: {}", e);
@@ -171,6 +217,9 @@ fn main() {
                 }
 
                 if verify_only {
+                    if bench {
+                        print_bench_json(file_path, &compile_elapsed, Some(&verify_elapsed), None);
+                    }
                     return;
                 }
             }
@@ -289,7 +338,12 @@ fn main() {
                         let _ = fs::set_permissions(out_path, perms);
                     }
 
-                    println!("\nGenerated executable: {} ({} bytes)", out_path, elf.len());
+                    if !quiet && !bench {
+                        println!("\nGenerated executable: {} ({} bytes)", out_path, elf.len());
+                    }
+                    if bench {
+                        print_bench_json(file_path, &compile_elapsed, if verify { Some(&verify_elapsed) } else { None }, Some(elf.len()));
+                    }
                 } else if native {
                     // Print x86-64 assembly
                     println!("\n{}", "=".repeat(60));

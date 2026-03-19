@@ -327,12 +327,28 @@ impl InterferenceGraph {
             let live_sets =
                 LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
 
-            // Add interference edges for each instruction point
-            for live_set in &live_sets {
+            // Add interference edges for each instruction point.
+            // Two sources of interference:
+            // 1. All pairs of simultaneously live registers
+            // 2. Each def vs everything live after the def (even if the
+            //    def is immediately dead, it still clobbers its register)
+            for (instr_idx, live_set) in live_sets.iter().enumerate() {
                 let regs: Vec<_> = live_set.iter().copied().collect();
                 for i in 0..regs.len() {
                     for j in (i + 1)..regs.len() {
                         graph.add_edge(regs[i], regs[j]);
+                    }
+                }
+
+                // Def-vs-live-after: the defined register interferes with
+                // everything live after this instruction
+                if let Some(def) = LivenessAnalysis::instruction_def(
+                    &block.instructions[instr_idx],
+                ) {
+                    for &live_reg in live_set.iter() {
+                        if live_reg != def {
+                            graph.add_edge(def, live_reg);
+                        }
                     }
                 }
             }
