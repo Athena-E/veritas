@@ -214,21 +214,16 @@ fn verify_block_derivation(
                 // falls through (no subsequent Jmp/Ret). In our codegen,
                 // Branch is always followed by a Jmp, so the Jmp handler
                 // checks coercion for the false edge.
-                let has_subsequent_jmp = block.instructions.iter().any(|i| {
-                    matches!(i, DtalInstr::Jmp { .. } | DtalInstr::Ret)
-                });
-                if !has_subsequent_jmp {
-                    if let Some(next_block) = func.blocks.get(block_idx + 1)
-                        && next_block.label != *target
-                        && let Some(next_state) = label_map.get(next_block.label.as_str())
-                    {
-                        verify_state_coercion(
-                            &state,
-                            next_state,
-                            &block.label,
-                            &next_block.label,
-                        )?;
-                    }
+                let has_subsequent_jmp = block
+                    .instructions
+                    .iter()
+                    .any(|i| matches!(i, DtalInstr::Jmp { .. } | DtalInstr::Ret));
+                if !has_subsequent_jmp
+                    && let Some(next_block) = func.blocks.get(block_idx + 1)
+                    && next_block.label != *target
+                    && let Some(next_state) = label_map.get(next_block.label.as_str())
+                {
+                    verify_state_coercion(&state, next_state, &block.label, &next_block.label)?;
                 }
             }
             DtalInstr::Ret => {

@@ -342,7 +342,12 @@ fn main() {
                         println!("\nGenerated executable: {} ({} bytes)", out_path, elf.len());
                     }
                     if bench {
-                        print_bench_json(file_path, &compile_elapsed, if verify { Some(&verify_elapsed) } else { None }, Some(elf.len()));
+                        print_bench_json(
+                            file_path,
+                            &compile_elapsed,
+                            if verify { Some(&verify_elapsed) } else { None },
+                            Some(elf.len()),
+                        );
                     }
                 } else if native {
                     // Print x86-64 assembly

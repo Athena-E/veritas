@@ -342,9 +342,8 @@ impl InterferenceGraph {
 
                 // Def-vs-live-after: the defined register interferes with
                 // everything live after this instruction
-                if let Some(def) = LivenessAnalysis::instruction_def(
-                    &block.instructions[instr_idx],
-                ) {
+                if let Some(def) = LivenessAnalysis::instruction_def(&block.instructions[instr_idx])
+                {
                     for &live_reg in live_set.iter() {
                         if live_reg != def {
                             graph.add_edge(def, live_reg);
