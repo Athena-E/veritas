@@ -177,10 +177,7 @@ mod tests {
         let mid = IndexExpr::Add(
             Box::new(v11.clone()),
             Box::new(IndexExpr::Div(
-                Box::new(IndexExpr::Sub(
-                    Box::new(v10.clone()),
-                    Box::new(v11.clone()),
-                )),
+                Box::new(IndexExpr::Sub(Box::new(v10.clone()), Box::new(v11.clone()))),
                 Box::new(IndexExpr::Const(2)),
             )),
         );

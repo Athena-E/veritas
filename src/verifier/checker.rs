@@ -735,8 +735,7 @@ pub fn types_compatible_with_constraints(
             // Add witness_var == idx to the context, then check φ(witness_var).
             // This is equivalent to φ[n/idx] but handles complex index expressions
             // correctly (string substitution can't replace a Var with an arbitrary expr).
-            let witness_eq =
-                Constraint::Eq(IndexExpr::Var(witness_var.clone()), idx.clone());
+            let witness_eq = Constraint::Eq(IndexExpr::Var(witness_var.clone()), idx.clone());
             let mut augmented_ctx: Vec<Constraint> = constraints.to_vec();
             augmented_ctx.push(witness_eq);
             is_constraint_provable(constraint, &augmented_ctx)
