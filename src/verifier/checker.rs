@@ -724,7 +724,7 @@ pub fn types_compatible_with_constraints(
             (v1 == v2 && c1 == c2 && types_compatible_with_constraints(b1, b2, constraints))
                 || types_compatible_with_constraints(b1, b2, constraints)
         }
-        // SingletonInt(k) <: ExistentialInt { n | φ(n) } — substitute n := k, check φ(k)
+        // SingletonInt(k) <: ExistentialInt { n | φ(n) } — check φ(k) via witness equation
         (
             DtalType::SingletonInt(idx),
             DtalType::ExistentialInt {
@@ -732,14 +732,38 @@ pub fn types_compatible_with_constraints(
                 constraint,
             },
         ) => {
-            let subs: std::collections::HashMap<String, String> =
-                std::collections::HashMap::from([(witness_var.clone(), format!("{}", idx))]);
-            let substituted = substitute_var_names_in_constraint(constraint, &subs);
-            let substituted = substitute_select_names(&substituted, &subs);
-            is_constraint_provable(&substituted, constraints)
+            // Add witness_var == idx to the context, then check φ(witness_var).
+            // This is equivalent to φ[n/idx] but handles complex index expressions
+            // correctly (string substitution can't replace a Var with an arbitrary expr).
+            let witness_eq =
+                Constraint::Eq(IndexExpr::Var(witness_var.clone()), idx.clone());
+            let mut augmented_ctx: Vec<Constraint> = constraints.to_vec();
+            augmented_ctx.push(witness_eq);
+            is_constraint_provable(constraint, &augmented_ctx)
         }
         // ExistentialInt <: Int — always true (erasure)
         (DtalType::ExistentialInt { .. }, DtalType::Int) => true,
+        // ExistentialInt <: RefinedInt — check existential constraint implies refinement
+        (
+            DtalType::ExistentialInt {
+                witness_var: w,
+                constraint: c,
+            },
+            DtalType::RefinedInt {
+                base: _,
+                var: rv,
+                constraint: rc,
+            },
+        ) => {
+            // Rename the refinement variable to match the witness, then check implication
+            let subs: std::collections::HashMap<String, String> =
+                std::collections::HashMap::from([(rv.clone(), w.clone())]);
+            let rc_renamed = substitute_var_names_in_constraint(rc, &subs);
+            is_constraint_provable(
+                &Constraint::Implies(Box::new(c.clone()), Box::new(rc_renamed)),
+                constraints,
+            )
+        }
         // ExistentialInt <: ExistentialInt — check constraint implication
         (
             DtalType::ExistentialInt {

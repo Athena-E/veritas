@@ -186,7 +186,7 @@ pub fn check_stmt<'src>(
             // (not just the singleton from initialization)
             let master_ty = IType::Master(Arc::new(ann_ty.clone()));
             let current_ty = match &ann_ty {
-                IType::Array { .. } => ann_ty.clone(),
+                IType::Array { .. } | IType::RefinedInt { .. } => ann_ty.clone(),
                 _ => value_ty.clone(),
             };
             let mut new_ctx = ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
