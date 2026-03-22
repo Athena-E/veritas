@@ -50,7 +50,7 @@ fn sorted_min(arr: [int; 10]) -> int
 
 // --- Count how many elements equal a target ---
 // Demonstrates a simple loop with refined accumulator.
-fn count_equal(arr: [{v: int | v >= 0}; 10], target: {v: int | v >= 0}) -> int
+fn count_equal(arr: [{v: int | v >= 0}; 10], target: {v: int | v >= 0}) -> {v: int | v >= 0}
     requires forall i in 0..10 { arr[i] >= 0 }
 {
     let mut count: {v: int | v >= 0} = 0;
@@ -109,7 +109,7 @@ fn main() -> int {
     let mut vals: [{v: int | v >= 0}; 10] = [5; 10];
     vals[3] = 7;
     vals[7] = 7;
-    let sevens: int = count_equal(vals, 7);
+    let sevens: {v: int | v >= 0} = count_equal(vals, 7);
 
     // Range check with implication (n=0 makes antecedent false)
     let trivial: int = all_in_range(arr, 0, 100, 0);

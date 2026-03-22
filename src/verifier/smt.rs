@@ -163,3 +163,37 @@ impl ConstraintOracle {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_existential_mid_plus_one_ge_zero() {
+        // (v11 + ((v10 - v11) / 2)) + 1 >= 0
+        // given: v11 >= 0, v11 <= v10, v10 < 10
+        let v11 = IndexExpr::Var("v11".to_string());
+        let v10 = IndexExpr::Var("v10".to_string());
+        let mid = IndexExpr::Add(
+            Box::new(v11.clone()),
+            Box::new(IndexExpr::Div(
+                Box::new(IndexExpr::Sub(
+                    Box::new(v10.clone()),
+                    Box::new(v11.clone()),
+                )),
+                Box::new(IndexExpr::Const(2)),
+            )),
+        );
+        let mid_plus_1 = IndexExpr::Add(Box::new(mid), Box::new(IndexExpr::Const(1)));
+        let goal = Constraint::Ge(mid_plus_1, IndexExpr::Const(0));
+        let ctx = vec![
+            Constraint::Ge(v11.clone(), IndexExpr::Const(0)),
+            Constraint::Le(v11.clone(), v10.clone()),
+            Constraint::Lt(v10.clone(), IndexExpr::Const(10)),
+        ];
+        assert!(
+            ConstraintOracle::is_provable(&goal, &ctx),
+            "mid + 1 >= 0 should be provable from v11 >= 0, v11 <= v10"
+        );
+    }
+}

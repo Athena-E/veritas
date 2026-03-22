@@ -225,13 +225,38 @@ fn lower_for_loop<'src>(
     let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
     for (name, &before_reg) in &vars_before_loop {
         if name != var {
-            // Create phi node for this variable.
-            // Widen the type to its base since the variable may change
-            // across iterations (e.g., int(0) after init → int after add).
             let phi_reg = ctx.fresh_reg();
-            let var_ty = widen_itype(ctx.lookup_var_type(name));
+            let original_ty = ctx.lookup_var_type(name);
+
+            // For refined types, preserve the refinement as an existential
+            // constraint on the phi node. This allows the verifier to derive
+            // the refinement from the type rather than losing it at the join.
+            let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
+                use crate::backend::dtal::convert::expr_to_constraint;
+                if let Some(constraint) = expr_to_constraint(&prop.predicate.0) {
+                    // Use a fresh witness name that can't collide with register
+                    // names (vN). The verifier opens the existential by
+                    // substituting this witness with the register name.
+                    let phi_witness = format!("_ex_v{}", phi_reg.0);
+                    // Rename the refinement variable to the witness name
+                    let renamed = crate::backend::codegen::generator::substitute_constraint_vars(
+                        &constraint,
+                        &[(prop.var.clone(), phi_witness.clone())],
+                    );
+                    Some((phi_witness, renamed))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Widen the IType for the phi's type field (the existential
+            // is carried separately via existential_constraint).
+            let var_ty = widen_itype(original_ty);
             let mut phi = PhiNode::new(phi_reg, var_ty);
             phi.add_incoming(entry_block, before_reg);
+            phi.existential_constraint = existential;
             ctx.emit_phi(phi);
             // Update var binding to use phi result
             ctx.bind_var(name, phi_reg);
