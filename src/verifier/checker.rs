@@ -111,9 +111,7 @@ pub fn verify_instruction(
         }
 
         // Call: derive return type from callee's declared signature
-        DtalInstr::Call {
-            target, return_ty, ..
-        } => {
+        DtalInstr::Call { target, .. } => {
             use crate::backend::dtal::regs::PhysicalReg;
 
             let derived_return_ty = if let Some(callee) =
@@ -167,8 +165,14 @@ pub fn verify_instruction(
                 // Derive return type from callee's declared signature
                 callee.return_type.clone()
             } else {
-                // External/unknown callee: trust the annotation
-                return_ty.clone()
+                // Unknown callee: reject. All callable functions must be
+                // present in the DTAL program. When runtime/intrinsic
+                // functions are added, they should be registered in the
+                // program's function list with their signatures so the
+                // verifier can check preconditions and derive return types.
+                return Err(VerifyError::UnknownFunction {
+                    name: target.clone(),
+                });
             };
 
             state
