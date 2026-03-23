@@ -111,9 +111,7 @@ pub fn verify_instruction(
         }
 
         // Call: derive return type from callee's declared signature
-        DtalInstr::Call {
-            target, ..
-        } => {
+        DtalInstr::Call { target, .. } => {
             use crate::backend::dtal::regs::PhysicalReg;
 
             let derived_return_ty = if let Some(callee) =

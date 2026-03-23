@@ -221,10 +221,10 @@ impl SmtOracle {
         // Add refinements from variable types
         // For a variable `n: {v: int | v > 0}`, we add the constraint `n > 0`
         for (var_name, ty) in typing_ctx.get_all_variable_types() {
-            if let Some(prop) = Self::extract_refinement_as_proposition(var_name, ty) {
-                if let Some(constraint) = Self::translate_proposition(&prop) {
-                    solver.assert(&constraint);
-                }
+            if let Some(prop) = Self::extract_refinement_as_proposition(var_name, ty)
+                && let Some(constraint) = Self::translate_proposition(&prop)
+            {
+                solver.assert(&constraint);
             }
         }
 
