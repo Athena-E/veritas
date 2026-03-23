@@ -34,119 +34,122 @@ impl SmtOracle {
         Self
     }
 
-    fn translate_expr(expr: &Expr) -> Int {
+    /// Translate an integer-valued expression to Z3.
+    /// Returns None if the expression contains forms not yet supported in SMT
+    /// (function calls, if-expressions, etc.). Callers treat None as "unprovable".
+    fn translate_expr(expr: &Expr) -> Option<Int> {
         match expr {
-            Expr::Literal(Literal::Int(n)) => Int::from_i64(*n),
+            Expr::Literal(Literal::Int(n)) => Some(Int::from_i64(*n)),
 
-            Expr::Variable(name) => Int::new_const(name.to_string()),
+            Expr::Variable(name) => Some(Int::new_const(name.to_string())),
 
             Expr::BinOp { op, lhs, rhs } => {
-                let left = Self::translate_expr(&lhs.0);
-                let right = Self::translate_expr(&rhs.0);
+                let left = Self::translate_expr(&lhs.0)?;
+                let right = Self::translate_expr(&rhs.0)?;
 
                 match op {
-                    BinOp::Add => left + right,
-                    BinOp::Sub => left - right,
-                    BinOp::Mul => left * right,
-                    BinOp::Div => left / right,
-                    _ => panic!("Comparison operator in integer expression context"),
+                    BinOp::Add => Some(left + right),
+                    BinOp::Sub => Some(left - right),
+                    BinOp::Mul => Some(left * right),
+                    BinOp::Div => Some(left / right),
+                    // Comparison operators produce booleans, not integers
+                    _ => None,
                 }
             }
 
             Expr::UnaryOp { op, cond } => match op {
                 UnaryOp::Neg => {
-                    let operand = Self::translate_expr(&cond.0);
-                    -operand
+                    let operand = Self::translate_expr(&cond.0)?;
+                    Some(-operand)
                 }
-                UnaryOp::Not => panic!("Boolean negation in integer expression context"),
+                UnaryOp::Not => None,
             },
 
             Expr::Index { base, index } => {
-                // Encode array indexing using Z3 array theory: arr[i] → select(arr, i)
+                // Encode array indexing using Z3 array theory: arr[i] -> select(arr, i)
                 if let Expr::Variable(name) = &base.0 {
                     let int_sort = Sort::int();
                     let arr = Z3Array::new_const(name.to_string(), &int_sort, &int_sort);
-                    let idx = Self::translate_expr(&index.0);
-                    arr.select(&idx).as_int().unwrap()
+                    let idx = Self::translate_expr(&index.0)?;
+                    Some(arr.select(&idx).as_int().unwrap())
                 } else {
-                    panic!("Complex array base not supported in SMT")
+                    None
                 }
             }
 
-            Expr::Error => panic!("Error node in SMT translation"),
-            Expr::Literal(Literal::Bool(_)) => panic!("Boolean literal in integer context"),
-            Expr::Call { .. } => panic!("Function calls not yet supported in SMT"),
-            Expr::ArrayInit { .. } => panic!("Array initialization not yet supported in SMT"),
-            Expr::If { .. } => panic!("If expressions not yet supported in SMT"),
-            Expr::Forall { .. } | Expr::Exists { .. } => {
-                panic!("Quantifiers in integer expression context")
-            }
+            Expr::Error
+            | Expr::Literal(Literal::Bool(_))
+            | Expr::Call { .. }
+            | Expr::ArrayInit { .. }
+            | Expr::If { .. }
+            | Expr::Forall { .. }
+            | Expr::Exists { .. } => None,
         }
     }
 
-    fn translate_bool_expr(expr: &Expr) -> Bool {
+    /// Translate a boolean-valued expression to Z3.
+    /// Returns None if the expression contains unsupported forms.
+    fn translate_bool_expr(expr: &Expr) -> Option<Bool> {
         match expr {
-            Expr::Literal(Literal::Bool(b)) => Bool::from_bool(*b),
+            Expr::Literal(Literal::Bool(b)) => Some(Bool::from_bool(*b)),
 
             Expr::BinOp { op, lhs, rhs } => match op {
                 BinOp::Eq => {
-                    let left = Self::translate_expr(&lhs.0);
-                    let right = Self::translate_expr(&rhs.0);
-                    Int::eq(&left, &right)
+                    let left = Self::translate_expr(&lhs.0)?;
+                    let right = Self::translate_expr(&rhs.0)?;
+                    Some(Int::eq(&left, &right))
                 }
                 BinOp::NotEq => {
-                    let left = Self::translate_expr(&lhs.0);
-                    let right = Self::translate_expr(&rhs.0);
-                    Int::eq(&left, &right).not()
+                    let left = Self::translate_expr(&lhs.0)?;
+                    let right = Self::translate_expr(&rhs.0)?;
+                    Some(Int::eq(&left, &right).not())
                 }
                 BinOp::Lt => {
-                    let left = Self::translate_expr(&lhs.0);
-                    let right = Self::translate_expr(&rhs.0);
-                    left.lt(&right)
+                    let left = Self::translate_expr(&lhs.0)?;
+                    let right = Self::translate_expr(&rhs.0)?;
+                    Some(left.lt(&right))
                 }
                 BinOp::Lte => {
-                    let left = Self::translate_expr(&lhs.0);
-                    let right = Self::translate_expr(&rhs.0);
-                    left.le(&right)
+                    let left = Self::translate_expr(&lhs.0)?;
+                    let right = Self::translate_expr(&rhs.0)?;
+                    Some(left.le(&right))
                 }
                 BinOp::Gt => {
-                    let left = Self::translate_expr(&lhs.0);
-                    let right = Self::translate_expr(&rhs.0);
-                    left.gt(&right)
+                    let left = Self::translate_expr(&lhs.0)?;
+                    let right = Self::translate_expr(&rhs.0)?;
+                    Some(left.gt(&right))
                 }
                 BinOp::Gte => {
-                    let left = Self::translate_expr(&lhs.0);
-                    let right = Self::translate_expr(&rhs.0);
-                    left.ge(&right)
+                    let left = Self::translate_expr(&lhs.0)?;
+                    let right = Self::translate_expr(&rhs.0)?;
+                    Some(left.ge(&right))
                 }
 
                 BinOp::And => {
-                    let left = Self::translate_bool_expr(&lhs.0);
-                    let right = Self::translate_bool_expr(&rhs.0);
-                    Bool::and(&[&left, &right])
+                    let left = Self::translate_bool_expr(&lhs.0)?;
+                    let right = Self::translate_bool_expr(&rhs.0)?;
+                    Some(Bool::and(&[&left, &right]))
                 }
                 BinOp::Or => {
-                    let left = Self::translate_bool_expr(&lhs.0);
-                    let right = Self::translate_bool_expr(&rhs.0);
-                    Bool::or(&[&left, &right])
+                    let left = Self::translate_bool_expr(&lhs.0)?;
+                    let right = Self::translate_bool_expr(&rhs.0)?;
+                    Some(Bool::or(&[&left, &right]))
                 }
                 BinOp::Implies => {
-                    let left = Self::translate_bool_expr(&lhs.0);
-                    let right = Self::translate_bool_expr(&rhs.0);
-                    left.implies(&right)
+                    let left = Self::translate_bool_expr(&lhs.0)?;
+                    let right = Self::translate_bool_expr(&rhs.0)?;
+                    Some(left.implies(&right))
                 }
 
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                    panic!("Arithmetic operation in boolean expression context")
-                }
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => None,
             },
 
             Expr::UnaryOp { op, cond } => match op {
                 UnaryOp::Not => {
-                    let operand = Self::translate_bool_expr(&cond.0);
-                    operand.not()
+                    let operand = Self::translate_bool_expr(&cond.0)?;
+                    Some(operand.not())
                 }
-                UnaryOp::Neg => panic!("Integer negation in boolean expression context"),
+                UnaryOp::Neg => None,
             },
 
             Expr::Forall {
@@ -156,11 +159,15 @@ impl SmtOracle {
                 body,
             } => {
                 let bound = Int::new_const(var.to_string());
-                let lo = Self::translate_expr(&start.0);
-                let hi = Self::translate_expr(&end.0);
+                let lo = Self::translate_expr(&start.0)?;
+                let hi = Self::translate_expr(&end.0)?;
                 let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
-                let body_formula = Self::translate_bool_expr(&body.0);
-                z3::ast::forall_const(&[&bound], &[], &range_guard.implies(&body_formula))
+                let body_formula = Self::translate_bool_expr(&body.0)?;
+                Some(z3::ast::forall_const(
+                    &[&bound],
+                    &[],
+                    &range_guard.implies(&body_formula),
+                ))
             }
 
             Expr::Exists {
@@ -170,24 +177,29 @@ impl SmtOracle {
                 body,
             } => {
                 let bound = Int::new_const(var.to_string());
-                let lo = Self::translate_expr(&start.0);
-                let hi = Self::translate_expr(&end.0);
+                let lo = Self::translate_expr(&start.0)?;
+                let hi = Self::translate_expr(&end.0)?;
                 let range_guard = Bool::and(&[&bound.ge(&lo), &bound.lt(&hi)]);
-                let body_formula = Self::translate_bool_expr(&body.0);
-                z3::ast::exists_const(&[&bound], &[], &Bool::and(&[&range_guard, &body_formula]))
+                let body_formula = Self::translate_bool_expr(&body.0)?;
+                Some(z3::ast::exists_const(
+                    &[&bound],
+                    &[],
+                    &Bool::and(&[&range_guard, &body_formula]),
+                ))
             }
 
-            Expr::Error => panic!("Error node in SMT translation"),
-            Expr::Literal(Literal::Int(_)) => panic!("Integer literal in boolean context"),
-            Expr::Variable(_) => panic!("Variable in boolean context (need comparison)"),
-            Expr::Call { .. } => panic!("Function calls not yet supported in SMT"),
-            Expr::Index { .. } => panic!("Array indexing not yet supported in SMT"),
-            Expr::ArrayInit { .. } => panic!("Array initialization not yet supported in SMT"),
-            Expr::If { .. } => panic!("If expressions not yet supported in SMT"),
+            Expr::Error
+            | Expr::Literal(Literal::Int(_))
+            | Expr::Variable(_)
+            | Expr::Call { .. }
+            | Expr::Index { .. }
+            | Expr::ArrayInit { .. }
+            | Expr::If { .. } => None,
         }
     }
 
-    fn translate_proposition(prop: &IProposition) -> Bool {
+    /// Translate a proposition to Z3. Returns None if untranslatable.
+    fn translate_proposition(prop: &IProposition) -> Option<Bool> {
         let predicate_expr = &prop.predicate.0;
         Self::translate_bool_expr(predicate_expr)
     }
@@ -197,23 +209,36 @@ impl SmtOracle {
 
         let solver = Solver::new();
 
-        // Add all context propositions as assumptions
+        // Add all context propositions as assumptions.
+        // Skip any that can't be translated (conservative: less context
+        // means fewer things provable, which is sound).
         for prop in typing_ctx.get_propositions() {
-            let constraint = Self::translate_proposition(prop);
-            solver.assert(&constraint);
+            if let Some(constraint) = Self::translate_proposition(prop) {
+                solver.assert(&constraint);
+            }
         }
 
         // Add refinements from variable types
         // For a variable `n: {v: int | v > 0}`, we add the constraint `n > 0`
         for (var_name, ty) in typing_ctx.get_all_variable_types() {
             if let Some(prop) = Self::extract_refinement_as_proposition(var_name, ty) {
-                let constraint = Self::translate_proposition(&prop);
-                solver.assert(&constraint);
+                if let Some(constraint) = Self::translate_proposition(&prop) {
+                    solver.assert(&constraint);
+                }
             }
         }
 
-        // Negate the goal - if unsatisfiable, the goal is provable
-        let goal_formula = Self::translate_proposition(goal);
+        // Negate the goal - if unsatisfiable, the goal is provable.
+        // If the goal can't be translated, conservatively return false.
+        let goal_formula = match Self::translate_proposition(goal) {
+            Some(f) => f,
+            None => {
+                let elapsed = start.elapsed().as_nanos() as u64;
+                FRONTEND_SMT_QUERIES.fetch_add(1, Ordering::Relaxed);
+                FRONTEND_SMT_TIME_NS.fetch_add(elapsed, Ordering::Relaxed);
+                return false;
+            }
+        };
         let negated_goal = goal_formula.not();
         solver.assert(&negated_goal);
 
