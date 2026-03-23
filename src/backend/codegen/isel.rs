@@ -180,6 +180,15 @@ fn lower_binop<'src>(
                 ty: dtal_ty,
             });
         }
+        TirBinaryOp::Mod => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::Mod,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: dtal_ty,
+            });
+        }
 
         // Comparison operations
         TirBinaryOp::Eq => lower_comparison(instrs, dst, lhs, rhs, "eq"),

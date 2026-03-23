@@ -599,7 +599,7 @@ impl<'a> FunctionLowerer<'a> {
         let dst_loc = self.get_vreg_location(dst);
 
         match op {
-            BinaryOp::Div => {
+            BinaryOp::Div | BinaryOp::Mod => {
                 // x86 idiv: dividend in rdx:rax, divisor in src reg
                 // quotient -> rax, remainder -> rdx
                 // Must load rhs first — if rhs is in Rax, loading lhs
@@ -622,8 +622,13 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 self.instructions.push(X86Instr::Cqo);
                 self.instructions.push(X86Instr::IdivR { src: divisor });
-                // Result is in Rax
-                self.store_from_reg(X86Reg::Rax, dst_loc);
+                // Div: quotient in Rax. Mod: remainder in Rdx.
+                let result_reg = if op == BinaryOp::Mod {
+                    X86Reg::Rdx
+                } else {
+                    X86Reg::Rax
+                };
+                self.store_from_reg(result_reg, dst_loc);
             }
             _ => {
                 // For non-division: copy lhs into Rax (scratch), operate
@@ -654,7 +659,7 @@ impl<'a> FunctionLowerer<'a> {
                         dst: X86Reg::Rax,
                         src: rhs_reg,
                     },
-                    BinaryOp::Div => unreachable!(),
+                    BinaryOp::Div | BinaryOp::Mod => unreachable!(),
                 };
                 self.instructions.push(instr);
                 self.store_from_reg(X86Reg::Rax, dst_loc);

@@ -1,0 +1,10 @@
+// Modulo operator test
+
+fn last_digit(n: int) -> int {
+    let d: int = n % 10;
+    d
+}
+
+fn main() -> int {
+    last_digit(42)
+}

@@ -145,7 +145,8 @@ where
         // Multiplication
         let op_mul_div = just(Token::Op("*"))
             .to(BinOp::Mul)
-            .or(just(Token::Op("/")).to(BinOp::Div));
+            .or(just(Token::Op("/")).to(BinOp::Div))
+            .or(just(Token::Op("%")).to(BinOp::Mod));
         let product =
             unary
                 .clone()
