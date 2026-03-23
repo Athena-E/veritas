@@ -40,6 +40,7 @@ impl ConstraintOracle {
             IndexExpr::Sub(l, r) => Self::translate_index_expr(l) - Self::translate_index_expr(r),
             IndexExpr::Mul(l, r) => Self::translate_index_expr(l) * Self::translate_index_expr(r),
             IndexExpr::Div(l, r) => Self::translate_index_expr(l) / Self::translate_index_expr(r),
+            IndexExpr::Mod(l, r) => Self::translate_index_expr(l) % Self::translate_index_expr(r),
             IndexExpr::Select(name, idx) => {
                 let func_name = format!("f_{}", name);
                 let int_sort = Sort::int();

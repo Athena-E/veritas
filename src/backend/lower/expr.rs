@@ -230,6 +230,7 @@ fn convert_binop(op: AstBinOp) -> BinaryOp {
         AstBinOp::Sub => BinaryOp::Sub,
         AstBinOp::Mul => BinaryOp::Mul,
         AstBinOp::Div => BinaryOp::Div,
+        AstBinOp::Mod => BinaryOp::Mod,
         AstBinOp::Eq => BinaryOp::Eq,
         AstBinOp::NotEq => BinaryOp::Ne,
         AstBinOp::Lt => BinaryOp::Lt,

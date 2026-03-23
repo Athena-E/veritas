@@ -322,7 +322,7 @@ fn verify_binop(
             DtalType::Bool
         }
         // Arithmetic operations: derive result type symbolically
-        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
@@ -340,6 +340,7 @@ fn verify_binop(
                 BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
                 BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
                 BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
+                BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
                 _ => unreachable!(),
             };
 
@@ -1019,6 +1020,10 @@ fn substitute_select_in_index(
             Box::new(substitute_select_in_index(l, subs)),
             Box::new(substitute_select_in_index(r, subs)),
         ),
+        IndexExpr::Mod(l, r) => IndexExpr::Mod(
+            Box::new(substitute_select_in_index(l, subs)),
+            Box::new(substitute_select_in_index(r, subs)),
+        ),
         IndexExpr::Select(name, idx) => {
             let new_name = subs.get(name).cloned().unwrap_or_else(|| name.clone());
             IndexExpr::Select(new_name, Box::new(substitute_select_in_index(idx, subs)))
@@ -1139,6 +1144,10 @@ fn substitute_var_in_index(
             Box::new(substitute_var_in_index(r, subs)),
         ),
         IndexExpr::Div(l, r) => IndexExpr::Div(
+            Box::new(substitute_var_in_index(l, subs)),
+            Box::new(substitute_var_in_index(r, subs)),
+        ),
+        IndexExpr::Mod(l, r) => IndexExpr::Mod(
             Box::new(substitute_var_in_index(l, subs)),
             Box::new(substitute_var_in_index(r, subs)),
         ),

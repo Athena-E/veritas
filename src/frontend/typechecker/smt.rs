@@ -52,6 +52,7 @@ impl SmtOracle {
                     BinOp::Sub => Some(left - right),
                     BinOp::Mul => Some(left * right),
                     BinOp::Div => Some(left / right),
+                    BinOp::Mod => Some(left % right),
                     // Comparison operators produce booleans, not integers
                     _ => None,
                 }
@@ -141,7 +142,7 @@ impl SmtOracle {
                     Some(left.implies(&right))
                 }
 
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => None,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => None,
             },
 
             Expr::UnaryOp { op, cond } => match op {

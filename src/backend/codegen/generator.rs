@@ -495,6 +495,10 @@ pub(crate) fn substitute_index_vars(
             Box::new(substitute_index_vars(l, subs)),
             Box::new(substitute_index_vars(r, subs)),
         ),
+        IndexExpr::Mod(l, r) => IndexExpr::Mod(
+            Box::new(substitute_index_vars(l, subs)),
+            Box::new(substitute_index_vars(r, subs)),
+        ),
         IndexExpr::Select(name, idx) => {
             let new_name = subs
                 .iter()

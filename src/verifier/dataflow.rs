@@ -486,7 +486,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
 
             let derived_ty = match op {
                 BinaryOp::And | BinaryOp::Or => DtalType::Bool,
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     let lhs_idx = extract_index(&lhs_ty, lhs);
                     let rhs_idx = extract_index(&rhs_ty, rhs);
                     let result_idx = match op {
@@ -494,6 +494,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                         BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
                         BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
                         BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
                         _ => unreachable!(),
                     };
                     DtalType::SingletonInt(result_idx)

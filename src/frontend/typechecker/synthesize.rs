@@ -68,7 +68,7 @@ pub fn synth_expr<'src>(
 
         // BINOP-ARITH: Arithmetic operations with SMT synthesis
         Expr::BinOp {
-            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div),
+            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod),
             lhs,
             rhs,
         } => {
@@ -92,7 +92,7 @@ pub fn synth_expr<'src>(
             }
 
             // Division safety: prove divisor is non-zero
-            if *op == BinOp::Div {
+            if *op == BinOp::Div || *op == BinOp::Mod {
                 check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
 
