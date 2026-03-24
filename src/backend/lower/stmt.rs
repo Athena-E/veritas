@@ -50,6 +50,14 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
         } => {
             lower_for_loop(ctx, var, var_ty, start, end, invariant.as_ref(), body);
         }
+
+        TStmt::While {
+            condition,
+            invariant,
+            body,
+        } => {
+            lower_while_loop(ctx, condition, invariant.as_ref(), body);
+        }
     }
 }
 
@@ -366,6 +374,149 @@ fn lower_for_loop<'src>(
 
     // At the exit block, bind variables to their header phi registers
     // This is correct because we exit from the header, so we use the header's phi values
+    for (name, phi_reg) in &loop_carried_vars {
+        ctx.bind_var(name, *phi_reg);
+    }
+}
+
+/// Lower a while loop to CFG with loop-carried phi nodes
+///
+/// CFG structure:
+/// ```text
+///            ┌─────────┐
+///            │  entry   │
+///            └────┬─────┘
+///                 │
+///          ┌──────▼──────┐
+///          │ loop_header │◄────┐
+///          │  eval cond  │    │
+///          │ branch      │    │
+///          └──────┬──────┘    │
+///            true/ \false     │
+///               /   \         │
+///     ┌────────▼┐   ┌▼────┐  │
+///     │  body   │   │exit │  │
+///     │  ...    │   └─────┘  │
+///     └────┬────┘            │
+///          └─────────────────┘
+/// ```
+fn lower_while_loop<'src>(
+    ctx: &mut LoweringContext<'src>,
+    condition: &Spanned<TExpr<'src>>,
+    invariant: Option<&Constraint>,
+    body: &TBlock<'src>,
+) {
+    let entry_block = ctx.current_block().expect("Should be in a block");
+
+    // Create blocks for header, body, and exit
+    let header_block = ctx.new_block();
+    let body_block = ctx.new_block();
+    let exit_block = ctx.new_block();
+
+    // Snapshot variable state before the loop
+    let vars_before_loop = ctx.snapshot_var_map();
+
+    // Jump from entry to header
+    ctx.finish_block(
+        Terminator::Jump {
+            target: header_block,
+        },
+        vec![],
+    );
+
+    // Start the header block
+    ctx.start_block(header_block);
+
+    // Create phi nodes for ALL existing mutable variables (loop-carried state)
+    let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
+    for (name, &before_reg) in &vars_before_loop {
+        let phi_reg = ctx.fresh_reg();
+        let original_ty = ctx.lookup_var_type(name);
+
+        // Preserve refined types as existential constraints on phi nodes
+        let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
+            use crate::backend::dtal::convert::expr_to_constraint;
+            if let Some(constraint) = expr_to_constraint(&prop.predicate.0) {
+                let phi_witness = format!("_ex_v{}", phi_reg.0);
+                let renamed = crate::backend::codegen::generator::substitute_constraint_vars(
+                    &constraint,
+                    &[(prop.var.clone(), phi_witness.clone())],
+                );
+                Some((phi_witness, renamed))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let var_ty = widen_itype(original_ty);
+        let mut phi = PhiNode::new(phi_reg, var_ty);
+        phi.add_incoming(entry_block, before_reg);
+        phi.existential_constraint = existential;
+        ctx.emit_phi(phi);
+        ctx.bind_var(name, phi_reg);
+        loop_carried_vars.push((name.clone(), phi_reg));
+    }
+
+    // Evaluate the condition in the header
+    let cond_reg = lower_expr(ctx, condition);
+
+    // Branch: if condition true, go to body; else go to exit
+    // Use Constraint::True / Constraint::True as placeholders since the
+    // condition is an arbitrary boolean expression (not a simple comparison)
+    ctx.finish_block(
+        Terminator::Branch {
+            cond: cond_reg,
+            true_target: body_block,
+            false_target: exit_block,
+            true_constraint: Box::new(Constraint::True),
+            false_constraint: Box::new(Constraint::True),
+        },
+        vec![entry_block],
+    );
+
+    // Lower the body block
+    ctx.start_block(body_block);
+
+    // Emit loop invariant assertion if present
+    if let Some(inv_constraint) = invariant {
+        let subs = ctx.var_substitutions();
+        let substituted =
+            crate::backend::codegen::generator::substitute_constraint_vars(inv_constraint, &subs);
+        ctx.emit(TirInstr::AssertConstraint {
+            constraint: substituted,
+        });
+    }
+
+    // Lower body statements
+    for stmt in &body.statements {
+        lower_stmt(ctx, stmt);
+    }
+
+    // Snapshot variables after body
+    let vars_after_body = ctx.snapshot_var_map();
+    let body_end_block = ctx.current_block().expect("Should be in body block");
+
+    // Update loop-carried variable phi nodes with body's incoming edges
+    for (i, (name, _phi_reg)) in loop_carried_vars.iter().enumerate() {
+        if let Some(&after_reg) = vars_after_body.get(name) {
+            ctx.update_phi_incoming(header_block, i, body_end_block, after_reg);
+        }
+    }
+
+    // Jump back to header
+    ctx.finish_block(
+        Terminator::Jump {
+            target: header_block,
+        },
+        vec![header_block],
+    );
+
+    // Start the exit block
+    ctx.start_block(exit_block);
+
+    // At exit, bind variables to their header phi registers
     for (name, phi_reg) in &loop_carried_vars {
         ctx.bind_var(name, *phi_reg);
     }

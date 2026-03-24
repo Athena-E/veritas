@@ -60,6 +60,7 @@ pub fn lexer<'src>()
             "else" => Token::Else,
             "return" => Token::Return,
             "for" => Token::For,
+            "while" => Token::While,
             "in" => Token::In,
             "requires" => Token::Requires,
             "ensures" => Token::Ensures,

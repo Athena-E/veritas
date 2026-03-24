@@ -115,6 +115,32 @@ where
                 )
             });
 
+        // While loop: while condition [invariant expr] { body }
+        let while_invariant = just(Token::Invariant).ignore_then(expr.clone()).or_not();
+        let while_stmt = just(Token::While)
+            .ignore_then(expr.clone())
+            .then(while_invariant)
+            .then(
+                stmt.clone()
+                    .repeated()
+                    .collect::<Vec<_>>()
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+                    .map(|stmts| Block {
+                        statements: stmts,
+                        trailing_expr: None,
+                    }),
+            )
+            .map_with(|((condition, invariant), body), e| {
+                (
+                    Stmt::While {
+                        condition: Box::new(condition),
+                        invariant,
+                        body,
+                    },
+                    e.span(),
+                )
+            });
+
         // Assignment statement
         let assign_stmt = expr
             .clone()
@@ -163,6 +189,7 @@ where
             let_stmt,
             return_stmt,
             for_stmt,
+            while_stmt,
             if_stmt,
             assign_stmt,
             expr_stmt,
