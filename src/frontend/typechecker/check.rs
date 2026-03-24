@@ -688,6 +688,128 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), post_ctx))
         }
 
+        // WHILE-LOOP: While loop with condition and optional invariant
+        Stmt::While {
+            condition,
+            invariant,
+            body,
+        } => {
+            let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+
+            // Step 1: Synthesize condition, check it's bool
+            let (tcond, cond_ty) = synth_expr(ctx, condition)?;
+            if !is_subtype(ctx, &cond_ty, &IType::Bool) {
+                return Err(TypeError::TypeMismatch {
+                    expected: IType::Bool,
+                    found: cond_ty,
+                    span: condition.1,
+                });
+            }
+
+            // Build loop context: start with current context + condition is true
+            let cond_prop = IProposition {
+                var: "_cond".to_string(),
+                predicate: Arc::new(*condition.clone()),
+            };
+            let mut loop_ctx = ctx.with_proposition(cond_prop);
+
+            // Step 2: Process invariant if present
+            let tinvariant = if let Some(inv_expr) = invariant {
+                // Type-check the invariant expression (must be bool)
+                let mut spec_ctx = loop_ctx.clone();
+                spec_ctx.allow_quantifiers = true;
+                let (_tinv, inv_ty) = synth_expr(&spec_ctx, inv_expr)?;
+
+                if !is_subtype(&loop_ctx, &inv_ty, &IType::Bool) {
+                    return Err(TypeError::TypeMismatch {
+                        expected: IType::Bool,
+                        found: inv_ty,
+                        span: inv_expr.1,
+                    });
+                }
+
+                // Verify invariant holds at loop entry (base case)
+                let inv_prop = IProposition {
+                    var: "_inv".to_string(),
+                    predicate: Arc::new(inv_expr.clone()),
+                };
+                if !crate::frontend::typechecker::check_provable(ctx, &inv_prop) {
+                    return Err(TypeError::InvariantNotEstablished {
+                        invariant_span: inv_expr.1,
+                    });
+                }
+
+                // Add invariant as proposition to loop body context
+                loop_ctx = loop_ctx.with_proposition(inv_prop);
+
+                // Convert invariant to Constraint for lowering
+                crate::backend::dtal::convert::expr_to_constraint(&inv_expr.0)
+            } else {
+                None
+            };
+
+            // Step 3: Check body statements
+            let (tbody, body_ctx) = check_stmts(&loop_ctx, &body.statements)?;
+
+            // Step 4: Verify loop body preserves invariant (inductive step)
+            if let Some(inv_expr) = invariant {
+                let inv_prop = IProposition {
+                    var: "_inv".to_string(),
+                    predicate: Arc::new(inv_expr.clone()),
+                };
+                if !crate::frontend::typechecker::check_provable(&body_ctx, &inv_prop) {
+                    return Err(TypeError::InvariantNotPreserved {
+                        invariant_span: inv_expr.1,
+                    });
+                }
+            }
+
+            let tstmt = TStmt::While {
+                condition: Box::new(tcond),
+                invariant: tinvariant,
+                body: TBlock {
+                    statements: tbody,
+                    trailing_expr: None,
+                },
+            };
+
+            // Step 5: Post-loop context
+            // After the loop: invariant still holds (if present), condition is false
+            let mut post_ctx = ctx.clone();
+
+            // Invalidate array propositions modified in the loop body
+            let modifications = collect_array_modifications(&body.statements);
+            for (arr_name, idx_expr) in &modifications {
+                if let Some(idx_val) = post_ctx.resolve_expr_to_int(idx_expr) {
+                    post_ctx = post_ctx.without_array_element_prop(arr_name, idx_val);
+                } else {
+                    post_ctx = post_ctx.without_all_array_element_props(arr_name);
+                }
+            }
+
+            // Add invariant to post-loop context (it was preserved)
+            if let Some(inv_expr) = invariant {
+                let inv_prop = IProposition {
+                    var: "_inv".to_string(),
+                    predicate: Arc::new(inv_expr.clone()),
+                };
+                post_ctx = post_ctx.with_proposition(inv_prop);
+            }
+
+            // Add negated condition (loop exited because condition is false)
+            let negated_cond = Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Not,
+                cond: condition.clone(),
+            };
+            let neg_prop = IProposition {
+                var: "_cond".to_string(),
+                predicate: Arc::new((negated_cond, dummy_span)),
+            };
+            post_ctx = post_ctx.with_proposition(neg_prop);
+
+            Ok(((tstmt, span), post_ctx))
+        }
+
         // EXPR-STMT: Expression statement
         // Special handling for if-expressions to support context joining
         Stmt::Expr(expr) => {
@@ -1403,6 +1525,30 @@ fn substitute_var_in_stmt<'src>(
                     .map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
             },
         },
+        Stmt::While {
+            condition,
+            invariant,
+            body,
+        } => Stmt::While {
+            condition: Box::new((
+                substitute_var_with_literal(&condition.0, var_name, value),
+                condition.1,
+            )),
+            invariant: invariant
+                .as_ref()
+                .map(|(inv, span)| (substitute_var_with_literal(inv, var_name, value), *span)),
+            body: Block {
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
+            },
+        },
     }
 }
 
@@ -1630,6 +1776,19 @@ fn find_invalid_free_var_in_stmt<'src>(
                 return Some(v);
             }
             if let Some(v) = find_invalid_free_var(&end.0, allowed) {
+                return Some(v);
+            }
+            for (s, _) in &body.statements {
+                if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        Stmt::While {
+            condition, body, ..
+        } => {
+            if let Some(v) = find_invalid_free_var(&condition.0, allowed) {
                 return Some(v);
             }
             for (s, _) in &body.statements {

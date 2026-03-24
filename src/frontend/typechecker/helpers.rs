@@ -614,5 +614,26 @@ fn rename_stmt_var<'src>(
                     .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
             },
         },
+        Stmt::While {
+            condition,
+            invariant,
+            body,
+        } => Stmt::While {
+            condition: Box::new((rename_expr_var(&condition.0, old, new), condition.1)),
+            invariant: invariant
+                .as_ref()
+                .map(|inv| (rename_expr_var(&inv.0, old, new), inv.1)),
+            body: Block {
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|s| (rename_stmt_var(&s.0, old, new), s.1))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+            },
+        },
     }
 }

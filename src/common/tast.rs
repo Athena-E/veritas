@@ -112,6 +112,12 @@ pub enum TStmt<'src> {
         invariant: Option<crate::backend::dtal::constraints::Constraint>,
         body: TBlock<'src>,
     },
+
+    While {
+        condition: Box<Spanned<TExpr<'src>>>,
+        invariant: Option<crate::backend::dtal::constraints::Constraint>,
+        body: TBlock<'src>,
+    },
 }
 
 #[derive(Clone, Debug)]
