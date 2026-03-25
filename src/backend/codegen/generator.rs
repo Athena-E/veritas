@@ -85,8 +85,8 @@ pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram {
 /// uses them to check preconditions and derive return types at call
 /// sites, but never attempts to verify their bodies (no blocks to verify).
 fn runtime_function_stubs() -> Vec<DtalFunction> {
+    use crate::backend::dtal::regs::{PhysicalReg, Reg};
     use crate::backend::dtal::types::DtalType;
-    use crate::backend::dtal::regs::{Reg, PhysicalReg};
 
     vec![
         DtalFunction {
