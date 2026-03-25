@@ -1,0 +1,19 @@
+// Combined I/O + while + modulo: print digit sum
+
+fn digit_sum(n: int) -> int requires n >= 0 {
+    let mut sum: int = 0;
+    let mut val: int = n;
+    while val > 0
+        invariant sum >= 0
+    {
+        sum = sum + val % 10;
+        val = val / 10;
+    }
+    sum
+}
+
+fn main() -> int {
+    let result: int = digit_sum(12345);
+    print_int(result);
+    0
+}

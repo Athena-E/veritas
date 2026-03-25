@@ -1,0 +1,33 @@
+// Read an integer from stdin and print its digit sum
+
+fn digit_sum(n: int) -> int requires n > 0 {
+    let mut sum: int = 0;
+    let mut val: int = n;
+    while val > 0
+        invariant sum >= 0
+    {
+        sum = sum + val % 10;
+        val = val / 10;
+    }
+    sum
+}
+
+fn main() -> int {
+    let n: int = read_int();
+    if n > 0 {
+        let result: int = digit_sum(n);
+        print_int(result);
+    } else {
+        if n < 0 {
+            // For negative numbers, compute digit sum of the negation
+            let pos: int = 0 - n;
+            let result: int = digit_sum(pos);
+            print_char(45);
+            print_int(result);
+        } else {
+            // n == 0
+            print_int(0);
+        }
+    }
+    0
+}

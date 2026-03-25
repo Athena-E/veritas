@@ -294,10 +294,53 @@ impl Default for ElfGenerator {
 }
 
 /// Generate a minimal ELF executable from encoded program
+///
+/// Prepends the runtime blob (print_int, print_char, read_int) before
+/// user code and resolves call relocations to runtime functions.
 pub fn generate_elf(encoded: &EncodedProgram, entry: &str) -> Vec<u8> {
+    use crate::backend::runtime;
+
+    let runtime_blob = runtime::runtime_code();
+    let runtime_syms = runtime::runtime_symbols();
+    let runtime_size = runtime_blob.len();
+
+    // Build a new EncodedProgram with runtime prepended:
+    // [runtime_blob | user_code]
+    let mut combined_code = runtime_blob;
+    combined_code.extend_from_slice(&encoded.code);
+
+    // Shift all user symbols by runtime_size
+    let mut combined_symbols = HashMap::new();
+    for (name, &offset) in &encoded.symbols {
+        combined_symbols.insert(name.clone(), offset + runtime_size);
+    }
+
+    // Add runtime symbols (offsets are relative to start of combined code)
+    for (name, offset) in &runtime_syms {
+        combined_symbols.insert(name.clone(), *offset);
+    }
+
+    // Resolve runtime relocations in the user code
+    // The user code starts at runtime_size within combined_code,
+    // so relocation patch offsets need to be shifted.
+    for reloc in &encoded.relocations {
+        if let Some(&target_pos) = combined_symbols.get(&reloc.target) {
+            let patch_offset = reloc.offset + runtime_size;
+            let offset = (target_pos as i64) - (patch_offset as i64 + 4);
+            let bytes = (offset as i32).to_le_bytes();
+            combined_code[patch_offset..patch_offset + 4].copy_from_slice(&bytes);
+        }
+    }
+
+    let combined_encoded = EncodedProgram {
+        code: combined_code,
+        symbols: combined_symbols,
+        relocations: vec![], // all resolved
+    };
+
     let mut generator = ElfGenerator::new();
-    generator.load_program(encoded);
-    generator.set_entry(entry, encoded);
+    generator.load_program(&combined_encoded);
+    generator.set_entry(entry, &combined_encoded);
 
     let mut output = Vec::new();
     generator

@@ -66,13 +66,54 @@ impl CodegenContext {
 
 /// Generate DTAL code for a TIR program
 pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram {
-    DtalProgram {
-        functions: program
-            .functions
-            .iter()
-            .map(|f| codegen_function(f))
-            .collect(),
-    }
+    let mut functions: Vec<DtalFunction> = program
+        .functions
+        .iter()
+        .map(|f| codegen_function(f))
+        .collect();
+
+    // Inject runtime function stubs so the verifier can check call-site
+    // types without needing the runtime's implementation.
+    functions.extend(runtime_function_stubs());
+
+    DtalProgram { functions }
+}
+
+/// Create stub DtalFunction entries for runtime intrinsics.
+///
+/// These have correct signatures but empty block lists. The verifier
+/// uses them to check preconditions and derive return types at call
+/// sites, but never attempts to verify their bodies (no blocks to verify).
+fn runtime_function_stubs() -> Vec<DtalFunction> {
+    use crate::backend::dtal::types::DtalType;
+    use crate::backend::dtal::regs::{Reg, PhysicalReg};
+
+    vec![
+        DtalFunction {
+            name: "print_int".to_string(),
+            params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
+        DtalFunction {
+            name: "print_char".to_string(),
+            params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
+        DtalFunction {
+            name: "read_int".to_string(),
+            params: vec![],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
+    ]
 }
 
 /// Generate DTAL code for a TIR function

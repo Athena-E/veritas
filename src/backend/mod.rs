@@ -33,6 +33,7 @@ pub mod emit;
 pub mod lower;
 pub mod optimise;
 pub mod regalloc;
+pub mod runtime;
 pub mod tir;
 pub mod x86_64;
 
