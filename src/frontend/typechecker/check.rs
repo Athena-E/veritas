@@ -1224,6 +1224,42 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
         signatures.insert(func.name.to_string(), sig);
     }
 
+    // Register runtime intrinsic signatures
+    let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+    signatures.insert(
+        "print_int".into(),
+        FunctionSignature {
+            name: "print_int".into(),
+            parameters: vec![("n".into(), IType::Int)],
+            return_type: IType::Unit,
+            precondition: None,
+            postcondition: None,
+            span: dummy_span,
+        },
+    );
+    signatures.insert(
+        "print_char".into(),
+        FunctionSignature {
+            name: "print_char".into(),
+            parameters: vec![("c".into(), IType::Int)],
+            return_type: IType::Unit,
+            precondition: None,
+            postcondition: None,
+            span: dummy_span,
+        },
+    );
+    signatures.insert(
+        "read_int".into(),
+        FunctionSignature {
+            name: "read_int".into(),
+            parameters: vec![],
+            return_type: IType::Int,
+            precondition: None,
+            postcondition: None,
+            span: dummy_span,
+        },
+    );
+
     let global_ctx = TypingContext::with_functions(signatures);
 
     let mut tfunctions = Vec::new();

@@ -46,7 +46,8 @@ fn test_pipeline_identity_function() {
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
-    assert_eq!(dtal.functions.len(), 1);
+    // 1 user function + 3 runtime stubs
+    assert_eq!(dtal.functions.len(), 4);
     assert_eq!(dtal.functions[0].name, "id");
 
     // Emit text
@@ -304,7 +305,8 @@ fn test_pipeline_multi_function_program() {
     assert_eq!(tir.functions.len(), 2);
 
     let dtal = codegen_program(&tir);
-    assert_eq!(dtal.functions.len(), 2);
+    // 2 user functions + 3 runtime stubs
+    assert_eq!(dtal.functions.len(), 5);
 
     let output = emit_program(&dtal);
     assert!(output.contains(".function helper"));
@@ -363,7 +365,8 @@ fn test_pipeline_function_with_postcondition() {
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
-    assert_eq!(dtal.functions.len(), 1);
+    // 1 user function + 3 runtime stubs
+    assert_eq!(dtal.functions.len(), 4);
     assert!(
         dtal.functions[0].postcondition.is_some(),
         "DTAL should have postcondition"
