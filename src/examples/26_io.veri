@@ -1,0 +1,13 @@
+// I/O runtime test: print_int, print_char, read_int
+
+fn print_number(n: int) {
+    print_int(n);
+}
+
+fn main() -> int {
+    print_number(42);
+    print_char(10);
+    print_int(123);
+    print_int(-456);
+    0
+}
