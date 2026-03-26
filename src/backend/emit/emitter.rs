@@ -239,6 +239,55 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::Cqo => {
+            writeln!(output, "    cqo").unwrap();
+        }
+
+        DtalInstr::Idiv { src } => {
+            writeln!(output, "    idiv {}", emit_reg(src)).unwrap();
+        }
+
+        DtalInstr::SpillStore { src, offset, ty } => {
+            writeln!(
+                output,
+                "    spill_store {}, [rbp{}]    : {}",
+                emit_reg(src),
+                offset,
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::SpillLoad { dst, offset, ty } => {
+            writeln!(
+                output,
+                "    spill_load {}, [rbp{}]    : {}",
+                emit_reg(dst),
+                offset,
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::Prologue {
+            frame_size,
+            callee_saved,
+        } => {
+            let regs: Vec<_> = callee_saved.iter().map(|r| emit_reg(r)).collect();
+            writeln!(
+                output,
+                "    .prologue frame={} callee_saved=[{}]",
+                frame_size,
+                regs.join(", ")
+            )
+            .unwrap();
+        }
+
+        DtalInstr::Epilogue { callee_saved } => {
+            let regs: Vec<_> = callee_saved.iter().map(|r| emit_reg(r)).collect();
+            writeln!(output, "    .epilogue callee_saved=[{}]", regs.join(", ")).unwrap();
+        }
+
         DtalInstr::TypeAnnotation { reg, ty } => {
             writeln!(output, "    .type {}: {}", emit_reg(reg), emit_type(ty)).unwrap();
         }

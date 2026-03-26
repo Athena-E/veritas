@@ -32,6 +32,7 @@ pub mod elf;
 pub mod emit;
 pub mod lower;
 pub mod optimise;
+pub mod physalloc;
 pub mod regalloc;
 pub mod runtime;
 pub mod tir;

@@ -37,6 +37,9 @@ pub struct TypeState {
     /// Taken as union across predecessors since they've been verified by the
     /// frontend typechecker and are safe to assume at join points.
     pub proven_assertions: Vec<Constraint>,
+    /// Types stored at stack spill slot offsets (post-regalloc).
+    /// Maps frame offset (negative from rbp) to the type stored there.
+    pub spill_types: HashMap<i32, DtalType>,
 }
 
 impl TypeState {
@@ -48,6 +51,7 @@ impl TypeState {
             stack: Vec::new(),
             array_versions: HashMap::new(),
             proven_assertions: Vec::new(),
+            spill_types: HashMap::new(),
         }
     }
 }
@@ -205,6 +209,25 @@ pub enum DtalInstr {
     Pop { dst: Reg, ty: DtalType },
     /// alloca rd, size
     Alloca { dst: Reg, size: u32, ty: DtalType },
+
+    // Physical allocation instructions (post-regalloc)
+    /// cqo: sign-extend rax into rdx:rax (required before idiv)
+    Cqo,
+    /// idiv src: signed divide rdx:rax by src; quotient → rax, remainder → rdx
+    Idiv { src: Reg },
+    /// Store register to stack spill slot at [rbp + offset]
+    SpillStore { src: Reg, offset: i32, ty: DtalType },
+    /// Load register from stack spill slot at [rbp + offset]
+    SpillLoad { dst: Reg, offset: i32, ty: DtalType },
+    /// Function prologue: push rbp, set frame, save callee-saved, allocate frame
+    Prologue {
+        frame_size: u32,
+        callee_saved: Vec<Reg>,
+    },
+    /// Function epilogue: restore callee-saved, pop rbp, ret
+    Epilogue {
+        callee_saved: Vec<Reg>,
+    },
 
     // Annotations (for verification)
     /// Type annotation for a register
