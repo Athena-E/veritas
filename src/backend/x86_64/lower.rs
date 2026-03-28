@@ -522,7 +522,9 @@ impl<'a> FunctionLowerer<'a> {
             | DtalInstr::SpillLoad { .. }
             | DtalInstr::Prologue { .. }
             | DtalInstr::Epilogue { .. } => {
-                unreachable!("Physical DTAL instructions should not appear in virtual DTAL lowering")
+                unreachable!(
+                    "Physical DTAL instructions should not appear in virtual DTAL lowering"
+                )
             }
         }
     }

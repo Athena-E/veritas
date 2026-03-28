@@ -67,8 +67,7 @@ fn try_resolve(vreg: VirtualReg, alloc: &AllocationResult) -> Option<PhysLoc> {
 }
 
 fn resolve(vreg: VirtualReg, alloc: &AllocationResult) -> PhysLoc {
-    try_resolve(vreg, alloc)
-        .unwrap_or_else(|| panic!("Unallocated virtual register v{}", vreg.0))
+    try_resolve(vreg, alloc).unwrap_or_else(|| panic!("Unallocated virtual register v{}", vreg.0))
 }
 
 /// Resolve a Reg (virtual or physical) to a PhysLoc.
@@ -80,12 +79,7 @@ fn resolve_reg(reg: Reg, alloc: &AllocationResult) -> PhysLoc {
 }
 
 /// Emit instructions to load a value into a specific physical register.
-fn emit_load_to(
-    instrs: &mut Vec<DtalInstr>,
-    loc: &PhysLoc,
-    target: Reg,
-    ty: DtalType,
-) {
+fn emit_load_to(instrs: &mut Vec<DtalInstr>, loc: &PhysLoc, target: Reg, ty: DtalType) {
     match loc {
         PhysLoc::Reg(r) if *r == target => {}
         PhysLoc::Reg(r) => {
@@ -106,20 +100,11 @@ fn emit_load_to(
 }
 
 /// Emit instructions to store from a physical register to a location.
-fn emit_store_from(
-    instrs: &mut Vec<DtalInstr>,
-    src: Reg,
-    loc: &PhysLoc,
-    ty: DtalType,
-) {
+fn emit_store_from(instrs: &mut Vec<DtalInstr>, src: Reg, loc: &PhysLoc, ty: DtalType) {
     match loc {
         PhysLoc::Reg(r) if *r == src => {}
         PhysLoc::Reg(r) => {
-            instrs.push(DtalInstr::MovReg {
-                dst: *r,
-                src,
-                ty,
-            });
+            instrs.push(DtalInstr::MovReg { dst: *r, src, ty });
         }
         PhysLoc::Spill(offset) => {
             instrs.push(DtalInstr::SpillStore {
@@ -281,7 +266,14 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
 
         // Translate each instruction
         for instr in &block.instructions {
-            allocate_instruction(&mut instrs, instr, alloc, func, &callee_saved_regs, &caller_saved_to_save);
+            allocate_instruction(
+                &mut instrs,
+                instr,
+                alloc,
+                func,
+                &callee_saved_regs,
+                &caller_saved_to_save,
+            );
         }
 
         blocks.push(DtalBlock {
@@ -485,12 +477,18 @@ fn allocate_instruction(
         DtalInstr::CmpImm { lhs, imm } => {
             let lhs_loc = resolve_reg(*lhs, alloc);
             emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
-            instrs.push(DtalInstr::CmpImm { lhs: RAX, imm: *imm });
+            instrs.push(DtalInstr::CmpImm {
+                lhs: RAX,
+                imm: *imm,
+            });
         }
 
         DtalInstr::SetCC { dst, cond } => {
             // setcc always goes to rax first (byte register encoding safety)
-            instrs.push(DtalInstr::SetCC { dst: RAX, cond: *cond });
+            instrs.push(DtalInstr::SetCC {
+                dst: RAX,
+                cond: *cond,
+            });
             let dst_loc = resolve_reg(*dst, alloc);
             emit_store_from(instrs, RAX, &dst_loc, DtalType::Bool);
         }
@@ -744,8 +742,8 @@ fn allocate_instruction(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline;
     use crate::backend::emit::emit_program;
+    use crate::pipeline;
 
     #[test]
     fn test_physalloc_simple() {
@@ -817,9 +815,7 @@ fn main() -> int {
         std::fs::write(path, &elf).expect("write elf");
         std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .expect("chmod");
-        let status = std::process::Command::new(path)
-            .status()
-            .expect("execute");
+        let status = std::process::Command::new(path).status().expect("execute");
         assert_eq!(
             status.code(),
             Some(42),
@@ -850,9 +846,7 @@ fn main() -> int {
         std::fs::write(path, &elf).expect("write elf");
         std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .expect("chmod");
-        let status = std::process::Command::new(path)
-            .status()
-            .expect("execute");
+        let status = std::process::Command::new(path).status().expect("execute");
         assert_eq!(
             status.code(),
             Some(7),
@@ -882,9 +876,7 @@ fn main() -> int {
         std::fs::write(path, &elf).expect("write elf");
         std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .expect("chmod");
-        let status = std::process::Command::new(path)
-            .status()
-            .expect("execute");
+        let status = std::process::Command::new(path).status().expect("execute");
         assert_eq!(
             status.code(),
             Some(6),

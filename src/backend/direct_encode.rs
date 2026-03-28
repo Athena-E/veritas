@@ -110,9 +110,7 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             }
         }
 
-        DtalInstr::BinOp {
-            op, dst, rhs, ..
-        } => {
+        DtalInstr::BinOp { op, dst, rhs, .. } => {
             let d = reg_to_x86(dst);
             let r = reg_to_x86(rhs);
             match op {
@@ -178,7 +176,9 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::Jmp { target } => {
-            out.push(X86Instr::Jmp { target: target.clone() });
+            out.push(X86Instr::Jmp {
+                target: target.clone(),
+            });
         }
 
         DtalInstr::Branch { cond, target } => {
@@ -189,7 +189,9 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::Call { target, .. } => {
-            out.push(X86Instr::Call { target: target.clone() });
+            out.push(X86Instr::Call {
+                target: target.clone(),
+            });
         }
 
         DtalInstr::Ret => {
@@ -197,17 +199,27 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::Push { src, .. } => {
-            out.push(X86Instr::Push { src: reg_to_x86(src) });
+            out.push(X86Instr::Push {
+                src: reg_to_x86(src),
+            });
         }
 
         DtalInstr::Pop { dst, .. } => {
-            out.push(X86Instr::Pop { dst: reg_to_x86(dst) });
+            out.push(X86Instr::Pop {
+                dst: reg_to_x86(dst),
+            });
         }
 
         DtalInstr::Alloca { dst, size, .. } => {
             let aligned = ((*size as i32) + 15) & !15;
-            out.push(X86Instr::SubRI { dst: X86Reg::Rsp, imm: aligned });
-            out.push(X86Instr::MovRR { dst: reg_to_x86(dst), src: X86Reg::Rsp });
+            out.push(X86Instr::SubRI {
+                dst: X86Reg::Rsp,
+                imm: aligned,
+            });
+            out.push(X86Instr::MovRR {
+                dst: reg_to_x86(dst),
+                src: X86Reg::Rsp,
+            });
         }
 
         DtalInstr::Cqo => {
@@ -215,7 +227,9 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::Idiv { src } => {
-            out.push(X86Instr::IdivR { src: reg_to_x86(src) });
+            out.push(X86Instr::IdivR {
+                src: reg_to_x86(src),
+            });
         }
 
         DtalInstr::SpillStore { src, offset, .. } => {
@@ -232,25 +246,44 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             });
         }
 
-        DtalInstr::Prologue { frame_size, callee_saved } => {
+        DtalInstr::Prologue {
+            frame_size,
+            callee_saved,
+        } => {
             out.push(X86Instr::Push { src: X86Reg::Rbp });
-            out.push(X86Instr::MovRR { dst: X86Reg::Rbp, src: X86Reg::Rsp });
+            out.push(X86Instr::MovRR {
+                dst: X86Reg::Rbp,
+                src: X86Reg::Rsp,
+            });
             for reg in callee_saved {
-                out.push(X86Instr::Push { src: reg_to_x86(reg) });
+                out.push(X86Instr::Push {
+                    src: reg_to_x86(reg),
+                });
             }
             if *frame_size > 0 {
-                out.push(X86Instr::SubRI { dst: X86Reg::Rsp, imm: *frame_size as i32 });
+                out.push(X86Instr::SubRI {
+                    dst: X86Reg::Rsp,
+                    imm: *frame_size as i32,
+                });
             }
         }
 
         DtalInstr::Epilogue { callee_saved } => {
-            out.push(X86Instr::MovRR { dst: X86Reg::Rsp, src: X86Reg::Rbp });
+            out.push(X86Instr::MovRR {
+                dst: X86Reg::Rsp,
+                src: X86Reg::Rbp,
+            });
             let callee_size = (callee_saved.len() * 8) as i32;
             if callee_size > 0 {
-                out.push(X86Instr::SubRI { dst: X86Reg::Rsp, imm: callee_size });
+                out.push(X86Instr::SubRI {
+                    dst: X86Reg::Rsp,
+                    imm: callee_size,
+                });
             }
             for reg in callee_saved.iter().rev() {
-                out.push(X86Instr::Pop { dst: reg_to_x86(reg) });
+                out.push(X86Instr::Pop {
+                    dst: reg_to_x86(reg),
+                });
             }
             out.push(X86Instr::Pop { dst: X86Reg::Rbp });
         }

@@ -220,12 +220,8 @@ pub fn verify_instruction(
             check_register_defined(rdx, state, block_label)?;
             check_register_defined(*src, state, block_label)?;
             // Both rax and rdx get new values
-            state
-                .register_types
-                .insert(rax, DtalType::Int);
-            state
-                .register_types
-                .insert(rdx, DtalType::Int);
+            state.register_types.insert(rax, DtalType::Int);
+            state.register_types.insert(rdx, DtalType::Int);
         }
 
         DtalInstr::SpillStore { src, offset, ty } => {

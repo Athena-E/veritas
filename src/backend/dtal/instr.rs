@@ -225,9 +225,7 @@ pub enum DtalInstr {
         callee_saved: Vec<Reg>,
     },
     /// Function epilogue: restore callee-saved, pop rbp, ret
-    Epilogue {
-        callee_saved: Vec<Reg>,
-    },
+    Epilogue { callee_saved: Vec<Reg> },
 
     // Annotations (for verification)
     /// Type annotation for a register

@@ -322,8 +322,7 @@ impl GraphColoringAllocator {
         }
 
         // Collect all virtual registers from the function (sorted for determinism)
-        let mut all_vregs: Vec<VirtualReg> =
-            Self::collect_all_vregs(func).into_iter().collect();
+        let mut all_vregs: Vec<VirtualReg> = Self::collect_all_vregs(func).into_iter().collect();
         all_vregs.sort_by_key(|v| v.0);
 
         // Simplify: repeatedly remove nodes with degree < k
@@ -401,13 +400,9 @@ impl GraphColoringAllocator {
             // If this vreg is live across a call, exclude caller-saved registers
             // (the callee will clobber them).
             let must_use_callee_saved = live_across_calls.contains(&node);
-            let available_color = self
-                .available_regs
-                .iter()
-                .find(|r| {
-                    !neighbor_colors.contains(r)
-                        && (!must_use_callee_saved || r.is_callee_saved())
-                });
+            let available_color = self.available_regs.iter().find(|r| {
+                !neighbor_colors.contains(r) && (!must_use_callee_saved || r.is_callee_saved())
+            });
 
             if let Some(&reg) = available_color {
                 allocation.insert(node, Location::Reg(reg));
