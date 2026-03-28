@@ -512,6 +512,18 @@ impl<'a> FunctionLowerer<'a> {
 
             // Annotations don't generate code
             DtalInstr::TypeAnnotation { .. } | DtalInstr::ConstraintAssert { .. } => {}
+
+            // Physical allocation instructions — these are only present in the
+            // physical DTAL pipeline (verify-after-regalloc). The current x86
+            // lowering path uses virtual DTAL, so these should not appear here.
+            DtalInstr::Cqo
+            | DtalInstr::Idiv { .. }
+            | DtalInstr::SpillStore { .. }
+            | DtalInstr::SpillLoad { .. }
+            | DtalInstr::Prologue { .. }
+            | DtalInstr::Epilogue { .. } => {
+                unreachable!("Physical DTAL instructions should not appear in virtual DTAL lowering")
+            }
         }
     }
 

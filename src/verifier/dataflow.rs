@@ -568,6 +568,25 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.proven_assertions.push(constraint.clone());
         }
         DtalInstr::Jmp { .. } | DtalInstr::Branch { .. } | DtalInstr::Ret => {}
+
+        // Physical allocation instructions (post-regalloc)
+        DtalInstr::Cqo => {
+            use crate::backend::dtal::regs::PhysicalReg;
+            let rax = Reg::Physical(PhysicalReg::LR);
+            let rdx = Reg::Physical(PhysicalReg::R2);
+            let rax_ty = state.register_types.get(&rax).cloned().unwrap_or(DtalType::Int);
+            state.register_types.insert(rdx, rax_ty);
+        }
+        DtalInstr::Idiv { src: _ } => {
+            use crate::backend::dtal::regs::PhysicalReg;
+            state.register_types.insert(Reg::Physical(PhysicalReg::LR), DtalType::Int);
+            state.register_types.insert(Reg::Physical(PhysicalReg::R2), DtalType::Int);
+        }
+        DtalInstr::SpillStore { .. } => {}
+        DtalInstr::SpillLoad { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::Prologue { .. } | DtalInstr::Epilogue { .. } => {}
     }
 }
 

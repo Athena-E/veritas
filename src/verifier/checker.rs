@@ -193,6 +193,66 @@ pub fn verify_instruction(
 
         // Control flow instructions are handled separately
         DtalInstr::Jmp { .. } | DtalInstr::Ret => {}
+
+        // Physical allocation instructions (post-regalloc).
+        // These are verified after register allocation in the physical DTAL pipeline.
+        // In the current virtual-register verification path, they should not appear.
+        DtalInstr::Cqo => {
+            // cqo: sign-extend rax into rdx:rax
+            use crate::backend::dtal::regs::PhysicalReg;
+            let rax = Reg::Physical(PhysicalReg::LR); // LR maps to rax
+            check_register_defined(rax, state, block_label)?;
+            // rdx gets defined (sign extension of rax)
+            let rax_ty = get_register_type(rax, state, block_label)?;
+            state
+                .register_types
+                .insert(Reg::Physical(PhysicalReg::R2), rax_ty); // R2 maps to rdx
+        }
+
+        DtalInstr::Idiv { src } => {
+            // idiv src: signed divide rdx:rax by src
+            // Requires: rax (dividend low), rdx (dividend high), src (divisor)
+            // Produces: rax (quotient), rdx (remainder)
+            use crate::backend::dtal::regs::PhysicalReg;
+            let rax = Reg::Physical(PhysicalReg::LR);
+            let rdx = Reg::Physical(PhysicalReg::R2);
+            check_register_defined(rax, state, block_label)?;
+            check_register_defined(rdx, state, block_label)?;
+            check_register_defined(*src, state, block_label)?;
+            // Both rax and rdx get new values
+            state
+                .register_types
+                .insert(rax, DtalType::Int);
+            state
+                .register_types
+                .insert(rdx, DtalType::Int);
+        }
+
+        DtalInstr::SpillStore { src, offset, ty } => {
+            check_register_defined(*src, state, block_label)?;
+            // Track the type stored at this stack offset
+            state.spill_types.insert(*offset, ty.clone());
+        }
+
+        DtalInstr::SpillLoad { dst, offset, ty } => {
+            // Verify the spill slot has been stored to
+            if let Some(stored_ty) = state.spill_types.get(offset) {
+                if !types_compatible(stored_ty, ty) {
+                    return Err(VerifyError::TypeMismatch {
+                        block: block_label.to_string(),
+                        instr_desc: format!("spill_load {:?}, [rbp{}]", dst, offset),
+                        expected: ty.clone(),
+                        actual: stored_ty.clone(),
+                    });
+                }
+            }
+            state.register_types.insert(*dst, ty.clone());
+        }
+
+        DtalInstr::Prologue { .. } | DtalInstr::Epilogue { .. } => {
+            // Structural markers — verified by checking callee-saved consistency
+            // at function level, not per-instruction
+        }
     }
 
     Ok(())

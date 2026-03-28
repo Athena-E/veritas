@@ -15,7 +15,7 @@ use super::liveness::{InterferenceGraph, LivenessAnalysis, LivenessInfo};
 use crate::backend::dtal::instr::{DtalFunction, DtalInstr};
 use crate::backend::dtal::regs::{Reg, VirtualReg};
 use crate::backend::x86_64::regs::{Location, X86Reg};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 /// A live interval for a virtual register
 #[derive(Clone, Debug)]
@@ -34,7 +34,7 @@ pub struct LiveInterval {
 #[derive(Clone, Debug)]
 pub struct AllocationResult {
     /// Mapping from virtual registers to locations (register or stack)
-    pub allocation: HashMap<VirtualReg, Location>,
+    pub allocation: BTreeMap<VirtualReg, Location>,
     /// Number of stack slots needed for spills
     pub spill_slots: usize,
     /// Registers that need to be saved/restored (callee-saved)
@@ -50,7 +50,7 @@ pub struct LinearScanAllocator {
     /// Free registers pool
     free_regs: Vec<X86Reg>,
     /// Allocation result
-    allocation: HashMap<VirtualReg, Location>,
+    allocation: BTreeMap<VirtualReg, Location>,
     /// Next spill slot
     next_spill_slot: i32,
     /// Set of callee-saved registers actually used
@@ -64,7 +64,7 @@ impl LinearScanAllocator {
             available_regs: X86Reg::ALLOCATABLE.to_vec(),
             active: Vec::new(),
             free_regs: X86Reg::ALLOCATABLE.to_vec(),
-            allocation: HashMap::new(),
+            allocation: BTreeMap::new(),
             next_spill_slot: -8, // Start at [rbp-8]
             callee_saved_used: HashSet::new(),
         }
@@ -127,7 +127,7 @@ impl LinearScanAllocator {
         liveness: &LivenessInfo,
     ) -> Vec<LiveInterval> {
         // Track first def and last use for each register
-        let mut intervals: HashMap<VirtualReg, LiveInterval> = HashMap::new();
+        let mut intervals: BTreeMap<VirtualReg, LiveInterval> = BTreeMap::new();
 
         let mut position = 0usize;
 
@@ -305,13 +305,31 @@ impl GraphColoringAllocator {
         let liveness = LivenessAnalysis::analyze(func);
         let graph = InterferenceGraph::build(func, &liveness);
 
-        // Collect all virtual registers from the function
-        let all_vregs: HashSet<VirtualReg> = Self::collect_all_vregs(func);
+        // Compute which virtual registers are live across call instructions.
+        // These must NOT be assigned to caller-saved registers because the
+        // callee will clobber them.
+        let mut live_across_calls: HashSet<VirtualReg> = HashSet::new();
+        for block in &func.blocks {
+            let block_info = &liveness.blocks[&block.label];
+            let live_sets =
+                LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
+            for (instr_idx, live_set) in live_sets.iter().enumerate() {
+                if matches!(block.instructions[instr_idx], DtalInstr::Call { .. }) {
+                    // Everything live AFTER the call is live across it
+                    live_across_calls.extend(live_set.iter().copied());
+                }
+            }
+        }
+
+        // Collect all virtual registers from the function (sorted for determinism)
+        let mut all_vregs: Vec<VirtualReg> =
+            Self::collect_all_vregs(func).into_iter().collect();
+        all_vregs.sort_by_key(|v| v.0);
 
         // Simplify: repeatedly remove nodes with degree < k
         let mut stack: Vec<VirtualReg> = Vec::new();
         let mut removed: HashSet<VirtualReg> = HashSet::new();
-        let mut current_degree: HashMap<VirtualReg, usize> = HashMap::new();
+        let mut current_degree: BTreeMap<VirtualReg, usize> = BTreeMap::new();
 
         // Initialize degrees (registers not in graph have degree 0)
         for &vreg in &all_vregs {
@@ -363,7 +381,7 @@ impl GraphColoringAllocator {
         }
 
         // Select phase: assign colors by popping from stack
-        let mut allocation: HashMap<VirtualReg, Location> = HashMap::new();
+        let mut allocation: BTreeMap<VirtualReg, Location> = BTreeMap::new();
         let mut callee_saved_used: HashSet<X86Reg> = HashSet::new();
         let mut next_spill_slot: i32 = -8;
 
@@ -379,11 +397,17 @@ impl GraphColoringAllocator {
                 })
                 .collect();
 
-            // Find an available color
+            // Find an available color.
+            // If this vreg is live across a call, exclude caller-saved registers
+            // (the callee will clobber them).
+            let must_use_callee_saved = live_across_calls.contains(&node);
             let available_color = self
                 .available_regs
                 .iter()
-                .find(|r| !neighbor_colors.contains(r));
+                .find(|r| {
+                    !neighbor_colors.contains(r)
+                        && (!must_use_callee_saved || r.is_callee_saved())
+                });
 
             if let Some(&reg) = available_color {
                 allocation.insert(node, Location::Reg(reg));

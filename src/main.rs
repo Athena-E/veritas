@@ -39,30 +39,47 @@ fn main() {
     let show_help = args.iter().any(|a| a == "--help" || a == "-h");
 
     if args.len() < 2 || show_help {
+        eprintln!("Veritas - A type-preserving compiler with refinement types");
+        eprintln!();
         eprintln!("Usage: {} <source_file> [OPTIONS]", args[0]);
         eprintln!();
-        eprintln!("Options:");
-        eprintln!("  -h, --help       Show this help message");
-        eprintln!("  -v, --verbose    Show compilation stages");
-        eprintln!("  --tokens         Show lexer tokens");
-        eprintln!("  --ast            Show typed AST");
-        eprintln!("  --tir            Show TIR (SSA form)");
-        eprintln!("  --verify         Verify DTAL output");
-        eprintln!("  --verify-only    Verify DTAL and exit (no output)");
-        eprintln!("  --verify-dtal    Verify a standalone .dtal file");
-        eprintln!("  -o <file>        Output native executable (ELF)");
-        eprintln!("  --native         Generate native x86-64 code (to stdout)");
+        eprintln!("Output:");
+        eprintln!("  -o <file>          Compile to native ELF executable");
+        eprintln!("  --native           Print x86-64 assembly to stdout");
         eprintln!();
-        eprintln!("Optimization:");
-        eprintln!("  -O, --optimize   Enable all optimizations");
-        eprintln!("  --copy-prop      Enable copy propagation only");
-        eprintln!("  --dce            Enable dead code elimination only");
+        eprintln!("Verification:");
+        eprintln!("  --verify           Verify DTAL before code generation");
+        eprintln!("  --verify-only      Verify DTAL and exit (no codegen)");
+        eprintln!("  --verify-dtal      Verify a standalone .dtal file");
         eprintln!();
-        eprintln!("Environment variables:");
-        eprintln!(
-            "  VERITAS_LS=1           Use linear scan register allocator (default: graph coloring)"
-        );
-        eprintln!("  VERITAS_DEBUG_ALLOC=1  Dump register allocation details to stderr");
+        eprintln!("Code generation pipeline:");
+        eprintln!("  --physical         Use verify-after-regalloc pipeline:");
+        eprintln!("                       regalloc -> physical DTAL -> verify -> encode");
+        eprintln!("                       Register allocation is untrusted; only the");
+        eprintln!("                       trivial encoder (~200 LOC) is in the TCB");
+        eprintln!();
+        eprintln!("Optimisation:");
+        eprintln!("  -O, --optimize     Enable all optimisations");
+        eprintln!("  --copy-prop        Copy propagation only");
+        eprintln!("  --dce              Dead code elimination only");
+        eprintln!();
+        eprintln!("Debug:");
+        eprintln!("  -v, --verbose      Show compilation stages");
+        eprintln!("  --tokens           Show lexer tokens");
+        eprintln!("  --ast              Show typed AST");
+        eprintln!("  --tir              Show TIR (SSA form)");
+        eprintln!("  -q, --quiet        Suppress non-error output");
+        eprintln!("  --bench            Output benchmark JSON");
+        eprintln!("  -h, --help         Show this help message");
+        eprintln!();
+        eprintln!("Runtime intrinsics:");
+        eprintln!("  print_int(n: int)      Print integer + newline to stdout");
+        eprintln!("  print_char(c: int)     Print single byte to stdout");
+        eprintln!("  read_int() -> int      Read decimal integer from stdin");
+        eprintln!();
+        eprintln!("Environment:");
+        eprintln!("  VERITAS_LS=1           Use linear scan allocator (default: graph colouring)");
+        eprintln!("  VERITAS_DEBUG_ALLOC=1  Dump register allocation details");
         std::process::exit(if show_help { 0 } else { 1 });
     }
 
@@ -99,6 +116,7 @@ fn main() {
     let verify = args.iter().any(|a| a == "--verify" || a == "--verify-only");
     let verify_only = args.iter().any(|a| a == "--verify-only");
     let native = args.iter().any(|a| a == "--native");
+    let physical = args.iter().any(|a| a == "--physical");
     let output_file = args
         .iter()
         .position(|a| a == "-o")
@@ -286,21 +304,50 @@ fn main() {
 
             // Generate native code if requested
             if native || output_file.is_some() {
-                if verbose {
-                    println!("\n[8] Lowering to x86-64...");
-                }
+                let encoded = if physical {
+                    // NEW PIPELINE: physalloc → verify physical → direct encode
+                    // Register allocation is UNTRUSTED — verifier checks the output
+                    if verbose {
+                        println!("\n[8] Physical allocation (regalloc → physical DTAL)...");
+                    }
+                    let physical_dtal =
+                        veritas::backend::physalloc::physically_allocate(&output.dtal_program);
 
-                // Lower DTAL to x86-64
-                let x86_program = lower_to_x86(&output.dtal_program);
+                    if verify {
+                        if verbose {
+                            println!("\n[8b] Verifying physically-allocated DTAL...");
+                        }
+                        match verify_dtal(&physical_dtal) {
+                            Ok(()) => {
+                                if !quiet && !bench {
+                                    println!("\nPhysical DTAL verification passed!");
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("\nPhysical DTAL verification FAILED: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
 
-                if verbose {
-                    println!("Generated {} function(s)", x86_program.functions.len());
-                    println!("\n[9] Encoding x86-64 instructions...");
-                }
+                    if verbose {
+                        println!("\n[9] Direct encoding physical DTAL...");
+                    }
+                    veritas::backend::direct_encode::encode_physical_dtal(&physical_dtal)
+                } else {
+                    // OLD PIPELINE: x86 lowering (trusted regalloc + isel + encode)
+                    if verbose {
+                        println!("\n[8] Lowering to x86-64...");
+                    }
+                    let x86_program = lower_to_x86(&output.dtal_program);
 
-                // Encode to machine code
-                let mut encoder = Encoder::new();
-                let encoded = encoder.encode_program(&x86_program);
+                    if verbose {
+                        println!("Generated {} function(s)", x86_program.functions.len());
+                        println!("\n[9] Encoding x86-64 instructions...");
+                    }
+                    let mut encoder = Encoder::new();
+                    encoder.encode_program(&x86_program)
+                };
 
                 if verbose {
                     println!("Encoded {} bytes of machine code", encoded.code.len());
@@ -315,9 +362,12 @@ fn main() {
                     let entry = if encoded.symbols.contains_key("main") {
                         "main"
                     } else {
-                        x86_program
+                        // Use first user function from DTAL program
+                        output
+                            .dtal_program
                             .functions
-                            .first()
+                            .iter()
+                            .find(|f| !f.blocks.is_empty())
                             .map(|f| f.name.as_str())
                             .unwrap_or("main")
                     };
@@ -350,15 +400,15 @@ fn main() {
                         );
                     }
                 } else if native {
-                    // Print x86-64 assembly
-                    println!("\n{}", "=".repeat(60));
-                    println!("x86-64 Assembly:");
-                    println!("{}", "=".repeat(60));
-                    for func in &x86_program.functions {
-                        println!("\n{}:", func.name);
-                        for instr in &func.instructions {
-                            println!("    {}", instr);
-                        }
+                    // Print physical DTAL or x86-64 assembly
+                    if physical {
+                        println!("\n{}", "=".repeat(60));
+                        println!("Physical DTAL:");
+                        println!("{}", "=".repeat(60));
+                        let physical_dtal =
+                            veritas::backend::physalloc::physically_allocate(&output.dtal_program);
+                        let text = veritas::backend::emit::emit_program(&physical_dtal);
+                        println!("{}", text);
                     }
 
                     println!("\n{}", "=".repeat(60));
