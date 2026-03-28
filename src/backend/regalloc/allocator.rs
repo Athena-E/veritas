@@ -305,6 +305,22 @@ impl GraphColoringAllocator {
         let liveness = LivenessAnalysis::analyze(func);
         let graph = InterferenceGraph::build(func, &liveness);
 
+        // Compute which virtual registers are live across call instructions.
+        // These must NOT be assigned to caller-saved registers because the
+        // callee will clobber them.
+        let mut live_across_calls: HashSet<VirtualReg> = HashSet::new();
+        for block in &func.blocks {
+            let block_info = &liveness.blocks[&block.label];
+            let live_sets =
+                LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
+            for (instr_idx, live_set) in live_sets.iter().enumerate() {
+                if matches!(block.instructions[instr_idx], DtalInstr::Call { .. }) {
+                    // Everything live AFTER the call is live across it
+                    live_across_calls.extend(live_set.iter().copied());
+                }
+            }
+        }
+
         // Collect all virtual registers from the function (sorted for determinism)
         let mut all_vregs: Vec<VirtualReg> =
             Self::collect_all_vregs(func).into_iter().collect();
@@ -381,11 +397,17 @@ impl GraphColoringAllocator {
                 })
                 .collect();
 
-            // Find an available color
+            // Find an available color.
+            // If this vreg is live across a call, exclude caller-saved registers
+            // (the callee will clobber them).
+            let must_use_callee_saved = live_across_calls.contains(&node);
             let available_color = self
                 .available_regs
                 .iter()
-                .find(|r| !neighbor_colors.contains(r));
+                .find(|r| {
+                    !neighbor_colors.contains(r)
+                        && (!must_use_callee_saved || r.is_callee_saved())
+                });
 
             if let Some(&reg) = available_color {
                 allocation.insert(node, Location::Reg(reg));

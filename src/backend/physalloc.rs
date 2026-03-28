@@ -170,9 +170,33 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
         .map(|x86| x86_to_dtal_reg(*x86))
         .collect();
 
-    // Compute frame size (spill slots * 8, 16-byte aligned)
-    let spill_size = (alloc.spill_slots * 8) as u32;
-    let callee_saved_size = (alloc.callee_saved_used.len() * 8) as u32;
+    // Collect caller-saved registers that need save/restore around calls.
+    let caller_saved_to_save: Vec<Reg>;
+    {
+        let mut cs_set: std::collections::BTreeSet<X86Reg> = std::collections::BTreeSet::new();
+        for loc in alloc.allocation.values() {
+            if let Location::Reg(x86) = loc {
+                if X86Reg::CALLER_SAVED.contains(x86) && X86Reg::ALLOCATABLE.contains(x86) {
+                    cs_set.insert(*x86);
+                }
+            }
+        }
+        caller_saved_to_save = cs_set.iter().map(|x86| x86_to_dtal_reg(*x86)).collect();
+    }
+
+    // Check if function uses alloca (needs extra frame space for caller-saved saves)
+    let has_alloca = func.blocks.iter().any(|b| {
+        b.instructions
+            .iter()
+            .any(|i| matches!(i, DtalInstr::Alloca { .. }))
+    });
+
+    // Count unique caller-saved registers used (for alloca save slots)
+    let caller_save_slots = caller_saved_to_save.len();
+
+    // Compute frame size (spill slots + caller-save slots for alloca, 16-byte aligned)
+    let spill_size = ((alloc.spill_slots + caller_save_slots) * 8) as u32;
+    let callee_saved_size = (callee_saved_regs.len() * 8) as u32;
     // After push rbp (8) + callee saves (N*8), we need frame_size such that
     // total is 16-byte aligned
     let unaligned = 8 + callee_saved_size + spill_size;
@@ -257,7 +281,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
 
         // Translate each instruction
         for instr in &block.instructions {
-            allocate_instruction(&mut instrs, instr, alloc, func);
+            allocate_instruction(&mut instrs, instr, alloc, func, &callee_saved_regs, &caller_saved_to_save);
         }
 
         blocks.push(DtalBlock {
@@ -308,6 +332,8 @@ fn allocate_instruction(
     instr: &DtalInstr,
     alloc: &AllocationResult,
     func: &DtalFunction,
+    callee_saved: &[Reg],
+    caller_saved: &[Reg],
 ) {
     // Skip instructions with dead destinations (register not allocated = never used)
     match instr {
@@ -545,51 +571,90 @@ fn allocate_instruction(
         }
 
         DtalInstr::Call { target, return_ty } => {
-            // Save caller-saved registers that are live (allocated to caller-saved x86 regs)
-            let caller_saved_to_push: Vec<Reg> = alloc
-                .allocation
-                .values()
-                .filter_map(|loc| {
-                    if let Location::Reg(x86) = loc {
-                        if X86Reg::CALLER_SAVED.contains(x86)
-                            && X86Reg::ALLOCATABLE.contains(x86)
-                        {
-                            Some(x86_to_dtal_reg(*x86))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
+            // Save caller-saved registers BEFORE argument setup.
+            // The argument-setup moves (mov r0, ...; mov r1, ...) have
+            // already been emitted to `instrs`. We need to insert saves
+            // BEFORE those moves to capture the pre-argument values.
+            //
+            // Strategy: find the argument-setup instructions at the tail
+            // of `instrs` (MovReg to R0-R5) and insert pushes before them.
+            let arg_regs: Vec<Reg> = PhysicalReg::param_regs()
+                .iter()
+                .map(|p| Reg::Physical(*p))
                 .collect();
 
-            for reg in &caller_saved_to_push {
-                instrs.push(DtalInstr::Push {
-                    src: *reg,
+            // Count trailing instructions that are argument moves (MovReg dst=R0..R5)
+            let mut arg_move_count = 0;
+            for instr in instrs.iter().rev() {
+                match instr {
+                    DtalInstr::MovReg { dst, .. } if arg_regs.contains(dst) => {
+                        arg_move_count += 1;
+                    }
+                    _ => break,
+                }
+            }
+
+            // Split: extract the argument moves, insert saves before them
+            let split_point = instrs.len() - arg_move_count;
+            let arg_moves: Vec<DtalInstr> = instrs.drain(split_point..).collect();
+
+            // Save caller-saved to rbp-relative spill slots (safe with alloca).
+            // These slots are in the frame area allocated by the prologue.
+            for (i, &reg) in caller_saved.iter().enumerate() {
+                let offset = -(((alloc.spill_slots + 1 + i) * 8) as i32);
+                instrs.push(DtalInstr::SpillStore {
+                    src: reg,
+                    offset,
                     ty: DtalType::Int,
                 });
             }
 
+            // Re-insert the argument moves
+            instrs.extend(arg_moves);
+
+            // Call
             instrs.push(DtalInstr::Call {
                 target: target.clone(),
                 return_ty: return_ty.clone(),
             });
 
-            // Restore caller-saved (reverse order)
-            for reg in caller_saved_to_push.iter().rev() {
-                instrs.push(DtalInstr::Pop {
-                    dst: *reg,
-                    ty: DtalType::Int,
-                });
-            }
-
-            // Return value is in rax (LR), move to R0 (rdi) for DTAL convention
+            // Return value is in rax (LR). Move to the destination register
+            // for the virtual reg that receives the call result.
+            // THEN restore caller-saved (so r0 gets its pre-call value back,
+            // NOT the return value). The return value is now in its destination reg.
+            //
+            // The DTAL instruction after Call is: MovReg { dst: vN, src: r0 }
+            // In physical DTAL: mov <dest>, r0. But we need to use lr (rax).
+            // So emit: mov r0, lr (return val to r0 temporarily)
+            //          mov <dest>, r0 (will be done by next instruction)
+            //
+            // Instead: skip r0 in restore, let return value flow through.
+            // Restore all EXCEPT r0, then let the next MovReg pick up r0=return val.
+            let r0_reg = Reg::Physical(PhysicalReg::R0);
+            // First: move return value from rax to r0 (rdi)
             instrs.push(DtalInstr::MovReg {
-                dst: Reg::Physical(PhysicalReg::R0),
+                dst: r0_reg,
                 src: RAX,
                 ty: return_ty.clone(),
             });
+            // The DTAL's MovReg { dst: vN, src: r0 } will pick up the return value.
+            // After that, we need to restore r0 from spill. But we can't know here
+            // when the return value has been consumed.
+            //
+            // Correct approach: restore everything EXCEPT r0 now, and accept that
+            // r0's pre-call value is lost. The register allocator should have placed
+            // anything that needs to survive the call in a callee-saved register.
+            for (i, &reg) in caller_saved.iter().enumerate() {
+                if reg == r0_reg {
+                    continue; // r0 now holds return value — don't overwrite
+                }
+                let offset = -(((alloc.spill_slots + 1 + i) * 8) as i32);
+                instrs.push(DtalInstr::SpillLoad {
+                    dst: reg,
+                    offset,
+                    ty: DtalType::Int,
+                });
+            }
         }
 
         DtalInstr::Ret => {
@@ -599,12 +664,10 @@ fn allocate_instruction(
                 src: Reg::Physical(PhysicalReg::R0),
                 ty: func.return_type.clone(),
             });
+            // Epilogue must restore ALL saved registers (callee-saved + caller-saved
+            // that were saved in the prologue for functions with calls)
             instrs.push(DtalInstr::Epilogue {
-                callee_saved: alloc
-                    .callee_saved_used
-                    .iter()
-                    .map(|x86| x86_to_dtal_reg(*x86))
-                    .collect(),
+                callee_saved: callee_saved.to_vec(),
             });
             instrs.push(DtalInstr::Ret);
         }
