@@ -194,6 +194,17 @@ pub fn verify_instruction(
         // Control flow instructions are handled separately
         DtalInstr::Jmp { .. } | DtalInstr::Ret => {}
 
+        // Port I/O instructions
+        DtalInstr::PortIn { dst, port } => {
+            check_register_defined(*port, state, block_label)?;
+            // Port read returns an int (byte value 0-255)
+            state.register_types.insert(*dst, DtalType::Int);
+        }
+        DtalInstr::PortOut { port, value } => {
+            check_register_defined(*port, state, block_label)?;
+            check_register_defined(*value, state, block_label)?;
+        }
+
         // Physical allocation instructions (post-regalloc).
         // These are verified after register allocation in the physical DTAL pipeline.
         // In the current virtual-register verification path, they should not appear.
@@ -377,7 +388,7 @@ fn verify_binop(
             DtalType::Bool
         }
         // Arithmetic operations: derive result type symbolically
-        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::BitAnd => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
@@ -390,16 +401,23 @@ fn verify_binop(
             let lhs_idx = extract_index(&lhs_ty, &lhs);
             let rhs_idx = extract_index(&rhs_ty, &rhs);
 
-            let result_idx = match op {
-                BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
-                _ => unreachable!(),
-            };
-
-            DtalType::SingletonInt(result_idx)
+            match op {
+                BinaryOp::BitAnd => {
+                    // Bitwise ops don't have IndexExpr representation — widen to Int
+                    DtalType::Int
+                }
+                _ => {
+                    let result_idx = match op {
+                        BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        _ => unreachable!(),
+                    };
+                    DtalType::SingletonInt(result_idx)
+                }
+            }
         }
     };
 

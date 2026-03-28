@@ -486,6 +486,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
 
             let derived_ty = match op {
                 BinaryOp::And | BinaryOp::Or => DtalType::Bool,
+                BinaryOp::BitAnd => DtalType::Int, // Bitwise ops widen to Int
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     let lhs_idx = extract_index(&lhs_ty, lhs);
                     let rhs_idx = extract_index(&rhs_ty, rhs);
@@ -590,6 +591,10 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R2), DtalType::Int);
         }
+        DtalInstr::PortIn { dst, .. } => {
+            state.register_types.insert(*dst, DtalType::Int);
+        }
+        DtalInstr::PortOut { .. } => {}
         DtalInstr::SpillStore { .. } => {}
         DtalInstr::SpillLoad { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());

@@ -208,6 +208,8 @@ impl Encoder {
 
             X86Instr::Ret => 1,
             X86Instr::Syscall => 2,
+            X86Instr::InAlDx => 1,  // 0xEC
+            X86Instr::OutDxAl => 1, // 0xEE
 
             X86Instr::Push { src } => {
                 if src.needs_rex_b() {
@@ -517,6 +519,14 @@ impl Encoder {
             X86Instr::Syscall => {
                 self.emit_byte(0x0F);
                 self.emit_byte(0x05);
+            }
+
+            X86Instr::InAlDx => {
+                self.emit_byte(0xEC);
+            }
+
+            X86Instr::OutDxAl => {
+                self.emit_byte(0xEE);
             }
         }
     }

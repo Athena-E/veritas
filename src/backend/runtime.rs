@@ -20,15 +20,19 @@ use std::collections::HashMap;
 pub const RT_PRINT_INT: &str = "print_int";
 pub const RT_PRINT_CHAR: &str = "print_char";
 pub const RT_READ_INT: &str = "read_int";
+pub const RT_PORT_IN: &str = "port_in";
+pub const RT_PORT_OUT: &str = "port_out";
 
 /// Offsets of each function within the runtime blob
 const PRINT_INT_OFFSET: usize = 0x00;
 const PRINT_CHAR_OFFSET: usize = 0x65;
 const READ_INT_OFFSET: usize = 0x7e;
+const PORT_IN_OFFSET: usize = 0xD3;  // after read_int (0x7e + 85 = 0xD3)
+const PORT_OUT_OFFSET: usize = 0xDC; // after port_in (0xD3 + 9 = 0xDC)
 
 /// Check whether a function name is a runtime intrinsic
 pub fn is_runtime_function(name: &str) -> bool {
-    matches!(name, RT_PRINT_INT | RT_PRINT_CHAR | RT_READ_INT)
+    matches!(name, RT_PRINT_INT | RT_PRINT_CHAR | RT_READ_INT | RT_PORT_IN | RT_PORT_OUT)
 }
 
 /// Get the raw x86-64 machine code for the runtime functions.
@@ -61,6 +65,19 @@ pub fn runtime_code() -> Vec<u8> {
         0xff, 0xc6, 0x0f, 0xb6, 0x16, 0x80, 0xea, 0x30, 0x80, 0xfa, 0x09, 0x77, 0x0f, 0x48, 0x6b,
         0xc0, 0x0a, 0x0f, 0xb6, 0xd2, 0x48, 0x01, 0xd0, 0x48, 0xff, 0xc6, 0xeb, 0xe6, 0x85, 0xc9,
         0x74, 0x03, 0x48, 0xf7, 0xd8, 0x48, 0x89, 0xec, 0x5d, 0xc3,
+        // __rt_port_in (offset 0xD3, 9 bytes)
+        // Input: rdi = port number
+        // Output: rax = byte read from port
+        0x66, 0x89, 0xfa,       // mov dx, di
+        0xec,                   // in al, dx
+        0x48, 0x0f, 0xb6, 0xc0, // movzx rax, al
+        0xc3,                   // ret
+        // __rt_port_out (offset 0xDC, 8 bytes)
+        // Input: rdi = port number, rsi = byte value
+        0x66, 0x89, 0xfa,       // mov dx, di
+        0x40, 0x88, 0xf0,       // mov al, sil
+        0xee,                   // out dx, al
+        0xc3,                   // ret
     ]
 }
 
@@ -73,5 +90,7 @@ pub fn runtime_symbols() -> HashMap<String, usize> {
     symbols.insert(RT_PRINT_INT.to_string(), PRINT_INT_OFFSET);
     symbols.insert(RT_PRINT_CHAR.to_string(), PRINT_CHAR_OFFSET);
     symbols.insert(RT_READ_INT.to_string(), READ_INT_OFFSET);
+    symbols.insert(RT_PORT_IN.to_string(), PORT_IN_OFFSET);
+    symbols.insert(RT_PORT_OUT.to_string(), PORT_OUT_OFFSET);
     symbols
 }

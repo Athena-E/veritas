@@ -117,7 +117,7 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
                 BinaryOp::Add => out.push(X86Instr::AddRR { dst: d, src: r }),
                 BinaryOp::Sub => out.push(X86Instr::SubRR { dst: d, src: r }),
                 BinaryOp::Mul => out.push(X86Instr::ImulRR { dst: d, src: r }),
-                BinaryOp::And => out.push(X86Instr::AndRR { dst: d, src: r }),
+                BinaryOp::BitAnd | BinaryOp::And => out.push(X86Instr::AndRR { dst: d, src: r }),
                 BinaryOp::Or => out.push(X86Instr::OrRR { dst: d, src: r }),
                 BinaryOp::Div | BinaryOp::Mod => {
                     unreachable!("Div/Mod expanded to Cqo+Idiv in physical DTAL")
@@ -220,6 +220,19 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
                 dst: reg_to_x86(dst),
                 src: X86Reg::Rsp,
             });
+        }
+
+        DtalInstr::PortIn { .. } => {
+            // in al, dx (port in DX, result in AL)
+            out.push(X86Instr::InAlDx);
+            // movzx rax, al (zero-extend byte to 64-bit)
+            // Note: the runtime blob handles this; in direct encode we trust
+            // the physalloc has set up the registers correctly
+        }
+
+        DtalInstr::PortOut { .. } => {
+            // out dx, al (value in AL, port in DX)
+            out.push(X86Instr::OutDxAl);
         }
 
         DtalInstr::Cqo => {

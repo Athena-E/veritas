@@ -549,6 +549,7 @@ impl<'a> DtalParser<'a> {
             "mul" => BinaryOp::Mul,
             "div" => BinaryOp::Div,
             "mod" => BinaryOp::Mod,
+            "bitand" => BinaryOp::BitAnd,
             "and" => BinaryOp::And,
             "or" => BinaryOp::Or,
             _ => return Err(self.err(format!("unknown binop '{}'", tokens[0]))),

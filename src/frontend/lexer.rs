@@ -5,12 +5,24 @@ use chumsky::prelude::*;
 // Lexer
 pub fn lexer<'src>()
 -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char, Span>>> {
-    // A parser for numbers
-    let num = text::int(10)
+    // A parser for numbers (decimal and hex)
+    let hex_num = just("0x")
+        .ignore_then(
+            any()
+                .filter(|c: &char| c.is_ascii_hexdigit())
+                .repeated()
+                .at_least(1)
+                .to_slice(),
+        )
+        .map(|s: &str| Token::Num(i64::from_str_radix(s, 16).unwrap()));
+
+    let dec_num = text::int(10)
         .to_slice()
         .from_str()
         .unwrapped()
         .map(Token::Num);
+
+    let num = hex_num.or(dec_num);
 
     // A parser for operators
     let op = choice((

@@ -123,6 +123,8 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
         | DtalInstr::Ret
         | DtalInstr::TypeAnnotation { .. }
         | DtalInstr::ConstraintAssert { .. }
+        | DtalInstr::PortIn { .. }
+        | DtalInstr::PortOut { .. }
         | DtalInstr::Cqo
         | DtalInstr::Idiv { .. }
         | DtalInstr::SpillStore { .. }

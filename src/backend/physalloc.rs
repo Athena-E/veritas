@@ -723,6 +723,23 @@ fn allocate_instruction(
         // derive types from the physical instructions instead
         DtalInstr::TypeAnnotation { .. } | DtalInstr::ConstraintAssert { .. } => {}
 
+        // Port I/O: pass through with register resolution
+        DtalInstr::PortIn { dst, port } => {
+            let port_loc = resolve_reg(*port, alloc);
+            let dst_loc = resolve_reg(*dst, alloc);
+            emit_load_to(instrs, &port_loc, RDX, DtalType::Int);
+            instrs.push(DtalInstr::PortIn { dst: RAX, port: RDX });
+            emit_store_from(instrs, RAX, &dst_loc, DtalType::Int);
+        }
+
+        DtalInstr::PortOut { port, value } => {
+            let port_loc = resolve_reg(*port, alloc);
+            let value_loc = resolve_reg(*value, alloc);
+            emit_load_to(instrs, &port_loc, RDX, DtalType::Int);
+            emit_load_to(instrs, &value_loc, RAX, DtalType::Int);
+            instrs.push(DtalInstr::PortOut { port: RDX, value: RAX });
+        }
+
         // Physical instructions should not appear in virtual DTAL input
         DtalInstr::Cqo
         | DtalInstr::Idiv { .. }
