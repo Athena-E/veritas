@@ -232,8 +232,8 @@ pub fn verify_instruction(
 
         DtalInstr::SpillLoad { dst, offset, ty } => {
             // Verify the spill slot has been stored to
-            if let Some(stored_ty) = state.spill_types.get(offset) {
-                if !types_compatible(stored_ty, ty) {
+            if let Some(stored_ty) = state.spill_types.get(offset)
+                && !types_compatible(stored_ty, ty) {
                     return Err(VerifyError::TypeMismatch {
                         block: block_label.to_string(),
                         instr_desc: format!("spill_load {:?}, [rbp{}]", dst, offset),
@@ -241,7 +241,6 @@ pub fn verify_instruction(
                         actual: stored_ty.clone(),
                     });
                 }
-            }
             state.register_types.insert(*dst, ty.clone());
         }
 

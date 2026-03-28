@@ -160,21 +160,20 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     {
         let mut cs_set: std::collections::BTreeSet<X86Reg> = std::collections::BTreeSet::new();
         for loc in alloc.allocation.values() {
-            if let Location::Reg(x86) = loc {
-                if X86Reg::CALLER_SAVED.contains(x86) && X86Reg::ALLOCATABLE.contains(x86) {
+            if let Location::Reg(x86) = loc
+                && X86Reg::CALLER_SAVED.contains(x86) && X86Reg::ALLOCATABLE.contains(x86) {
                     cs_set.insert(*x86);
                 }
-            }
         }
         caller_saved_to_save = cs_set.iter().map(|x86| x86_to_dtal_reg(*x86)).collect();
     }
 
     // Check if function uses alloca (needs extra frame space for caller-saved saves)
-    let has_alloca = func.blocks.iter().any(|b| {
-        b.instructions
-            .iter()
-            .any(|i| matches!(i, DtalInstr::Alloca { .. }))
-    });
+    // let has_alloca = func.blocks.iter().any(|b| {
+    //     b.instructions
+    //         .iter()
+    //         .any(|i| matches!(i, DtalInstr::Alloca { .. }))
+    // });
 
     // Count unique caller-saved registers used (for alloca save slots)
     let caller_save_slots = caller_saved_to_save.len();
@@ -185,7 +184,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     // After push rbp (8) + callee saves (N*8), we need frame_size such that
     // total is 16-byte aligned
     let unaligned = 8 + callee_saved_size + spill_size;
-    let frame_size = if unaligned % 16 == 0 {
+    let frame_size = if unaligned.is_multiple_of(16) {
         spill_size
     } else {
         spill_size + (16 - (unaligned % 16))
@@ -211,15 +210,14 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             let param_regs = PhysicalReg::param_regs();
             let mut param_moves: Vec<(Reg, PhysLoc, DtalType)> = Vec::new();
             for (i, (param_reg, param_ty)) in func.params.iter().enumerate() {
-                if i < param_regs.len() {
-                    if let Reg::Virtual(vreg) = param_reg {
+                if i < param_regs.len()
+                    && let Reg::Virtual(vreg) = param_reg {
                         // Skip dead parameters (not allocated because never used)
                         if let Some(dst_loc) = try_resolve(*vreg, alloc) {
                             let abi_reg = Reg::Physical(param_regs[i]);
                             param_moves.push((abi_reg, dst_loc, param_ty.clone()));
                         }
                     }
-                }
             }
 
             // Detect if any source reg is the same as another move's destination reg.
@@ -238,9 +236,9 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             let mut saved_to_scratch: Option<(Reg, Reg)> = None; // (original_src, scratch)
             for (i, (src, _, _)) in param_moves.iter().enumerate() {
                 for (j, dst_r) in dst_regs.iter().enumerate() {
-                    if j != i {
-                        if let Some(dr) = dst_r {
-                            if *src == *dr && saved_to_scratch.is_none() {
+                    if j != i
+                        && let Some(dr) = dst_r
+                            && *src == *dr && saved_to_scratch.is_none() {
                                 // Save src to scratch before it gets clobbered
                                 instrs.push(DtalInstr::MovReg {
                                     dst: R11,
@@ -249,8 +247,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                                 });
                                 saved_to_scratch = Some((*src, R11));
                             }
-                        }
-                    }
                 }
             }
 

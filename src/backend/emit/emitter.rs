@@ -273,7 +273,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             frame_size,
             callee_saved,
         } => {
-            let regs: Vec<_> = callee_saved.iter().map(|r| emit_reg(r)).collect();
+            let regs: Vec<_> = callee_saved.iter().map(emit_reg).collect();
             writeln!(
                 output,
                 "    .prologue frame={} callee_saved=[{}]",
@@ -284,7 +284,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::Epilogue { callee_saved } => {
-            let regs: Vec<_> = callee_saved.iter().map(|r| emit_reg(r)).collect();
+            let regs: Vec<_> = callee_saved.iter().map(emit_reg).collect();
             writeln!(output, "    .epilogue callee_saved=[{}]", regs.join(", ")).unwrap();
         }
 
