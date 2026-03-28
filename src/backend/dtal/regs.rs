@@ -5,7 +5,7 @@
 use std::fmt;
 
 /// A virtual register (before physical allocation)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VirtualReg(pub u32);
 
 impl fmt::Display for VirtualReg {

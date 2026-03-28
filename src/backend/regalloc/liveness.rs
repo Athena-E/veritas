@@ -297,9 +297,10 @@ impl LivenessAnalysis {
 #[derive(Debug, Default)]
 pub struct InterferenceGraph {
     /// Adjacency list: reg -> set of interfering regs
-    pub edges: HashMap<VirtualReg, HashSet<VirtualReg>>,
+    /// Uses BTreeMap/BTreeSet for deterministic iteration order.
+    pub edges: std::collections::BTreeMap<VirtualReg, std::collections::BTreeSet<VirtualReg>>,
     /// All registers in the graph
-    pub nodes: HashSet<VirtualReg>,
+    pub nodes: std::collections::BTreeSet<VirtualReg>,
 }
 
 impl InterferenceGraph {

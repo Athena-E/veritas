@@ -58,12 +58,17 @@ enum PhysLoc {
     Spill(i32),
 }
 
-fn resolve(vreg: VirtualReg, alloc: &AllocationResult) -> PhysLoc {
+fn try_resolve(vreg: VirtualReg, alloc: &AllocationResult) -> Option<PhysLoc> {
     match alloc.allocation.get(&vreg) {
-        Some(Location::Reg(x86)) => PhysLoc::Reg(x86_to_dtal_reg(*x86)),
-        Some(Location::Stack(offset)) => PhysLoc::Spill(*offset),
-        None => panic!("Unallocated virtual register v{}", vreg.0),
+        Some(Location::Reg(x86)) => Some(PhysLoc::Reg(x86_to_dtal_reg(*x86))),
+        Some(Location::Stack(offset)) => Some(PhysLoc::Spill(*offset)),
+        None => None,
     }
+}
+
+fn resolve(vreg: VirtualReg, alloc: &AllocationResult) -> PhysLoc {
+    try_resolve(vreg, alloc)
+        .unwrap_or_else(|| panic!("Unallocated virtual register v{}", vreg.0))
 }
 
 /// Resolve a Reg (virtual or physical) to a PhysLoc.
@@ -75,9 +80,6 @@ fn resolve_reg(reg: Reg, alloc: &AllocationResult) -> PhysLoc {
 }
 
 /// Emit instructions to load a value into a specific physical register.
-/// If the value is already in that register, emit nothing.
-/// If it's in another register, emit a mov.
-/// If it's spilled, emit a spill_load.
 fn emit_load_to(
     instrs: &mut Vec<DtalInstr>,
     loc: &PhysLoc,
@@ -85,7 +87,7 @@ fn emit_load_to(
     ty: DtalType,
 ) {
     match loc {
-        PhysLoc::Reg(r) if *r == target => {} // already there
+        PhysLoc::Reg(r) if *r == target => {}
         PhysLoc::Reg(r) => {
             instrs.push(DtalInstr::MovReg {
                 dst: target,
@@ -111,7 +113,7 @@ fn emit_store_from(
     ty: DtalType,
 ) {
     match loc {
-        PhysLoc::Reg(r) if *r == src => {} // already there
+        PhysLoc::Reg(r) if *r == src => {}
         PhysLoc::Reg(r) => {
             instrs.push(DtalInstr::MovReg {
                 dst: *r,
@@ -192,16 +194,64 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 callee_saved: callee_saved_regs.clone(),
             });
 
-            // Move parameters from ABI argument registers to allocated locations
+            // Move parameters from ABI argument registers to allocated locations.
+            // Must handle cycles: if param 0 (in rdi) is allocated to rsi, and
+            // param 1 (in rsi) is allocated to rdi, sequential moves would clobber.
+            // Strategy: first move any params whose destination conflicts with
+            // another param's source to scratch (R11), then do the rest.
             let param_regs = PhysicalReg::param_regs();
+            let mut param_moves: Vec<(Reg, PhysLoc, DtalType)> = Vec::new();
             for (i, (param_reg, param_ty)) in func.params.iter().enumerate() {
                 if i < param_regs.len() {
-                    let abi_reg = Reg::Physical(param_regs[i]);
                     if let Reg::Virtual(vreg) = param_reg {
-                        let dst_loc = resolve(*vreg, alloc);
-                        emit_store_from(&mut instrs, abi_reg, &dst_loc, param_ty.clone());
+                        // Skip dead parameters (not allocated because never used)
+                        if let Some(dst_loc) = try_resolve(*vreg, alloc) {
+                            let abi_reg = Reg::Physical(param_regs[i]);
+                            param_moves.push((abi_reg, dst_loc, param_ty.clone()));
+                        }
                     }
                 }
+            }
+
+            // Detect if any source reg is the same as another move's destination reg.
+            // If so, save it to R11 first. Simple approach: move all params to their
+            // allocated location, but if dst is a register that's also a param source,
+            // save that source to R11 first.
+            let dst_regs: Vec<Option<Reg>> = param_moves
+                .iter()
+                .map(|(_, loc, _)| match loc {
+                    PhysLoc::Reg(r) => Some(*r),
+                    PhysLoc::Spill(_) => None,
+                })
+                .collect();
+
+            // Check for conflicts: src_i == dst_j for some j > i
+            let mut saved_to_scratch: Option<(Reg, Reg)> = None; // (original_src, scratch)
+            for (i, (src, _, _)) in param_moves.iter().enumerate() {
+                for (j, dst_r) in dst_regs.iter().enumerate() {
+                    if j != i {
+                        if let Some(dr) = dst_r {
+                            if *src == *dr && saved_to_scratch.is_none() {
+                                // Save src to scratch before it gets clobbered
+                                instrs.push(DtalInstr::MovReg {
+                                    dst: R11,
+                                    src: *src,
+                                    ty: DtalType::Int,
+                                });
+                                saved_to_scratch = Some((*src, R11));
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (src, dst_loc, ty) in &param_moves {
+                let actual_src = if let Some((orig, scratch)) = &saved_to_scratch {
+                    if src == orig { *scratch } else { *src }
+                } else {
+                    *src
+                };
+                emit_store_from(&mut instrs, actual_src, dst_loc, ty.clone());
             }
         }
 
@@ -243,6 +293,15 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     }
 }
 
+/// Check if a destination register is dead (not allocated).
+fn is_dead_dst(reg: &Reg, alloc: &AllocationResult) -> bool {
+    if let Reg::Virtual(vreg) = reg {
+        try_resolve(*vreg, alloc).is_none()
+    } else {
+        false
+    }
+}
+
 /// Translate a single virtual-register instruction to physical-register instructions.
 fn allocate_instruction(
     instrs: &mut Vec<DtalInstr>,
@@ -250,6 +309,24 @@ fn allocate_instruction(
     alloc: &AllocationResult,
     func: &DtalFunction,
 ) {
+    // Skip instructions with dead destinations (register not allocated = never used)
+    match instr {
+        DtalInstr::MovImm { dst, .. }
+        | DtalInstr::MovReg { dst, .. }
+        | DtalInstr::BinOp { dst, .. }
+        | DtalInstr::AddImm { dst, .. }
+        | DtalInstr::Load { dst, .. }
+        | DtalInstr::SetCC { dst, .. }
+        | DtalInstr::Not { dst, .. }
+        | DtalInstr::Pop { dst, .. }
+        | DtalInstr::Alloca { dst, .. } => {
+            if is_dead_dst(dst, alloc) {
+                return;
+            }
+        }
+        _ => {}
+    }
+
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
             let dst_loc = resolve_reg(*dst, alloc);
@@ -413,8 +490,18 @@ fn allocate_instruction(
             let base_loc = resolve_reg(*base, alloc);
             let offset_loc = resolve_reg(*offset, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
-            emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-            emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            // Must load base and offset without clobbering each other.
+            // If offset is in RAX, load it to R11 first; if base is in R11, load it to RAX first.
+            let offset_in_rax = matches!(&offset_loc, PhysLoc::Reg(r) if *r == RAX);
+            let base_in_r11 = matches!(&base_loc, PhysLoc::Reg(r) if *r == R11);
+            if offset_in_rax || base_in_r11 {
+                // Load offset first (to R11), then base (to RAX)
+                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
+            } else {
+                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
+                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            }
             instrs.push(DtalInstr::Load {
                 dst: RAX,
                 base: RAX,
@@ -428,12 +515,11 @@ fn allocate_instruction(
             let base_loc = resolve_reg(*base, alloc);
             let offset_loc = resolve_reg(*offset, alloc);
             let src_loc = resolve_reg(*src, alloc);
-            // Need three distinct registers: base in rax, offset in r11, src in... rdx?
-            // Actually we need to be careful. Let's use rax for base, r11 for offset.
-            emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-            emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
-            // For src, if it's already in a physical reg that's not rax/r11, use it directly.
-            // Otherwise load to rdx as a third scratch.
+            // Need base in RAX, offset in R11, src in a third reg.
+            // Must avoid clobbering: load src to RDX first (safest), then
+            // base/offset with conflict detection.
+            //
+            // Step 1: Get src into a safe register (RDX unless already safe).
             let src_reg = match &src_loc {
                 PhysLoc::Reg(r) if *r != RAX && *r != R11 => *r,
                 _ => {
@@ -441,6 +527,16 @@ fn allocate_instruction(
                     RDX
                 }
             };
+            // Step 2: Load base and offset without clobbering each other or src.
+            let offset_in_rax = matches!(&offset_loc, PhysLoc::Reg(r) if *r == RAX);
+            let base_in_r11 = matches!(&base_loc, PhysLoc::Reg(r) if *r == R11);
+            if offset_in_rax || base_in_r11 {
+                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
+            } else {
+                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
+                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            }
             instrs.push(DtalInstr::Store {
                 base: RAX,
                 offset: R11,
@@ -579,5 +675,158 @@ fn allocate_instruction(
         | DtalInstr::Epilogue { .. } => {
             unreachable!("Physical instructions in virtual DTAL input")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline;
+    use crate::backend::emit::emit_program;
+
+    #[test]
+    fn test_physalloc_simple() {
+        let source = r#"
+fn main() -> int {
+    let x: int = 42;
+    let y: int = x + 1;
+    y
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let text = emit_program(&physical);
+        println!("=== Physical DTAL ===\n{}", text);
+    }
+
+    #[test]
+    fn test_physalloc_with_call() {
+        let source = r#"
+fn add(a: int, b: int) -> int {
+    a + b
+}
+fn main() -> int {
+    let x: int = add(3, 4);
+    x
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let text = emit_program(&physical);
+        println!("=== Physical DTAL (call) ===\n{}", text);
+    }
+
+    #[test]
+    fn test_physalloc_division() {
+        let source = r#"
+fn main() -> int {
+    let x: int = 42 / 10;
+    let y: int = 42 % 10;
+    x + y
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let text = emit_program(&physical);
+        println!("=== Physical DTAL (div/mod) ===\n{}", text);
+    }
+
+    /// End-to-end test: compile → physalloc → direct_encode → ELF → execute
+    #[test]
+    fn test_physalloc_e2e_simple() {
+        use crate::backend::direct_encode::encode_physical_dtal;
+        use crate::backend::elf::generate_elf;
+
+        let source = r#"
+fn main() -> int {
+    let x: int = 40;
+    let y: int = 2;
+    x + y
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let encoded = encode_physical_dtal(&physical);
+        let elf = generate_elf(&encoded, "main");
+
+        // Write to temp file and execute
+        let path = "/tmp/veritas_physalloc_test";
+        std::fs::write(path, &elf).expect("write elf");
+        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("chmod");
+        let status = std::process::Command::new(path)
+            .status()
+            .expect("execute");
+        assert_eq!(
+            status.code(),
+            Some(42),
+            "Expected exit code 42 (40+2), got {:?}",
+            status.code()
+        );
+    }
+
+    #[test]
+    fn test_physalloc_e2e_function_call() {
+        use crate::backend::direct_encode::encode_physical_dtal;
+        use crate::backend::elf::generate_elf;
+
+        let source = r#"
+fn add(a: int, b: int) -> int {
+    a + b
+}
+fn main() -> int {
+    add(3, 4)
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let encoded = encode_physical_dtal(&physical);
+        let elf = generate_elf(&encoded, "main");
+
+        let path = "/tmp/veritas_physalloc_call_test";
+        std::fs::write(path, &elf).expect("write elf");
+        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("chmod");
+        let status = std::process::Command::new(path)
+            .status()
+            .expect("execute");
+        assert_eq!(
+            status.code(),
+            Some(7),
+            "Expected exit code 7 (3+4), got {:?}",
+            status.code()
+        );
+    }
+
+    #[test]
+    fn test_physalloc_e2e_division() {
+        use crate::backend::direct_encode::encode_physical_dtal;
+        use crate::backend::elf::generate_elf;
+
+        let source = r#"
+fn main() -> int {
+    let x: int = 42 / 10;
+    let y: int = 42 % 10;
+    x + y
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let encoded = encode_physical_dtal(&physical);
+        let elf = generate_elf(&encoded, "main");
+
+        let path = "/tmp/veritas_physalloc_div_test";
+        std::fs::write(path, &elf).expect("write elf");
+        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("chmod");
+        let status = std::process::Command::new(path)
+            .status()
+            .expect("execute");
+        assert_eq!(
+            status.code(),
+            Some(6),
+            "Expected exit code 6 (4+2), got {:?}",
+            status.code()
+        );
     }
 }
