@@ -57,6 +57,8 @@ fn main() {
         eprintln!("                       regalloc -> physical DTAL -> verify -> encode");
         eprintln!("                       Register allocation is untrusted; only the");
         eprintln!("                       trivial encoder (~200 LOC) is in the TCB");
+        eprintln!("  --target-bare-metal  Generate Multiboot ELF for bare-metal/QEMU:");
+        eprintln!("                       qemu-system-x86_64 -kernel <binary> -serial stdio");
         eprintln!();
         eprintln!("Optimisation:");
         eprintln!("  -O, --optimize     Enable all optimisations");
@@ -117,6 +119,7 @@ fn main() {
     let verify_only = args.iter().any(|a| a == "--verify-only");
     let native = args.iter().any(|a| a == "--native");
     let physical = args.iter().any(|a| a == "--physical");
+    let bare_metal = args.iter().any(|a| a == "--target-bare-metal");
     let output_file = args
         .iter()
         .position(|a| a == "-o")
@@ -372,8 +375,12 @@ fn main() {
                             .unwrap_or("main")
                     };
 
-                    // Generate ELF
-                    let elf = generate_elf(&encoded, entry);
+                    // Generate ELF (Linux or bare-metal)
+                    let elf = if bare_metal {
+                        veritas::backend::elf::generate_baremetal_elf(&encoded, entry)
+                    } else {
+                        generate_elf(&encoded, entry)
+                    };
 
                     // Write executable
                     if let Err(e) = fs::write(out_path, &elf) {
