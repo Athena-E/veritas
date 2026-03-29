@@ -440,12 +440,29 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
         })
         .collect();
 
+    // Remap precondition/postcondition variable names from virtual param names
+    // to ABI parameter register names (R0, R1, ...). The preconditions reference
+    // the callee's virtual param registers; we map them to the ABI registers
+    // because the verifier's call-site check substitutes callee param names
+    // with ABI param names.
+    let mut precond_map = std::collections::HashMap::new();
+    let param_regs_for_precond = PhysicalReg::param_regs();
+    for (i, (param_reg, _)) in func.params.iter().enumerate() {
+        if i < param_regs_for_precond.len() {
+            let vname = format!("{}", param_reg);
+            let pname = format!("{}", Reg::Physical(param_regs_for_precond[i]));
+            precond_map.insert(vname, pname);
+        }
+    }
+    let phys_precond = func.precondition.as_ref().map(|c| remap_constraint(c, &precond_map));
+    let phys_postcond = func.postcondition.as_ref().map(|c| remap_constraint(c, &precond_map));
+
     DtalFunction {
         name: func.name.clone(),
         params: phys_params,
         return_type: func.return_type.clone(),
-        precondition: func.precondition.clone(),
-        postcondition: func.postcondition.clone(),
+        precondition: phys_precond,
+        postcondition: phys_postcond,
         blocks,
     }
 }

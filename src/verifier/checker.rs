@@ -721,8 +721,13 @@ fn verify_constraint_assert(
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
-    // Check if constraint is provable from current context (syntactic fast-path + Z3)
-    if !is_constraint_provable(constraint, &state.constraints) {
+    // Check if constraint is provable from current context (syntactic fast-path + Z3).
+    // Also check proven_assertions — these are frontend-verified invariants that
+    // survive across join points and don't need to be re-proven each iteration.
+    let mut full_context = state.constraints.clone();
+    full_context.extend(state.proven_assertions.iter().cloned());
+
+    if !is_constraint_provable(constraint, &full_context) {
         return Err(VerifyError::UnprovableConstraint {
             constraint: constraint.clone(),
             context: state.constraints.clone(),
