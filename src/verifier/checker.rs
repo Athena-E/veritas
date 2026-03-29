@@ -255,9 +255,30 @@ pub fn verify_instruction(
             state.register_types.insert(*dst, ty.clone());
         }
 
-        DtalInstr::Prologue { .. } | DtalInstr::Epilogue { .. } => {
-            // Structural markers — verified by checking callee-saved consistency
-            // at function level, not per-instruction
+        DtalInstr::Prologue { .. } => {
+            // In physical DTAL, the prologue marks function entry. All physical
+            // registers are "available" at this point (they hold parameter values,
+            // caller-saved values, or undefined values). Define them all as Int
+            // to prevent false "used before definition" errors.
+            //
+            // TypeAnnotation instructions AFTER the Prologue will refine specific
+            // registers to their correct types (e.g., array params). Since
+            // TypeAnnotation verification accepts refinement from a supertype,
+            // defining as Int first and then narrowing via annotation is sound.
+            use crate::backend::dtal::regs::PhysicalReg;
+            for preg in &[
+                PhysicalReg::LR, PhysicalReg::R0, PhysicalReg::R1,
+                PhysicalReg::R2, PhysicalReg::R3, PhysicalReg::R4,
+                PhysicalReg::R5, PhysicalReg::R6, PhysicalReg::R7,
+                PhysicalReg::R8, PhysicalReg::R9, PhysicalReg::R10,
+                PhysicalReg::R11, PhysicalReg::R12,
+            ] {
+                state.register_types.insert(Reg::Physical(*preg), DtalType::Int);
+            }
+        }
+
+        DtalInstr::Epilogue { .. } => {
+            // Structural marker
         }
     }
 
@@ -668,7 +689,14 @@ fn verify_type_annotation(
                 DtalType::Int | DtalType::SingletonInt(_) | DtalType::ExistentialInt { .. }
             );
 
+        // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
+        // TypeAnnotation from physalloc refines them to their actual types.
+        // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
+        let is_prologue_refinement = matches!(existing_ty, DtalType::Int)
+            && matches!(reg, Reg::Physical(_));
+
         if !is_existential_narrowing
+            && !is_prologue_refinement
             && !types_compatible_with_constraints(existing_ty, ty, &state.constraints)
         {
             return Err(VerifyError::TypeMismatch {
