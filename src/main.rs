@@ -53,10 +53,8 @@ fn main() {
         eprintln!("  --verify-dtal      Verify a standalone .dtal file");
         eprintln!();
         eprintln!("Code generation pipeline:");
-        eprintln!("  --physical         Use verify-after-regalloc pipeline:");
-        eprintln!("                       regalloc -> physical DTAL -> verify -> encode");
-        eprintln!("                       Register allocation is untrusted; only the");
-        eprintln!("                       trivial encoder (~200 LOC) is in the TCB");
+        eprintln!("  --legacy-pipeline  Use the old trusted-lowering pipeline instead of");
+        eprintln!("                       the default verify-after-regalloc pipeline");
         eprintln!("  --target-bare-metal  Generate Multiboot ELF for bare-metal/QEMU:");
         eprintln!("                       qemu-system-x86_64 -kernel <binary> -serial stdio");
         eprintln!();
@@ -118,7 +116,7 @@ fn main() {
     let verify = args.iter().any(|a| a == "--verify" || a == "--verify-only");
     let verify_only = args.iter().any(|a| a == "--verify-only");
     let native = args.iter().any(|a| a == "--native");
-    let physical = args.iter().any(|a| a == "--physical");
+    let physical = !args.iter().any(|a| a == "--legacy-pipeline");
     let bare_metal = args.iter().any(|a| a == "--target-bare-metal");
     let output_file = args
         .iter()
