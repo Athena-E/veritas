@@ -24,6 +24,15 @@ fn serial_print_positive(n: int) requires n > 0 {
     serial_write(n % 10 + 48);
 }
 
+// Print a non-negative integer followed by newline.
+fn serial_print_nonneg(n: int) requires n >= 0 {
+    if n > 0 {
+        serial_print_positive(n);
+    } else {
+        serial_write(48);
+    }
+}
+
 fn serial_print_int(n: int) {
     if n < 0 {
         serial_write(45);
@@ -32,11 +41,7 @@ fn serial_print_int(n: int) {
             serial_print_positive(pos);
         }
     } else {
-        if n == 0 {
-            serial_write(48);
-        } else {
-            serial_print_positive(n);
-        }
+        serial_print_nonneg(n);
     }
     serial_write(10);
 }

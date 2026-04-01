@@ -227,7 +227,33 @@ fn compute_edge_states(
                     }
                 }
             }
-            DtalInstr::Jmp { .. } => {
+            DtalInstr::Jmp { target } => {
+                // If this Jmp follows a Branch in the same block,
+                // it's the fall-through path. Add the negated branch
+                // constraint to the jump target's edge state.
+                if !has_jmp && !has_ret {
+                    // Check if a Branch was seen earlier in this block
+                    let had_branch = block.instructions.iter().any(|i| matches!(i, DtalInstr::Branch { .. }));
+                    if had_branch {
+                        // Find the branch's condition and negate it
+                        for prev_instr in &block.instructions {
+                            if let DtalInstr::Branch { cond, .. } = prev_instr {
+                                let neg_cond = negate_cmp_op(*cond);
+                                if let Some(neg_constraint) =
+                                    constraint_from_cmp_op(neg_cond, &exit_state.last_cmp)
+                                {
+                                    let mut jmp_state = exit_state.clone();
+                                    jmp_state.constraints.push(neg_constraint);
+                                    edge_states.insert(
+                                        (block.label.clone(), target.clone()),
+                                        jmp_state,
+                                    );
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
                 has_jmp = true;
             }
             DtalInstr::Ret => {
@@ -604,7 +630,21 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::SpillLoad { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
         }
-        DtalInstr::Prologue { .. } | DtalInstr::Epilogue { .. } => {}
+        DtalInstr::Prologue { .. } => {
+            // Mirror the checker's Prologue handling: define all physical
+            // registers as Int so they're available in successor blocks.
+            use crate::backend::dtal::regs::PhysicalReg;
+            for preg in &[
+                PhysicalReg::LR, PhysicalReg::R0, PhysicalReg::R1,
+                PhysicalReg::R2, PhysicalReg::R3, PhysicalReg::R4,
+                PhysicalReg::R5, PhysicalReg::R6, PhysicalReg::R7,
+                PhysicalReg::R8, PhysicalReg::R9, PhysicalReg::R10,
+                PhysicalReg::R11, PhysicalReg::R12,
+            ] {
+                state.register_types.insert(Reg::Physical(*preg), DtalType::Int);
+            }
+        }
+        DtalInstr::Epilogue { .. } => {}
     }
 }
 
