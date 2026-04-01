@@ -4,7 +4,7 @@
 
 #![allow(clippy::result_large_err)]
 
-use crate::backend::dtal::constraints::IndexExpr;
+use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
@@ -461,6 +461,11 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .register_types
                 .insert(*dst, DtalType::SingletonInt(IndexExpr::Const(*imm)));
+            // Add equality constraint so branch conditions can reference this value
+            let reg_expr = crate::verifier::checker::reg_to_index_expr(dst);
+            state
+                .constraints
+                .push(Constraint::Eq(reg_expr, IndexExpr::Const(*imm)));
         }
         DtalInstr::MovReg { dst, src, .. } => {
             let ty = state

@@ -627,16 +627,39 @@ fn allocate_instruction(
         DtalInstr::Cmp { lhs, rhs } => {
             let lhs_loc = resolve_reg(*lhs, alloc);
             let rhs_loc = resolve_reg(*rhs, alloc);
-            emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
-            emit_load_to(instrs, &rhs_loc, R11, DtalType::Int);
-            instrs.push(DtalInstr::Cmp { lhs: RAX, rhs: R11 });
+            // Use the actual allocated registers when possible, so branch
+            // constraints reference the right registers (not scratch).
+            let lhs_reg = match &lhs_loc {
+                PhysLoc::Reg(r) => *r,
+                PhysLoc::Spill(_) => {
+                    emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
+                    RAX
+                }
+            };
+            let rhs_reg = match &rhs_loc {
+                PhysLoc::Reg(r) if *r != lhs_reg => *r,
+                _ => {
+                    emit_load_to(instrs, &rhs_loc, R11, DtalType::Int);
+                    R11
+                }
+            };
+            instrs.push(DtalInstr::Cmp {
+                lhs: lhs_reg,
+                rhs: rhs_reg,
+            });
         }
 
         DtalInstr::CmpImm { lhs, imm } => {
             let lhs_loc = resolve_reg(*lhs, alloc);
-            emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
+            let lhs_reg = match &lhs_loc {
+                PhysLoc::Reg(r) => *r,
+                PhysLoc::Spill(_) => {
+                    emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
+                    RAX
+                }
+            };
             instrs.push(DtalInstr::CmpImm {
-                lhs: RAX,
+                lhs: lhs_reg,
                 imm: *imm,
             });
         }
