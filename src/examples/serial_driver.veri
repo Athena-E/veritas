@@ -1,5 +1,5 @@
 // Serial port driver for UART 16550 (COM1 at 0x3F8)
-// Verified Veritas code — DTAL verifier checks all I/O operations.
+// Fully verified Veritas code — DTAL verifier checks all I/O operations.
 
 fn serial_init() {
     port_out(0x3F8 + 1, 0);
@@ -16,18 +16,36 @@ fn serial_write(c: int) {
     port_out(0x3F8, c);
 }
 
+// Print digits of a positive number via recursion (most significant first).
+fn serial_print_positive(n: int) requires n > 0 {
+    if n >= 10 {
+        serial_print_positive(n / 10);
+    }
+    serial_write(n % 10 + 48);
+}
+
 fn serial_print_int(n: int) {
-    // Use the trusted print_int runtime for now.
-    // A fully verified version requires more sophisticated invariants
-    // for the digit reversal loop.
-    print_int(n);
+    if n < 0 {
+        serial_write(45);
+        let pos: int = 0 - n;
+        if pos > 0 {
+            serial_print_positive(pos);
+        }
+    } else {
+        if n == 0 {
+            serial_write(48);
+        } else {
+            serial_print_positive(n);
+        }
+    }
+    serial_write(10);
 }
 
 fn main() -> int {
     serial_init();
-    serial_write(72);
-    serial_write(105);
-    serial_write(10);
     serial_print_int(42);
+    serial_print_int(0);
+    serial_print_int(-7);
+    serial_print_int(12345);
     0
 }

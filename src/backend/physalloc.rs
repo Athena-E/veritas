@@ -414,6 +414,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 func,
                 &callee_saved_regs,
                 &caller_saved_to_save,
+                callee_saved_regs.len(),
             );
         }
 
@@ -484,6 +485,7 @@ fn allocate_instruction(
     func: &DtalFunction,
     callee_saved: &[Reg],
     caller_saved: &[Reg],
+    callee_saved_count: usize,
 ) {
     // Skip instructions with dead destinations (register not allocated = never used)
     match instr {
@@ -780,7 +782,7 @@ fn allocate_instruction(
             // Save caller-saved to rbp-relative spill slots (safe with alloca).
             // These slots are in the frame area allocated by the prologue.
             for (i, &reg) in caller_saved.iter().enumerate() {
-                let offset = -(((alloc.spill_slots + 1 + i) * 8) as i32);
+                let offset = -(((callee_saved_count + alloc.spill_slots + 1 + i) * 8) as i32);
                 instrs.push(DtalInstr::SpillStore {
                     src: reg,
                     offset,
@@ -827,7 +829,7 @@ fn allocate_instruction(
                 if reg == r0_reg {
                     continue; // r0 now holds return value — don't overwrite
                 }
-                let offset = -(((alloc.spill_slots + 1 + i) * 8) as i32);
+                let offset = -(((callee_saved_count + alloc.spill_slots + 1 + i) * 8) as i32);
                 instrs.push(DtalInstr::SpillLoad {
                     dst: reg,
                     offset,

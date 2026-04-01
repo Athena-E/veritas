@@ -215,9 +215,12 @@ fn main() {
                 }
             }
 
-            // Verify DTAL if requested
+            // Verify DTAL if requested.
+            // When using the physical pipeline (default), skip the virtual DTAL
+            // verifier — the physical verifier is strictly stronger and runs
+            // after register allocation.
             let mut verify_elapsed = std::time::Duration::ZERO;
-            if verify {
+            if verify && !physical {
                 if verbose {
                     println!("\n[7] Verifying DTAL...");
                 }
