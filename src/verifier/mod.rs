@@ -1849,4 +1849,356 @@ mod tests {
         // v2 is Bool, pushed and popped → r0 is Bool, matching return type
         assert!(verify_dtal(&program).is_ok());
     }
+
+    // ========================================================================
+    // Physical DTAL tests
+    //
+    // These test the verifier with physically-allocated code: Prologue/Epilogue,
+    // physical registers only, Cqo/Idiv for division, SpillStore/SpillLoad,
+    // and return value in LR (rax) instead of R0 (rdi).
+    // ========================================================================
+
+    fn lr() -> Reg {
+        Reg::Physical(PhysicalReg::LR) // rax
+    }
+    fn r7() -> Reg {
+        Reg::Physical(PhysicalReg::R7) // r11 (scratch)
+    }
+
+    #[test]
+    fn test_physical_simple_return() {
+        // Physical DTAL: Prologue, mov lr, 42, Epilogue, ret
+        // Return type check should use LR (not R0)
+        let program = make_program(vec![make_func(
+            "main",
+            vec![],
+            DtalType::SingletonInt(IndexExpr::Const(42)),
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 42,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(42)),
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    #[test]
+    fn test_physical_return_type_mismatch() {
+        // LR has int(42) but return type is Bool — should fail
+        let program = make_program(vec![make_func(
+            "bad",
+            vec![],
+            DtalType::Bool,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 42,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(42)),
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        let result = verify_dtal(&program);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            VerifyError::ReturnTypeMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn test_physical_r0_not_checked_for_return() {
+        // In physical DTAL, R0 may hold a different type than LR.
+        // R0 = array (from alloca), LR = int (return value).
+        // Return type is int — should pass (checks LR, not R0).
+        let program = make_program(vec![make_func(
+            "main",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    // R0 gets array type (simulating alloca result)
+                    DtalInstr::Alloca {
+                        dst: r0(),
+                        size: 24,
+                        ty: DtalType::Array {
+                            element_type: Arc::new(DtalType::Int),
+                            size: IndexExpr::Const(3),
+                        },
+                    },
+                    // LR gets int (return value)
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 7,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(7)),
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Physical return should check LR, not R0"
+        );
+    }
+
+    #[test]
+    fn test_physical_cqo_idiv() {
+        // cqo requires LR defined; idiv requires LR + R2 + src defined.
+        // After idiv, LR = quotient, R2 = remainder.
+        let program = make_program(vec![make_func(
+            "div",
+            vec![(r0(), DtalType::Int)],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::MovImm {
+                        dst: r7(),
+                        imm: 10,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(10)),
+                    },
+                    DtalInstr::MovReg {
+                        dst: lr(),
+                        src: r0(),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Cqo,
+                    DtalInstr::Idiv { src: r7() },
+                    // LR now holds quotient (int), R2 holds remainder
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Cqo + Idiv should verify correctly"
+        );
+    }
+
+    #[test]
+    fn test_physical_idiv_without_cqo_fails() {
+        // Idiv requires R2 (rdx) to be defined — without Cqo, R2 is
+        // only defined by the Prologue (as Int), which is acceptable.
+        // But if we DON'T have a Prologue, R2 is undefined → should fail.
+        let program = make_program(vec![make_func(
+            "bad",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    // No Prologue — scratch registers not defined
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 42,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::MovImm {
+                        dst: r7(),
+                        imm: 10,
+                        ty: DtalType::Int,
+                    },
+                    // R2 not defined — idiv should fail
+                    DtalInstr::Idiv { src: r7() },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: lr(),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        let result = verify_dtal(&program);
+        assert!(
+            result.is_err(),
+            "Idiv without R2 defined should fail"
+        );
+    }
+
+    #[test]
+    fn test_physical_spill_store_load() {
+        // SpillStore saves a value, SpillLoad restores it.
+        // Type must be compatible.
+        let program = make_program(vec![make_func(
+            "spill",
+            vec![(r0(), DtalType::Int)],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 8,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::SpillStore {
+                        src: r0(),
+                        offset: -8,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::SpillLoad {
+                        dst: lr(),
+                        offset: -8,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Spill store/load should verify"
+        );
+    }
+
+    #[test]
+    fn test_physical_call_sets_lr() {
+        // After call, return value is in LR. Subsequent mov r0, lr
+        // should propagate the type.
+        let callee = make_func(
+            "get_value",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 99,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(99)),
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        );
+        let caller = make_func(
+            "main",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Call {
+                        target: "get_value".to_string(),
+                        return_ty: DtalType::Int,
+                    },
+                    // Return value is in LR; move to r0 for subsequent use
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: lr(),
+                        ty: DtalType::Int,
+                    },
+                    // Return via LR
+                    DtalInstr::MovReg {
+                        dst: lr(),
+                        src: r0(),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        );
+        let program = make_program(vec![callee, caller]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Physical call should set LR to return type"
+        );
+    }
+
+    #[test]
+    fn test_physical_prologue_defines_scratch_regs() {
+        // After Prologue, scratch registers (LR, R7, R2) should be
+        // defined as Int, allowing their use without prior assignment.
+        let program = make_program(vec![make_func(
+            "main",
+            vec![],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 0,
+                        callee_saved: vec![],
+                    },
+                    // Use LR immediately — should be defined by Prologue
+                    DtalInstr::MovImm {
+                        dst: r7(),
+                        imm: 10,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::BinOp {
+                        op: crate::backend::dtal::instr::BinaryOp::Add,
+                        dst: lr(),
+                        lhs: lr(),
+                        rhs: r7(),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Prologue should define scratch registers"
+        );
+    }
 }
