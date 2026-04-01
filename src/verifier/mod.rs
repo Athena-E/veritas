@@ -265,24 +265,37 @@ fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyErr
     use crate::backend::dtal::regs::{PhysicalReg, Reg};
     use crate::backend::dtal::types::DtalType;
 
-    // Unit-returning functions don't use r0 for the return value.
-    // r0 may contain a stale type from a prior call instruction.
+    // Check return type.
+    // Virtual DTAL: return value in R0 (rdi).
+    // Physical DTAL: return value in LR (rax).
+    // Detect convention: physical DTAL has Prologue instructions.
     if func.return_type == DtalType::Unit {
-        // Skip r0 check for unit returns — no value to verify
+        // No return value to verify
     } else {
-        let return_reg = Reg::Physical(PhysicalReg::R0);
-        if let Some(actual_type) = state.register_types.get(&return_reg)
-            && !types_compatible_with_constraints(
+        let is_physical = func.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i, DtalInstr::Prologue { .. }))
+        });
+
+        let return_reg = if is_physical {
+            Reg::Physical(PhysicalReg::LR)
+        } else {
+            Reg::Physical(PhysicalReg::R0)
+        };
+
+        if let Some(actual_type) = state.register_types.get(&return_reg) {
+            if !types_compatible_with_constraints(
                 actual_type,
                 &func.return_type,
                 &state.constraints,
-            )
-        {
-            return Err(VerifyError::ReturnTypeMismatch {
-                function: func.name.clone(),
-                expected: func.return_type.clone(),
-                actual: actual_type.clone(),
-            });
+            ) {
+                return Err(VerifyError::ReturnTypeMismatch {
+                    function: func.name.clone(),
+                    expected: func.return_type.clone(),
+                    actual: actual_type.clone(),
+                });
+            }
         }
     }
 
@@ -534,6 +547,11 @@ mod tests {
                         imm: 5,
                         ty: DtalType::SingletonInt(IndexExpr::Const(5)),
                     },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::SingletonInt(IndexExpr::Const(5)),
+                    },
                     DtalInstr::Ret,
                 ],
             )],
@@ -634,6 +652,11 @@ mod tests {
                             IndexExpr::Const(0),
                         ),
                     },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::Int,
+                    },
                     DtalInstr::Ret,
                 ],
             )],
@@ -686,6 +709,11 @@ mod tests {
                             IndexExpr::Var("v0".to_string()),
                             IndexExpr::Const(3),
                         ),
+                    },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::Int,
                     },
                     DtalInstr::Ret,
                 ],
@@ -862,6 +890,11 @@ mod tests {
                         reg: v(0),
                         ty: DtalType::Int,
                     },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::Int,
+                    },
                     DtalInstr::Ret,
                 ],
             )],
@@ -880,6 +913,11 @@ mod tests {
                 vec![
                     DtalInstr::TypeAnnotation {
                         reg: v(0),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(0),
                         ty: DtalType::Int,
                     },
                     DtalInstr::Ret,

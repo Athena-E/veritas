@@ -175,9 +175,21 @@ pub fn verify_instruction(
                 });
             };
 
+            // Set return type in both R0 and LR:
+            // - Virtual DTAL reads the return value from R0 (`mov vN, r0`)
+            // - Physical DTAL reads it from LR (`mov r0, lr`)
+            //
+            // Setting both is safe because:
+            // - In virtual DTAL, R0 is the designated return register
+            // - In physical DTAL, R0 (rdi) is caller-saved and the
+            //   call-clobber-aware allocator guarantees no live value
+            //   is in a caller-saved register across a call
             state
                 .register_types
-                .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty);
+                .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty.clone());
+            state
+                .register_types
+                .insert(Reg::Physical(PhysicalReg::LR), derived_return_ty);
         }
 
         DtalInstr::Branch { cond, .. } => {
