@@ -104,6 +104,10 @@ pub enum BinaryOp {
     Div,
     Mod,
     BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
     And,
     Or,
 }
@@ -117,6 +121,10 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Div => write!(f, "div"),
             BinaryOp::Mod => write!(f, "mod"),
             BinaryOp::BitAnd => write!(f, "bitand"),
+            BinaryOp::BitOr => write!(f, "bitor"),
+            BinaryOp::BitXor => write!(f, "bitxor"),
+            BinaryOp::Shl => write!(f, "shl"),
+            BinaryOp::Shr => write!(f, "shr"),
             BinaryOp::And => write!(f, "and"),
             BinaryOp::Or => write!(f, "or"),
         }

@@ -198,10 +198,46 @@ fn lower_binop<'src>(
         TirBinaryOp::Gt => lower_comparison(instrs, dst, lhs, rhs, "gt"),
         TirBinaryOp::Ge => lower_comparison(instrs, dst, lhs, rhs, "ge"),
 
-        // Bitwise AND (integer operands, integer result)
+        // Bitwise operations (integer operands, integer result)
         TirBinaryOp::BitAnd => {
             instrs.push(DtalInstr::BinOp {
                 op: DtalBinaryOp::BitAnd,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: dtal_ty,
+            });
+        }
+        TirBinaryOp::BitOr => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::BitOr,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: dtal_ty,
+            });
+        }
+        TirBinaryOp::BitXor => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::BitXor,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: dtal_ty,
+            });
+        }
+        TirBinaryOp::Shl => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::Shl,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: dtal_ty,
+            });
+        }
+        TirBinaryOp::Shr => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::Shr,
                 dst: Reg::Virtual(dst),
                 lhs: Reg::Virtual(lhs),
                 rhs: Reg::Virtual(rhs),

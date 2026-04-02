@@ -518,7 +518,8 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
 
             let derived_ty = match op {
                 BinaryOp::And | BinaryOp::Or => DtalType::Bool,
-                BinaryOp::BitAnd => DtalType::Int, // Bitwise ops widen to Int
+                BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
+                | BinaryOp::Shl | BinaryOp::Shr => DtalType::Int,
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     let lhs_idx = extract_index(&lhs_ty, lhs);
                     let rhs_idx = extract_index(&rhs_ty, rhs);

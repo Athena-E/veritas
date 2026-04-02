@@ -193,6 +193,7 @@ impl Encoder {
             X86Instr::IdivR { src: _ } => 3, // REX.W + 0xF7 + ModR/M (REX.B comes free with REX.W)
 
             X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
+            X86Instr::ShlCl { .. } | X86Instr::ShrCl { .. } => 3, // REX.W + D3 + ModR/M
 
             X86Instr::SetCC { dst, .. } => {
                 // setcc r8 (3-4 bytes) + movzx r32, r8 (3-4 bytes)
@@ -519,6 +520,16 @@ impl Encoder {
             X86Instr::Syscall => {
                 self.emit_byte(0x0F);
                 self.emit_byte(0x05);
+            }
+
+            X86Instr::ShlCl { dst } => {
+                // REX.W + D3 /4 (SHL r/m64, CL)
+                self.encode_unary(0xD3, 4, *dst);
+            }
+
+            X86Instr::ShrCl { dst } => {
+                // REX.W + D3 /5 (SHR r/m64, CL)
+                self.encode_unary(0xD3, 5, *dst);
             }
 
             X86Instr::InAlDx => {

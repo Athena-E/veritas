@@ -646,6 +646,20 @@ fn allocate_instruction(
                     let result = if *op == BinaryOp::Mod { RDX } else { RAX };
                     emit_store_from(instrs, result, &dst_loc, ty.clone());
                 }
+                BinaryOp::Shl | BinaryOp::Shr => {
+                    // x86 shifts require count in CL (low byte of RCX/R3)
+                    let r3 = Reg::Physical(PhysicalReg::R3);
+                    emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
+                    emit_load_to(instrs, &rhs_loc, r3, DtalType::Int);
+                    instrs.push(DtalInstr::BinOp {
+                        op: *op,
+                        dst: RAX,
+                        lhs: RAX,
+                        rhs: r3,
+                        ty: ty.clone(),
+                    });
+                    emit_store_from(instrs, RAX, &dst_loc, ty.clone());
+                }
                 _ => {
                     // General case: lhs → rax, operate with rhs, store result
                     emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);

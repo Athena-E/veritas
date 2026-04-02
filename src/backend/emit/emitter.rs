@@ -329,6 +329,10 @@ fn emit_binop(op: &BinaryOp) -> &'static str {
         BinaryOp::Div => "div",
         BinaryOp::Mod => "mod",
         BinaryOp::BitAnd => "bitand",
+        BinaryOp::BitOr => "bitor",
+        BinaryOp::BitXor => "bitxor",
+        BinaryOp::Shl => "shl",
+        BinaryOp::Shr => "shr",
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
     }

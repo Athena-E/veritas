@@ -31,6 +31,8 @@ pub fn lexer<'src>()
         just("!="),
         just("<="),
         just(">="),
+        just("<<"),
+        just(">>"),
         just("&&"),
         just("||"),
         just("->"),
@@ -45,6 +47,7 @@ pub fn lexer<'src>()
         just("="),
         just("&"),
         just("|"),
+        just("^"),
         just("!"),
     ))
     .map(Token::Op);
