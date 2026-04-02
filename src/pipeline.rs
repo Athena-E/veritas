@@ -271,7 +271,11 @@ pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, Com
 
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
-            errors.iter().map(|e| format!("{:?}", e)).collect::<Vec<_>>().join("\n"),
+            errors
+                .iter()
+                .map(|e| format!("{:?}", e))
+                .collect::<Vec<_>>()
+                .join("\n"),
         )
     })?;
     let token_strings: Vec<(String, String)> = raw_tokens
@@ -285,7 +289,11 @@ pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, Com
         .into_result()
         .map_err(|errors| {
             CompileError::ParseError(
-                errors.iter().map(|e| format!("{:?}", e)).collect::<Vec<_>>().join("\n"),
+                errors
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             )
         })?;
     let tast = check_program_bare_metal(&ast).map_err(CompileError::TypeError)?;

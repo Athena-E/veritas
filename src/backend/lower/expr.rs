@@ -4,7 +4,6 @@
 //! TIR instructions, returning the register holding the result.
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
-use crate::common::types::IValue;
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
@@ -13,6 +12,7 @@ use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
+use crate::common::types::IValue;
 
 /// Convert a typed expression to an IndexExpr for constraints.
 /// Returns None if the expression cannot be represented in the constraint domain.

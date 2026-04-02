@@ -184,11 +184,26 @@ where
         // Shifts (between addition and bitwise AND)
         let op_shl = just(Token::Op("<<")).to(BinOp::Shl);
         let op_shr = just(Token::Op(">>")).to(BinOp::Shr);
-        let shift = sum
-            .clone()
-            .foldl_with(
-                choice((op_shl, op_shr)).then(sum.clone()).repeated(),
-                |lhs, (op, rhs), e| {
+        let shift = sum.clone().foldl_with(
+            choice((op_shl, op_shr)).then(sum.clone()).repeated(),
+            |lhs, (op, rhs), e| {
+                (
+                    Expr::BinOp {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    e.span(),
+                )
+            },
+        );
+
+        // Bitwise AND
+        let op_bitand = just(Token::Op("&")).to(BinOp::BitAnd);
+        let bit_and =
+            shift
+                .clone()
+                .foldl_with(op_bitand.then(shift).repeated(), |lhs, (op, rhs), e| {
                     (
                         Expr::BinOp {
                             op,
@@ -197,56 +212,39 @@ where
                         },
                         e.span(),
                     )
-                },
-            );
-
-        // Bitwise AND
-        let op_bitand = just(Token::Op("&")).to(BinOp::BitAnd);
-        let bit_and = shift.clone().foldl_with(
-            op_bitand.then(shift).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        );
+                });
 
         // Bitwise XOR
         let op_bitxor = just(Token::Op("^")).to(BinOp::BitXor);
-        let bit_xor = bit_and.clone().foldl_with(
-            op_bitxor.then(bit_and).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        );
+        let bit_xor =
+            bit_and
+                .clone()
+                .foldl_with(op_bitxor.then(bit_and).repeated(), |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                });
 
         // Bitwise OR
         let op_bitor = just(Token::Op("|")).to(BinOp::BitOr);
-        let bitwise = bit_xor.clone().foldl_with(
-            op_bitor.then(bit_xor).repeated(),
-            |lhs, (op, rhs), e| {
-                (
-                    Expr::BinOp {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    e.span(),
-                )
-            },
-        );
+        let bitwise =
+            bit_xor
+                .clone()
+                .foldl_with(op_bitor.then(bit_xor).repeated(), |lhs, (op, rhs), e| {
+                    (
+                        Expr::BinOp {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    )
+                });
 
         // Comparisons
         let op_lt = just(Token::Op("<")).to(BinOp::Lt);

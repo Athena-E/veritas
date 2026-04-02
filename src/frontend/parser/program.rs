@@ -92,19 +92,16 @@ where
         .then_ignore(just(Token::Op("=")))
         .then(expr)
         .then_ignore(just(Token::Ctrl(';')))
-        .map_with(|((name, ty), value), e| {
-            (Constant { name, ty, value }, e.span())
-        });
+        .map_with(|((name, ty), value), e| (Constant { name, ty, value }, e.span()));
 
     let constants = const_decl.repeated().collect::<Vec<_>>();
 
     constants
-        .then(
-            function_parser()
-                .repeated()
-                .collect::<Vec<_>>(),
-        )
-        .map(|(constants, functions)| Program { constants, functions })
+        .then(function_parser().repeated().collect::<Vec<_>>())
+        .map(|(constants, functions)| Program {
+            constants,
+            functions,
+        })
         .then_ignore(end())
         .boxed()
 }

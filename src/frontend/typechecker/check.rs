@@ -1242,39 +1242,39 @@ fn check_program_with_target<'src>(
 
     // Linux-only intrinsics (use syscalls — not available on bare metal)
     if !bare_metal {
-    signatures.insert(
-        "print_int".into(),
-        FunctionSignature {
-            name: "print_int".into(),
-            parameters: vec![("n".into(), IType::Int)],
-            return_type: IType::Unit,
-            precondition: None,
-            postcondition: None,
-            span: dummy_span,
-        },
-    );
-    signatures.insert(
-        "print_char".into(),
-        FunctionSignature {
-            name: "print_char".into(),
-            parameters: vec![("c".into(), IType::Int)],
-            return_type: IType::Unit,
-            precondition: None,
-            postcondition: None,
-            span: dummy_span,
-        },
-    );
-    signatures.insert(
-        "read_int".into(),
-        FunctionSignature {
-            name: "read_int".into(),
-            parameters: vec![],
-            return_type: IType::Int,
-            precondition: None,
-            postcondition: None,
-            span: dummy_span,
-        },
-    );
+        signatures.insert(
+            "print_int".into(),
+            FunctionSignature {
+                name: "print_int".into(),
+                parameters: vec![("n".into(), IType::Int)],
+                return_type: IType::Unit,
+                precondition: None,
+                postcondition: None,
+                span: dummy_span,
+            },
+        );
+        signatures.insert(
+            "print_char".into(),
+            FunctionSignature {
+                name: "print_char".into(),
+                parameters: vec![("c".into(), IType::Int)],
+                return_type: IType::Unit,
+                precondition: None,
+                postcondition: None,
+                span: dummy_span,
+            },
+        );
+        signatures.insert(
+            "read_int".into(),
+            FunctionSignature {
+                name: "read_int".into(),
+                parameters: vec![],
+                return_type: IType::Int,
+                precondition: None,
+                postcondition: None,
+                span: dummy_span,
+            },
+        );
     } // end if !bare_metal
 
     // Port I/O intrinsics (available on both Linux and bare metal)

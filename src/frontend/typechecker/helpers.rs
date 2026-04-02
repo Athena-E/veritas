@@ -107,10 +107,20 @@ pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'
         ) => IType::SingletonInt(IValue::Int(n1 >> n2)),
 
         // Fallback to base int type
-        (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
-            | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr, _, _) => {
-            IType::Int
-        }
+        (
+            BinOp::Add
+            | BinOp::Sub
+            | BinOp::Mul
+            | BinOp::Div
+            | BinOp::Mod
+            | BinOp::BitAnd
+            | BinOp::BitOr
+            | BinOp::BitXor
+            | BinOp::Shl
+            | BinOp::Shr,
+            _,
+            _,
+        ) => IType::Int,
 
         // Comparisons always produce bool
         _ => IType::Bool,

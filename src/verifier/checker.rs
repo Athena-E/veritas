@@ -438,7 +438,11 @@ fn verify_binop(
         | BinaryOp::Mul
         | BinaryOp::Div
         | BinaryOp::Mod
-        | BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr => {
+        | BinaryOp::BitAnd
+        | BinaryOp::BitOr
+        | BinaryOp::BitXor
+        | BinaryOp::Shl
+        | BinaryOp::Shr => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
@@ -452,8 +456,11 @@ fn verify_binop(
             let rhs_idx = extract_index(&rhs_ty, &rhs);
 
             match op {
-                BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
-                | BinaryOp::Shl | BinaryOp::Shr => {
+                BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => {
                     // Bitwise ops don't have IndexExpr representation — widen to Int
                     DtalType::Int
                 }

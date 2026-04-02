@@ -55,8 +55,7 @@ impl SmtOracle {
                     BinOp::Mod => Some(left % right),
                     // Bitwise ops: Z3 integer theory doesn't support them.
                     // Return None (unprovable) — conservative but sound.
-                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor
-                    | BinOp::Shl | BinOp::Shr => None,
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => None,
                     // Comparison operators produce booleans, not integers
                     _ => None,
                 }
@@ -146,10 +145,16 @@ impl SmtOracle {
                     Some(left.implies(&right))
                 }
 
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
-                    | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                    None
-                }
+                BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr => None,
             },
 
             Expr::UnaryOp { op, cond } => match op {
