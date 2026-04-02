@@ -4,6 +4,7 @@
 //! TIR instructions, returning the register holding the result.
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
+use crate::common::types::IValue;
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
@@ -162,10 +163,24 @@ pub fn lower_expr<'src>(
 
         TExpr::Literal { value, ty } => lower_literal(ctx, value, ty),
 
-        TExpr::Variable { name, ty: _ } => {
-            // Look up the variable in the current scope
-            ctx.lookup_var(name)
-                .unwrap_or_else(|| panic!("Undefined variable during lowering: {}", name))
+        TExpr::Variable { name, ty } => {
+            // Look up the variable in the current scope.
+            // If not found, it may be a global constant — emit its value directly
+            // using the singleton type from the typechecker.
+            if let Some(reg) = ctx.lookup_var(name) {
+                reg
+            } else if let IType::SingletonInt(IValue::Int(n)) = ty {
+                // Global constant with known value — inline as LoadImm
+                let dst = ctx.fresh_reg();
+                ctx.emit(TirInstr::LoadImm {
+                    dst,
+                    value: *n,
+                    ty: ty.clone(),
+                });
+                dst
+            } else {
+                panic!("Undefined variable during lowering: {}", name)
+            }
         }
 
         TExpr::BinOp { op, lhs, rhs, ty } => lower_binop(ctx, *op, lhs, rhs, ty),

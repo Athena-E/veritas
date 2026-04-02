@@ -13,6 +13,7 @@ fn spanned<T>(value: T) -> Spanned<T> {
 /// Helper to create a program with a single function
 fn make_program<'src>(func: Function<'src>) -> Program<'src> {
     Program {
+        constants: vec![],
         functions: vec![spanned(func)],
     }
 }

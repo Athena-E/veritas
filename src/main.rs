@@ -6,7 +6,7 @@ use veritas::backend::elf::generate_elf;
 use veritas::backend::optimise::OptConfig;
 use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
 use veritas::frontend::typechecker::smt::{get_frontend_smt_stats, reset_frontend_smt_stats};
-use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_optimized};
+use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_bare_metal, compile_verbose_optimized};
 use veritas::verifier::smt::{get_verifier_smt_stats, reset_verifier_smt_stats};
 use veritas::verifier::verify_dtal;
 
@@ -175,6 +175,8 @@ fn main() {
     // Use optimized compilation if any optimizations are enabled
     let compile_result = if opt_config.any_enabled() {
         compile_verbose_optimized(&src, &opt_config)
+    } else if bare_metal {
+        compile_verbose_bare_metal(&src)
     } else {
         compile_verbose(&src)
     };

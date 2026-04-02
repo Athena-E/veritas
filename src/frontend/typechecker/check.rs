@@ -1154,6 +1154,19 @@ pub fn check_function<'src>(
 
 /// Check an entire program
 pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, TypeError<'src>> {
+    check_program_with_target(program, false)
+}
+
+pub fn check_program_bare_metal<'src>(
+    program: &Program<'src>,
+) -> Result<TProgram<'src>, TypeError<'src>> {
+    check_program_with_target(program, true)
+}
+
+fn check_program_with_target<'src>(
+    program: &Program<'src>,
+    bare_metal: bool,
+) -> Result<TProgram<'src>, TypeError<'src>> {
     let mut signatures = HashMap::new();
 
     for spanned_func in &program.functions {
@@ -1226,6 +1239,9 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
 
     // Register runtime intrinsic signatures
     let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
+
+    // Linux-only intrinsics (use syscalls — not available on bare metal)
+    if !bare_metal {
     signatures.insert(
         "print_int".into(),
         FunctionSignature {
@@ -1259,6 +1275,9 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
             span: dummy_span,
         },
     );
+    } // end if !bare_metal
+
+    // Port I/O intrinsics (available on both Linux and bare metal)
     signatures.insert(
         "port_in".into(),
         FunctionSignature {
@@ -1282,7 +1301,23 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
         },
     );
 
-    let global_ctx = TypingContext::with_functions(signatures);
+    let mut global_ctx = TypingContext::with_functions(signatures);
+
+    // Process constant declarations — add as immutable singleton bindings
+    for (constant, _span) in &program.constants {
+        let ty = ast_type_to_itype(&constant.ty)?;
+        // Evaluate constant value to a singleton
+        let (_, value_ty) = synth_expr(&global_ctx, &constant.value)?;
+        // Constants must be compile-time known (singleton)
+        if !is_subtype(&global_ctx, &value_ty, &ty) {
+            return Err(TypeError::TypeMismatch {
+                expected: ty,
+                found: value_ty,
+                span: constant.value.1,
+            });
+        }
+        global_ctx = global_ctx.with_immutable(constant.name.to_string(), value_ty);
+    }
 
     let mut tfunctions = Vec::new();
 

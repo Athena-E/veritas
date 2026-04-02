@@ -23,6 +23,7 @@ pub enum Token<'src> {
     Invariant,
     Forall,
     Exists,
+    Const,
     // Type keywords
     Int,
     Bool,
@@ -51,6 +52,7 @@ impl fmt::Display for Token<'_> {
             Token::Invariant => write!(f, "invariant"),
             Token::Forall => write!(f, "forall"),
             Token::Exists => write!(f, "exists"),
+            Token::Const => write!(f, "const"),
             Token::Int => write!(f, "int"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
@@ -249,8 +251,17 @@ pub struct Function<'src> {
     pub body: FunctionBody<'src>,
 }
 
+// Constant declaration
+#[derive(Debug)]
+pub struct Constant<'src> {
+    pub name: &'src str,
+    pub ty: Spanned<Type<'src>>,
+    pub value: Spanned<Expr<'src>>,
+}
+
 // Program
 #[derive(Debug)]
 pub struct Program<'src> {
+    pub constants: Vec<Spanned<Constant<'src>>>,
     pub functions: Vec<Spanned<Function<'src>>>,
 }
