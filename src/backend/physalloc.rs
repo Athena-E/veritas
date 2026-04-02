@@ -148,23 +148,54 @@ fn remap_constraint(
     match c {
         Constraint::True => Constraint::True,
         Constraint::False => Constraint::False,
-        Constraint::Eq(l, r) => Constraint::Eq(remap_index_expr(l, name_map), remap_index_expr(r, name_map)),
-        Constraint::Lt(l, r) => Constraint::Lt(remap_index_expr(l, name_map), remap_index_expr(r, name_map)),
-        Constraint::Le(l, r) => Constraint::Le(remap_index_expr(l, name_map), remap_index_expr(r, name_map)),
-        Constraint::Gt(l, r) => Constraint::Gt(remap_index_expr(l, name_map), remap_index_expr(r, name_map)),
-        Constraint::Ge(l, r) => Constraint::Ge(remap_index_expr(l, name_map), remap_index_expr(r, name_map)),
-        Constraint::Ne(l, r) => Constraint::Ne(remap_index_expr(l, name_map), remap_index_expr(r, name_map)),
-        Constraint::And(l, r) => Constraint::And(Box::new(remap_constraint(l, name_map)), Box::new(remap_constraint(r, name_map))),
-        Constraint::Or(l, r) => Constraint::Or(Box::new(remap_constraint(l, name_map)), Box::new(remap_constraint(r, name_map))),
+        Constraint::Eq(l, r) => {
+            Constraint::Eq(remap_index_expr(l, name_map), remap_index_expr(r, name_map))
+        }
+        Constraint::Lt(l, r) => {
+            Constraint::Lt(remap_index_expr(l, name_map), remap_index_expr(r, name_map))
+        }
+        Constraint::Le(l, r) => {
+            Constraint::Le(remap_index_expr(l, name_map), remap_index_expr(r, name_map))
+        }
+        Constraint::Gt(l, r) => {
+            Constraint::Gt(remap_index_expr(l, name_map), remap_index_expr(r, name_map))
+        }
+        Constraint::Ge(l, r) => {
+            Constraint::Ge(remap_index_expr(l, name_map), remap_index_expr(r, name_map))
+        }
+        Constraint::Ne(l, r) => {
+            Constraint::Ne(remap_index_expr(l, name_map), remap_index_expr(r, name_map))
+        }
+        Constraint::And(l, r) => Constraint::And(
+            Box::new(remap_constraint(l, name_map)),
+            Box::new(remap_constraint(r, name_map)),
+        ),
+        Constraint::Or(l, r) => Constraint::Or(
+            Box::new(remap_constraint(l, name_map)),
+            Box::new(remap_constraint(r, name_map)),
+        ),
         Constraint::Not(c) => Constraint::Not(Box::new(remap_constraint(c, name_map))),
-        Constraint::Implies(l, r) => Constraint::Implies(Box::new(remap_constraint(l, name_map)), Box::new(remap_constraint(r, name_map))),
-        Constraint::Forall { var, lower, upper, body } => Constraint::Forall {
+        Constraint::Implies(l, r) => Constraint::Implies(
+            Box::new(remap_constraint(l, name_map)),
+            Box::new(remap_constraint(r, name_map)),
+        ),
+        Constraint::Forall {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Forall {
             var: name_map.get(var).cloned().unwrap_or_else(|| var.clone()),
             lower: remap_index_expr(lower, name_map),
             upper: remap_index_expr(upper, name_map),
             body: Box::new(remap_constraint(body, name_map)),
         },
-        Constraint::Exists { var, lower, upper, body } => Constraint::Exists {
+        Constraint::Exists {
+            var,
+            lower,
+            upper,
+            body,
+        } => Constraint::Exists {
             var: name_map.get(var).cloned().unwrap_or_else(|| var.clone()),
             lower: remap_index_expr(lower, name_map),
             upper: remap_index_expr(upper, name_map),
@@ -185,22 +216,29 @@ fn remap_constraint_vars(
 /// Remap virtual register names within a DtalType's constraints.
 fn remap_constraint_vars_in_type(ty: &DtalType, alloc: &AllocationResult) -> DtalType {
     let name_map = build_vreg_name_map(alloc);
-    remap_type(&ty, &name_map)
+    remap_type(ty, &name_map)
 }
 
-fn remap_type(
-    ty: &DtalType,
-    name_map: &std::collections::HashMap<String, String>,
-) -> DtalType {
+fn remap_type(ty: &DtalType, name_map: &std::collections::HashMap<String, String>) -> DtalType {
     match ty {
         DtalType::SingletonInt(idx) => DtalType::SingletonInt(remap_index_expr(idx, name_map)),
-        DtalType::RefinedInt { base, var, constraint } => DtalType::RefinedInt {
+        DtalType::RefinedInt {
+            base,
+            var,
+            constraint,
+        } => DtalType::RefinedInt {
             base: std::sync::Arc::new(remap_type(base, name_map)),
             var: name_map.get(var).cloned().unwrap_or_else(|| var.clone()),
             constraint: remap_constraint(constraint, name_map),
         },
-        DtalType::ExistentialInt { witness_var, constraint } => DtalType::ExistentialInt {
-            witness_var: name_map.get(witness_var).cloned().unwrap_or_else(|| witness_var.clone()),
+        DtalType::ExistentialInt {
+            witness_var,
+            constraint,
+        } => DtalType::ExistentialInt {
+            witness_var: name_map
+                .get(witness_var)
+                .cloned()
+                .unwrap_or_else(|| witness_var.clone()),
             constraint: remap_constraint(constraint, name_map),
         },
         DtalType::Array { element_type, size } => DtalType::Array {
@@ -294,9 +332,11 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
         let mut cs_set: std::collections::BTreeSet<X86Reg> = std::collections::BTreeSet::new();
         for loc in alloc.allocation.values() {
             if let Location::Reg(x86) = loc
-                && X86Reg::CALLER_SAVED.contains(x86) && X86Reg::ALLOCATABLE.contains(x86) {
-                    cs_set.insert(*x86);
-                }
+                && X86Reg::CALLER_SAVED.contains(x86)
+                && X86Reg::ALLOCATABLE.contains(x86)
+            {
+                cs_set.insert(*x86);
+            }
         }
         caller_saved_to_save = cs_set.iter().map(|x86| x86_to_dtal_reg(*x86)).collect();
     }
@@ -356,13 +396,14 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             let mut param_moves: Vec<(Reg, PhysLoc, DtalType)> = Vec::new();
             for (i, (param_reg, param_ty)) in func.params.iter().enumerate() {
                 if i < param_regs.len()
-                    && let Reg::Virtual(vreg) = param_reg {
-                        // Skip dead parameters (not allocated because never used)
-                        if let Some(dst_loc) = try_resolve(*vreg, alloc) {
-                            let abi_reg = Reg::Physical(param_regs[i]);
-                            param_moves.push((abi_reg, dst_loc, param_ty.clone()));
-                        }
+                    && let Reg::Virtual(vreg) = param_reg
+                {
+                    // Skip dead parameters (not allocated because never used)
+                    if let Some(dst_loc) = try_resolve(*vreg, alloc) {
+                        let abi_reg = Reg::Physical(param_regs[i]);
+                        param_moves.push((abi_reg, dst_loc, param_ty.clone()));
                     }
+                }
             }
 
             // Detect if any source reg is the same as another move's destination reg.
@@ -383,15 +424,17 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 for (j, dst_r) in dst_regs.iter().enumerate() {
                     if j != i
                         && let Some(dr) = dst_r
-                            && *src == *dr && saved_to_scratch.is_none() {
-                                // Save src to scratch before it gets clobbered
-                                instrs.push(DtalInstr::MovReg {
-                                    dst: R11,
-                                    src: *src,
-                                    ty: DtalType::Int,
-                                });
-                                saved_to_scratch = Some((*src, R11));
-                            }
+                        && *src == *dr
+                        && saved_to_scratch.is_none()
+                    {
+                        // Save src to scratch before it gets clobbered
+                        instrs.push(DtalInstr::MovReg {
+                            dst: R11,
+                            src: *src,
+                            ty: DtalType::Int,
+                        });
+                        saved_to_scratch = Some((*src, R11));
+                    }
                 }
             }
 
@@ -455,8 +498,14 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             precond_map.insert(vname, pname);
         }
     }
-    let phys_precond = func.precondition.as_ref().map(|c| remap_constraint(c, &precond_map));
-    let phys_postcond = func.postcondition.as_ref().map(|c| remap_constraint(c, &precond_map));
+    let phys_precond = func
+        .precondition
+        .as_ref()
+        .map(|c| remap_constraint(c, &precond_map));
+    let phys_postcond = func
+        .postcondition
+        .as_ref()
+        .map(|c| remap_constraint(c, &precond_map));
 
     DtalFunction {
         name: func.name.clone(),
@@ -596,6 +645,20 @@ fn allocate_instruction(
                     instrs.push(DtalInstr::Idiv { src: R11 });
                     let result = if *op == BinaryOp::Mod { RDX } else { RAX };
                     emit_store_from(instrs, result, &dst_loc, ty.clone());
+                }
+                BinaryOp::Shl | BinaryOp::Shr => {
+                    // x86 shifts require count in CL (low byte of RCX/R3)
+                    let r3 = Reg::Physical(PhysicalReg::R3);
+                    emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
+                    emit_load_to(instrs, &rhs_loc, r3, DtalType::Int);
+                    instrs.push(DtalInstr::BinOp {
+                        op: *op,
+                        dst: RAX,
+                        lhs: RAX,
+                        rhs: r3,
+                        ty: ty.clone(),
+                    });
+                    emit_store_from(instrs, RAX, &dst_loc, ty.clone());
                 }
                 _ => {
                     // General case: lhs → rax, operate with rhs, store result
@@ -909,13 +972,13 @@ fn allocate_instruction(
         // Pass through type annotations and constraint assertions with
         // virtual register names remapped to their physical counterparts.
         DtalInstr::TypeAnnotation { reg, ty } => {
-            if let Some(loc) = resolve_reg_opt(*reg, alloc) {
-                if let PhysLoc::Reg(phys_reg) = loc {
-                    instrs.push(DtalInstr::TypeAnnotation {
-                        reg: phys_reg,
-                        ty: remap_constraint_vars_in_type(ty, alloc),
-                    });
-                }
+            if let Some(loc) = resolve_reg_opt(*reg, alloc)
+                && let PhysLoc::Reg(phys_reg) = loc
+            {
+                instrs.push(DtalInstr::TypeAnnotation {
+                    reg: phys_reg,
+                    ty: remap_constraint_vars_in_type(ty, alloc),
+                });
             }
         }
 
@@ -930,7 +993,10 @@ fn allocate_instruction(
             let port_loc = resolve_reg(*port, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
             emit_load_to(instrs, &port_loc, RDX, DtalType::Int);
-            instrs.push(DtalInstr::PortIn { dst: RAX, port: RDX });
+            instrs.push(DtalInstr::PortIn {
+                dst: RAX,
+                port: RDX,
+            });
             emit_store_from(instrs, RAX, &dst_loc, DtalType::Int);
         }
 
@@ -939,7 +1005,10 @@ fn allocate_instruction(
             let value_loc = resolve_reg(*value, alloc);
             emit_load_to(instrs, &port_loc, RDX, DtalType::Int);
             emit_load_to(instrs, &value_loc, RAX, DtalType::Int);
-            instrs.push(DtalInstr::PortOut { port: RDX, value: RAX });
+            instrs.push(DtalInstr::PortOut {
+                port: RDX,
+                value: RAX,
+            });
         }
 
         // Physical instructions should not appear in virtual DTAL input

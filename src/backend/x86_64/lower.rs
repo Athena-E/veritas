@@ -676,10 +676,27 @@ impl<'a> FunctionLowerer<'a> {
                         dst: X86Reg::Rax,
                         src: rhs_reg,
                     },
-                    BinaryOp::Or => X86Instr::OrRR {
+                    BinaryOp::BitOr | BinaryOp::Or => X86Instr::OrRR {
                         dst: X86Reg::Rax,
                         src: rhs_reg,
                     },
+                    BinaryOp::BitXor => X86Instr::XorRR {
+                        dst: X86Reg::Rax,
+                        src: rhs_reg,
+                    },
+                    BinaryOp::Shl | BinaryOp::Shr => {
+                        // Shifts need count in CL (low byte of RCX).
+                        // Move rhs from R11 to RCX.
+                        self.instructions.push(X86Instr::MovRR {
+                            dst: X86Reg::Rcx,
+                            src: rhs_reg,
+                        });
+                        if matches!(op, BinaryOp::Shl) {
+                            X86Instr::ShlCl { dst: X86Reg::Rax }
+                        } else {
+                            X86Instr::ShrCl { dst: X86Reg::Rax }
+                        }
+                    }
                     BinaryOp::Div | BinaryOp::Mod => unreachable!(),
                 };
                 self.instructions.push(instr);

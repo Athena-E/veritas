@@ -1,7 +1,7 @@
 use super::expr::expr_parser;
 use super::stmt::{promote_trailing_if, stmt_parser};
 use super::types::type_parser;
-use crate::common::ast::{Function, Parameter, Program, Token, Type};
+use crate::common::ast::{Constant, Function, Parameter, Program, Token, Type};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -81,10 +81,27 @@ pub fn program_parser<'tokens, 'src: 'tokens, I>()
 where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
-    function_parser()
-        .repeated()
-        .collect::<Vec<_>>()
-        .map(|functions| Program { functions })
+    let expr = expr_parser();
+    let ty = type_parser();
+
+    // Constant declaration: const NAME: TYPE = EXPR;
+    let const_decl = just(Token::Const)
+        .ignore_then(select! { Token::Ident(name) => name })
+        .then_ignore(just(Token::Ctrl(':')))
+        .then(ty)
+        .then_ignore(just(Token::Op("=")))
+        .then(expr)
+        .then_ignore(just(Token::Ctrl(';')))
+        .map_with(|((name, ty), value), e| (Constant { name, ty, value }, e.span()));
+
+    let constants = const_decl.repeated().collect::<Vec<_>>();
+
+    constants
+        .then(function_parser().repeated().collect::<Vec<_>>())
+        .map(|(constants, functions)| Program {
+            constants,
+            functions,
+        })
         .then_ignore(end())
         .boxed()
 }

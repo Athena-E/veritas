@@ -22,7 +22,23 @@ pub fn lexer<'src>()
         .unwrapped()
         .map(Token::Num);
 
-    let num = hex_num.or(dec_num);
+    // Character literals: 'a', '\n', '\t', '\\', '\''
+    let char_escape = just('\\').ignore_then(choice((
+        just('n').to(10i64),  // newline
+        just('t').to(9i64),   // tab
+        just('\\').to(92i64), // backslash
+        just('\'').to(39i64), // single quote
+        just('0').to(0i64),   // null
+    )));
+    let char_plain = any()
+        .filter(|c: &char| *c != '\\' && *c != '\'')
+        .map(|c: char| c as i64);
+    let char_lit = just('\'')
+        .ignore_then(char_escape.or(char_plain))
+        .then_ignore(just('\''))
+        .map(Token::Num);
+
+    let num = hex_num.or(dec_num).or(char_lit);
 
     // A parser for operators
     let op = choice((
@@ -31,6 +47,8 @@ pub fn lexer<'src>()
         just("!="),
         just("<="),
         just(">="),
+        just("<<"),
+        just(">>"),
         just("&&"),
         just("||"),
         just("->"),
@@ -45,6 +63,7 @@ pub fn lexer<'src>()
         just("="),
         just("&"),
         just("|"),
+        just("^"),
         just("!"),
     ))
     .map(Token::Op);
@@ -79,6 +98,7 @@ pub fn lexer<'src>()
             "invariant" => Token::Invariant,
             "forall" => Token::Forall,
             "exists" => Token::Exists,
+            "const" => Token::Const,
             "int" => Token::Int,
             "bool" => Token::Bool,
             "true" => Token::True,

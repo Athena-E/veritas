@@ -284,18 +284,18 @@ fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyErr
             Reg::Physical(PhysicalReg::R0)
         };
 
-        if let Some(actual_type) = state.register_types.get(&return_reg) {
-            if !types_compatible_with_constraints(
+        if let Some(actual_type) = state.register_types.get(&return_reg)
+            && !types_compatible_with_constraints(
                 actual_type,
                 &func.return_type,
                 &state.constraints,
-            ) {
-                return Err(VerifyError::ReturnTypeMismatch {
-                    function: func.name.clone(),
-                    expected: func.return_type.clone(),
-                    actual: actual_type.clone(),
-                });
-            }
+            )
+        {
+            return Err(VerifyError::ReturnTypeMismatch {
+                function: func.name.clone(),
+                expected: func.return_type.clone(),
+                actual: actual_type.clone(),
+            });
         }
     }
 
@@ -2049,10 +2049,7 @@ mod tests {
             )],
         )]);
         let result = verify_dtal(&program);
-        assert!(
-            result.is_err(),
-            "Idiv without R2 defined should fail"
-        );
+        assert!(result.is_err(), "Idiv without R2 defined should fail");
     }
 
     #[test]

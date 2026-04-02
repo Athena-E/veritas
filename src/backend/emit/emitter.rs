@@ -244,7 +244,13 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::PortOut { port, value } => {
-            writeln!(output, "    port_out {}, {}", emit_reg(port), emit_reg(value)).unwrap();
+            writeln!(
+                output,
+                "    port_out {}, {}",
+                emit_reg(port),
+                emit_reg(value)
+            )
+            .unwrap();
         }
 
         DtalInstr::Cqo => {
@@ -323,6 +329,10 @@ fn emit_binop(op: &BinaryOp) -> &'static str {
         BinaryOp::Div => "div",
         BinaryOp::Mod => "mod",
         BinaryOp::BitAnd => "bitand",
+        BinaryOp::BitOr => "bitor",
+        BinaryOp::BitXor => "bitxor",
+        BinaryOp::Shl => "shl",
+        BinaryOp::Shr => "shr",
         BinaryOp::And => "and",
         BinaryOp::Or => "or",
     }

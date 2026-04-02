@@ -12,6 +12,7 @@ use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
+use crate::common::types::IValue;
 
 /// Convert a typed expression to an IndexExpr for constraints.
 /// Returns None if the expression cannot be represented in the constraint domain.
@@ -162,10 +163,24 @@ pub fn lower_expr<'src>(
 
         TExpr::Literal { value, ty } => lower_literal(ctx, value, ty),
 
-        TExpr::Variable { name, ty: _ } => {
-            // Look up the variable in the current scope
-            ctx.lookup_var(name)
-                .unwrap_or_else(|| panic!("Undefined variable during lowering: {}", name))
+        TExpr::Variable { name, ty } => {
+            // Look up the variable in the current scope.
+            // If not found, it may be a global constant — emit its value directly
+            // using the singleton type from the typechecker.
+            if let Some(reg) = ctx.lookup_var(name) {
+                reg
+            } else if let IType::SingletonInt(IValue::Int(n)) = ty {
+                // Global constant with known value — inline as LoadImm
+                let dst = ctx.fresh_reg();
+                ctx.emit(TirInstr::LoadImm {
+                    dst,
+                    value: *n,
+                    ty: ty.clone(),
+                });
+                dst
+            } else {
+                panic!("Undefined variable during lowering: {}", name)
+            }
         }
 
         TExpr::BinOp { op, lhs, rhs, ty } => lower_binop(ctx, *op, lhs, rhs, ty),
@@ -239,6 +254,10 @@ fn convert_binop(op: AstBinOp) -> BinaryOp {
         AstBinOp::Gte => BinaryOp::Ge,
         AstBinOp::And => BinaryOp::And,
         AstBinOp::BitAnd => BinaryOp::BitAnd,
+        AstBinOp::BitOr => BinaryOp::BitOr,
+        AstBinOp::BitXor => BinaryOp::BitXor,
+        AstBinOp::Shl => BinaryOp::Shl,
+        AstBinOp::Shr => BinaryOp::Shr,
         AstBinOp::Or => BinaryOp::Or,
         AstBinOp::Implies => panic!("specification-only operator"),
     }

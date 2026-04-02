@@ -235,6 +235,11 @@ pub enum X86Instr {
     /// not reg
     Not { dst: X86Reg },
 
+    /// shl reg, cl (shift left by count in CL)
+    ShlCl { dst: X86Reg },
+    /// shr reg, cl (shift right by count in CL)
+    ShrCl { dst: X86Reg },
+
     // === Control Flow ===
     /// jmp label (unconditional)
     Jmp { target: String },
@@ -326,6 +331,8 @@ impl fmt::Display for X86Instr {
             X86Instr::XorRI { dst, imm } => write!(f, "xor {}, {}", dst, imm),
 
             X86Instr::Not { dst } => write!(f, "not {}", dst),
+            X86Instr::ShlCl { dst } => write!(f, "shl {}, cl", dst),
+            X86Instr::ShrCl { dst } => write!(f, "shr {}, cl", dst),
 
             X86Instr::Jmp { target } => write!(f, "jmp {}", target),
             X86Instr::JmpRel { offset } => write!(f, "jmp .+{}", offset),

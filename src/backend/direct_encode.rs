@@ -118,7 +118,10 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
                 BinaryOp::Sub => out.push(X86Instr::SubRR { dst: d, src: r }),
                 BinaryOp::Mul => out.push(X86Instr::ImulRR { dst: d, src: r }),
                 BinaryOp::BitAnd | BinaryOp::And => out.push(X86Instr::AndRR { dst: d, src: r }),
-                BinaryOp::Or => out.push(X86Instr::OrRR { dst: d, src: r }),
+                BinaryOp::BitOr | BinaryOp::Or => out.push(X86Instr::OrRR { dst: d, src: r }),
+                BinaryOp::BitXor => out.push(X86Instr::XorRR { dst: d, src: r }),
+                BinaryOp::Shl => out.push(X86Instr::ShlCl { dst: d }),
+                BinaryOp::Shr => out.push(X86Instr::ShrCl { dst: d }),
                 BinaryOp::Div | BinaryOp::Mod => {
                     unreachable!("Div/Mod expanded to Cqo+Idiv in physical DTAL")
                 }

@@ -256,14 +256,15 @@ pub fn verify_instruction(
         DtalInstr::SpillLoad { dst, offset, ty } => {
             // Verify the spill slot has been stored to
             if let Some(stored_ty) = state.spill_types.get(offset)
-                && !types_compatible(stored_ty, ty) {
-                    return Err(VerifyError::TypeMismatch {
-                        block: block_label.to_string(),
-                        instr_desc: format!("spill_load {:?}, [rbp{}]", dst, offset),
-                        expected: ty.clone(),
-                        actual: stored_ty.clone(),
-                    });
-                }
+                && !types_compatible(stored_ty, ty)
+            {
+                return Err(VerifyError::TypeMismatch {
+                    block: block_label.to_string(),
+                    instr_desc: format!("spill_load {:?}, [rbp{}]", dst, offset),
+                    expected: ty.clone(),
+                    actual: stored_ty.clone(),
+                });
+            }
             state.register_types.insert(*dst, ty.clone());
         }
 
@@ -279,13 +280,24 @@ pub fn verify_instruction(
             // defining as Int first and then narrowing via annotation is sound.
             use crate::backend::dtal::regs::PhysicalReg;
             for preg in &[
-                PhysicalReg::LR, PhysicalReg::R0, PhysicalReg::R1,
-                PhysicalReg::R2, PhysicalReg::R3, PhysicalReg::R4,
-                PhysicalReg::R5, PhysicalReg::R6, PhysicalReg::R7,
-                PhysicalReg::R8, PhysicalReg::R9, PhysicalReg::R10,
-                PhysicalReg::R11, PhysicalReg::R12,
+                PhysicalReg::LR,
+                PhysicalReg::R0,
+                PhysicalReg::R1,
+                PhysicalReg::R2,
+                PhysicalReg::R3,
+                PhysicalReg::R4,
+                PhysicalReg::R5,
+                PhysicalReg::R6,
+                PhysicalReg::R7,
+                PhysicalReg::R8,
+                PhysicalReg::R9,
+                PhysicalReg::R10,
+                PhysicalReg::R11,
+                PhysicalReg::R12,
             ] {
-                state.register_types.insert(Reg::Physical(*preg), DtalType::Int);
+                state
+                    .register_types
+                    .insert(Reg::Physical(*preg), DtalType::Int);
             }
         }
 
@@ -421,7 +433,16 @@ fn verify_binop(
             DtalType::Bool
         }
         // Arithmetic operations: derive result type symbolically
-        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::BitAnd => {
+        BinaryOp::Add
+        | BinaryOp::Sub
+        | BinaryOp::Mul
+        | BinaryOp::Div
+        | BinaryOp::Mod
+        | BinaryOp::BitAnd
+        | BinaryOp::BitOr
+        | BinaryOp::BitXor
+        | BinaryOp::Shl
+        | BinaryOp::Shr => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
@@ -435,7 +456,11 @@ fn verify_binop(
             let rhs_idx = extract_index(&rhs_ty, &rhs);
 
             match op {
-                BinaryOp::BitAnd => {
+                BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => {
                     // Bitwise ops don't have IndexExpr representation — widen to Int
                     DtalType::Int
                 }
@@ -704,8 +729,8 @@ fn verify_type_annotation(
         // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
-        let is_prologue_refinement = matches!(existing_ty, DtalType::Int)
-            && matches!(reg, Reg::Physical(_));
+        let is_prologue_refinement =
+            matches!(existing_ty, DtalType::Int) && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
             && !is_prologue_refinement
