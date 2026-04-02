@@ -1274,10 +1274,7 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
         "port_out".into(),
         FunctionSignature {
             name: "port_out".into(),
-            parameters: vec![
-                ("port".into(), IType::Int),
-                ("value".into(), IType::Int),
-            ],
+            parameters: vec![("port".into(), IType::Int), ("value".into(), IType::Int)],
             return_type: IType::Unit,
             precondition: None,
             postcondition: None,

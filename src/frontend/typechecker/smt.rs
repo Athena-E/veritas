@@ -145,7 +145,9 @@ impl SmtOracle {
                     Some(left.implies(&right))
                 }
 
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::BitAnd => None,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::BitAnd => {
+                    None
+                }
             },
 
             Expr::UnaryOp { op, cond } => match op {

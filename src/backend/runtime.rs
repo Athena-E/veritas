@@ -27,12 +27,15 @@ pub const RT_PORT_OUT: &str = "port_out";
 const PRINT_INT_OFFSET: usize = 0x00;
 const PRINT_CHAR_OFFSET: usize = 0x65;
 const READ_INT_OFFSET: usize = 0x7e;
-const PORT_IN_OFFSET: usize = 0xD3;  // after read_int (0x7e + 85 = 0xD3)
+const PORT_IN_OFFSET: usize = 0xD3; // after read_int (0x7e + 85 = 0xD3)
 const PORT_OUT_OFFSET: usize = 0xDC; // after port_in (0xD3 + 9 = 0xDC)
 
 /// Check whether a function name is a runtime intrinsic
 pub fn is_runtime_function(name: &str) -> bool {
-    matches!(name, RT_PRINT_INT | RT_PRINT_CHAR | RT_READ_INT | RT_PORT_IN | RT_PORT_OUT)
+    matches!(
+        name,
+        RT_PRINT_INT | RT_PRINT_CHAR | RT_READ_INT | RT_PORT_IN | RT_PORT_OUT
+    )
 }
 
 /// Get the raw x86-64 machine code for the runtime functions.
@@ -68,16 +71,16 @@ pub fn runtime_code() -> Vec<u8> {
         // __rt_port_in (offset 0xD3, 9 bytes)
         // Input: rdi = port number
         // Output: rax = byte read from port
-        0x66, 0x89, 0xfa,       // mov dx, di
-        0xec,                   // in al, dx
+        0x66, 0x89, 0xfa, // mov dx, di
+        0xec, // in al, dx
         0x48, 0x0f, 0xb6, 0xc0, // movzx rax, al
-        0xc3,                   // ret
+        0xc3, // ret
         // __rt_port_out (offset 0xDC, 8 bytes)
         // Input: rdi = port number, rsi = byte value
-        0x66, 0x89, 0xfa,       // mov dx, di
-        0x40, 0x88, 0xf0,       // mov al, sil
-        0xee,                   // out dx, al
-        0xc3,                   // ret
+        0x66, 0x89, 0xfa, // mov dx, di
+        0x40, 0x88, 0xf0, // mov al, sil
+        0xee, // out dx, al
+        0xc3, // ret
     ]
 }
 

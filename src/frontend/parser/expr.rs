@@ -183,21 +183,19 @@ where
 
         // Bitwise AND (higher precedence than comparisons, lower than addition)
         let op_bitand = just(Token::Op("&")).to(BinOp::BitAnd);
-        let bitwise = sum
-            .clone()
-            .foldl_with(
-                op_bitand.then(sum.clone()).repeated(),
-                |lhs, (op, rhs), e| {
-                    (
-                        Expr::BinOp {
-                            op,
-                            lhs: Box::new(lhs),
-                            rhs: Box::new(rhs),
-                        },
-                        e.span(),
-                    )
-                },
-            );
+        let bitwise = sum.clone().foldl_with(
+            op_bitand.then(sum.clone()).repeated(),
+            |lhs, (op, rhs), e| {
+                (
+                    Expr::BinOp {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                    e.span(),
+                )
+            },
+        );
 
         // Comparisons
         let op_lt = just(Token::Op("<")).to(BinOp::Lt);

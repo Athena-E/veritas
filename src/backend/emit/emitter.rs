@@ -244,7 +244,13 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::PortOut { port, value } => {
-            writeln!(output, "    port_out {}, {}", emit_reg(port), emit_reg(value)).unwrap();
+            writeln!(
+                output,
+                "    port_out {}, {}",
+                emit_reg(port),
+                emit_reg(value)
+            )
+            .unwrap();
         }
 
         DtalInstr::Cqo => {
