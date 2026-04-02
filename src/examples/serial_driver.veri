@@ -1,19 +1,25 @@
-// Serial port driver for UART 16550 (COM1 at 0x3F8)
+// Serial port driver for UART 16550 (COM1)
 // Fully verified Veritas code — DTAL verifier checks all I/O operations.
 
+const COM1: int = 0x3F8;
+const COM1_IER: int = 0x3F9;
+const COM1_FCR: int = 0x3FA;
+const COM1_LCR: int = 0x3FB;
+const COM1_LSR: int = 0x3FD;
+
 fn serial_init() {
-    port_out(0x3F8 + 1, 0);
-    port_out(0x3F8 + 3, 0x80);
-    port_out(0x3F8 + 0, 3);
-    port_out(0x3F8 + 1, 0);
-    port_out(0x3F8 + 3, 3);
-    port_out(0x3F8 + 2, 0xC7);
+    port_out(COM1_IER, 0);
+    port_out(COM1_LCR, 0x80);
+    port_out(COM1, 3);
+    port_out(COM1_IER, 0);
+    port_out(COM1_LCR, 3);
+    port_out(COM1_FCR, 0xC7);
 }
 
 fn serial_write(c: int) {
-    while (port_in(0x3F8 + 5) & 0x20) == 0 {
+    while (port_in(COM1_LSR) & 0x20) == 0 {
     }
-    port_out(0x3F8, c);
+    port_out(COM1, c);
 }
 
 // Print digits of a positive number via recursion (most significant first).
@@ -21,21 +27,21 @@ fn serial_print_positive(n: int) requires n > 0 {
     if n >= 10 {
         serial_print_positive(n / 10);
     }
-    serial_write(n % 10 + 48);
+    serial_write(n % 10 + '0');
 }
 
-// Print a non-negative integer followed by newline.
+// Print a non-negative integer.
 fn serial_print_nonneg(n: int) requires n >= 0 {
     if n > 0 {
         serial_print_positive(n);
     } else {
-        serial_write(48);
+        serial_write('0');
     }
 }
 
 fn serial_print_int(n: int) {
     if n < 0 {
-        serial_write(45);
+        serial_write('-');
         let pos: int = 0 - n;
         if pos > 0 {
             serial_print_positive(pos);
@@ -43,7 +49,7 @@ fn serial_print_int(n: int) {
     } else {
         serial_print_nonneg(n);
     }
-    serial_write(10);
+    serial_write('\n');
 }
 
 fn main() -> int {
