@@ -1259,6 +1259,31 @@ pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, Ty
             span: dummy_span,
         },
     );
+    signatures.insert(
+        "port_in".into(),
+        FunctionSignature {
+            name: "port_in".into(),
+            parameters: vec![("port".into(), IType::Int)],
+            return_type: IType::Int,
+            precondition: None,
+            postcondition: None,
+            span: dummy_span,
+        },
+    );
+    signatures.insert(
+        "port_out".into(),
+        FunctionSignature {
+            name: "port_out".into(),
+            parameters: vec![
+                ("port".into(), IType::Int),
+                ("value".into(), IType::Int),
+            ],
+            return_type: IType::Unit,
+            precondition: None,
+            postcondition: None,
+            span: dummy_span,
+        },
+    );
 
     let global_ctx = TypingContext::with_functions(signatures);
 

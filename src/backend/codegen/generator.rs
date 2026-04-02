@@ -113,6 +113,25 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
             postcondition: None,
             blocks: vec![],
         },
+        DtalFunction {
+            name: "port_in".to_string(),
+            params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
+        DtalFunction {
+            name: "port_out".to_string(),
+            params: vec![
+                (Reg::Physical(PhysicalReg::R0), DtalType::Int),
+                (Reg::Physical(PhysicalReg::R1), DtalType::Int),
+            ],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
     ]
 }
 

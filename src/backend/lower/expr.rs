@@ -238,6 +238,7 @@ fn convert_binop(op: AstBinOp) -> BinaryOp {
         AstBinOp::Gt => BinaryOp::Gt,
         AstBinOp::Gte => BinaryOp::Ge,
         AstBinOp::And => BinaryOp::And,
+        AstBinOp::BitAnd => BinaryOp::BitAnd,
         AstBinOp::Or => BinaryOp::Or,
         AstBinOp::Implies => panic!("specification-only operator"),
     }

@@ -267,6 +267,12 @@ pub enum X86Instr {
     /// syscall
     Syscall,
 
+    // === Port I/O ===
+    /// in al, dx (read byte from port in DX to AL)
+    InAlDx,
+    /// out dx, al (write byte from AL to port in DX)
+    OutDxAl,
+
     // === Pseudo-instructions (resolved before encoding) ===
     /// Label definition
     Label { name: String },
@@ -338,6 +344,8 @@ impl fmt::Display for X86Instr {
             X86Instr::Pop { dst } => write!(f, "pop {}", dst),
 
             X86Instr::Syscall => write!(f, "syscall"),
+            X86Instr::InAlDx => write!(f, "in al, dx"),
+            X86Instr::OutDxAl => write!(f, "out dx, al"),
 
             X86Instr::Label { name } => write!(f, "{}:", name),
             X86Instr::Comment { text } => write!(f, "; {}", text),

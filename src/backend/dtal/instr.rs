@@ -103,6 +103,7 @@ pub enum BinaryOp {
     Mul,
     Div,
     Mod,
+    BitAnd,
     And,
     Or,
 }
@@ -115,6 +116,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Mul => write!(f, "mul"),
             BinaryOp::Div => write!(f, "div"),
             BinaryOp::Mod => write!(f, "mod"),
+            BinaryOp::BitAnd => write!(f, "bitand"),
             BinaryOp::And => write!(f, "and"),
             BinaryOp::Or => write!(f, "or"),
         }
@@ -209,6 +211,12 @@ pub enum DtalInstr {
     Pop { dst: Reg, ty: DtalType },
     /// alloca rd, size
     Alloca { dst: Reg, size: u32, ty: DtalType },
+
+    // Port I/O (bare-metal hardware access)
+    /// in al, dx: read byte from I/O port in src to dst
+    PortIn { dst: Reg, port: Reg },
+    /// out dx, al: write byte from src to I/O port in dst
+    PortOut { port: Reg, value: Reg },
 
     // Physical allocation instructions (post-regalloc)
     /// cqo: sign-extend rax into rdx:rax (required before idiv)

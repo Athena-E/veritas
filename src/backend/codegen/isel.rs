@@ -198,6 +198,17 @@ fn lower_binop<'src>(
         TirBinaryOp::Gt => lower_comparison(instrs, dst, lhs, rhs, "gt"),
         TirBinaryOp::Ge => lower_comparison(instrs, dst, lhs, rhs, "ge"),
 
+        // Bitwise AND (integer operands, integer result)
+        TirBinaryOp::BitAnd => {
+            instrs.push(DtalInstr::BinOp {
+                op: DtalBinaryOp::BitAnd,
+                dst: Reg::Virtual(dst),
+                lhs: Reg::Virtual(lhs),
+                rhs: Reg::Virtual(rhs),
+                ty: dtal_ty,
+            });
+        }
+
         // Logical operations
         TirBinaryOp::And => {
             instrs.push(DtalInstr::BinOp {

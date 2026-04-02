@@ -68,7 +68,7 @@ pub fn synth_expr<'src>(
 
         // BINOP-ARITH: Arithmetic operations with SMT synthesis
         Expr::BinOp {
-            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod),
+            op: op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::BitAnd),
             lhs,
             rhs,
         } => {

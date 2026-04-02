@@ -175,9 +175,21 @@ pub fn verify_instruction(
                 });
             };
 
+            // Set return type in both R0 and LR:
+            // - Virtual DTAL reads the return value from R0 (`mov vN, r0`)
+            // - Physical DTAL reads it from LR (`mov r0, lr`)
+            //
+            // Setting both is safe because:
+            // - In virtual DTAL, R0 is the designated return register
+            // - In physical DTAL, R0 (rdi) is caller-saved and the
+            //   call-clobber-aware allocator guarantees no live value
+            //   is in a caller-saved register across a call
             state
                 .register_types
-                .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty);
+                .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty.clone());
+            state
+                .register_types
+                .insert(Reg::Physical(PhysicalReg::LR), derived_return_ty);
         }
 
         DtalInstr::Branch { cond, .. } => {
@@ -193,6 +205,17 @@ pub fn verify_instruction(
 
         // Control flow instructions are handled separately
         DtalInstr::Jmp { .. } | DtalInstr::Ret => {}
+
+        // Port I/O instructions
+        DtalInstr::PortIn { dst, port } => {
+            check_register_defined(*port, state, block_label)?;
+            // Port read returns an int (byte value 0-255)
+            state.register_types.insert(*dst, DtalType::Int);
+        }
+        DtalInstr::PortOut { port, value } => {
+            check_register_defined(*port, state, block_label)?;
+            check_register_defined(*value, state, block_label)?;
+        }
 
         // Physical allocation instructions (post-regalloc).
         // These are verified after register allocation in the physical DTAL pipeline.
@@ -244,9 +267,30 @@ pub fn verify_instruction(
             state.register_types.insert(*dst, ty.clone());
         }
 
-        DtalInstr::Prologue { .. } | DtalInstr::Epilogue { .. } => {
-            // Structural markers — verified by checking callee-saved consistency
-            // at function level, not per-instruction
+        DtalInstr::Prologue { .. } => {
+            // In physical DTAL, the prologue marks function entry. All physical
+            // registers are "available" at this point (they hold parameter values,
+            // caller-saved values, or undefined values). Define them all as Int
+            // to prevent false "used before definition" errors.
+            //
+            // TypeAnnotation instructions AFTER the Prologue will refine specific
+            // registers to their correct types (e.g., array params). Since
+            // TypeAnnotation verification accepts refinement from a supertype,
+            // defining as Int first and then narrowing via annotation is sound.
+            use crate::backend::dtal::regs::PhysicalReg;
+            for preg in &[
+                PhysicalReg::LR, PhysicalReg::R0, PhysicalReg::R1,
+                PhysicalReg::R2, PhysicalReg::R3, PhysicalReg::R4,
+                PhysicalReg::R5, PhysicalReg::R6, PhysicalReg::R7,
+                PhysicalReg::R8, PhysicalReg::R9, PhysicalReg::R10,
+                PhysicalReg::R11, PhysicalReg::R12,
+            ] {
+                state.register_types.insert(Reg::Physical(*preg), DtalType::Int);
+            }
+        }
+
+        DtalInstr::Epilogue { .. } => {
+            // Structural marker
         }
     }
 
@@ -377,7 +421,7 @@ fn verify_binop(
             DtalType::Bool
         }
         // Arithmetic operations: derive result type symbolically
-        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod | BinaryOp::BitAnd => {
             if !is_numeric_type(&lhs_ty) || !is_numeric_type(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
                     block: block_label.to_string(),
@@ -390,16 +434,23 @@ fn verify_binop(
             let lhs_idx = extract_index(&lhs_ty, &lhs);
             let rhs_idx = extract_index(&rhs_ty, &rhs);
 
-            let result_idx = match op {
-                BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
-                BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
-                _ => unreachable!(),
-            };
-
-            DtalType::SingletonInt(result_idx)
+            match op {
+                BinaryOp::BitAnd => {
+                    // Bitwise ops don't have IndexExpr representation — widen to Int
+                    DtalType::Int
+                }
+                _ => {
+                    let result_idx = match op {
+                        BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
+                        _ => unreachable!(),
+                    };
+                    DtalType::SingletonInt(result_idx)
+                }
+            }
         }
     };
 
@@ -650,7 +701,14 @@ fn verify_type_annotation(
                 DtalType::Int | DtalType::SingletonInt(_) | DtalType::ExistentialInt { .. }
             );
 
+        // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
+        // TypeAnnotation from physalloc refines them to their actual types.
+        // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
+        let is_prologue_refinement = matches!(existing_ty, DtalType::Int)
+            && matches!(reg, Reg::Physical(_));
+
         if !is_existential_narrowing
+            && !is_prologue_refinement
             && !types_compatible_with_constraints(existing_ty, ty, &state.constraints)
         {
             return Err(VerifyError::TypeMismatch {
@@ -675,8 +733,13 @@ fn verify_constraint_assert(
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
-    // Check if constraint is provable from current context (syntactic fast-path + Z3)
-    if !is_constraint_provable(constraint, &state.constraints) {
+    // Check if constraint is provable from current context (syntactic fast-path + Z3).
+    // Also check proven_assertions — these are frontend-verified invariants that
+    // survive across join points and don't need to be re-proven each iteration.
+    let mut full_context = state.constraints.clone();
+    full_context.extend(state.proven_assertions.iter().cloned());
+
+    if !is_constraint_provable(constraint, &full_context) {
         return Err(VerifyError::UnprovableConstraint {
             constraint: constraint.clone(),
             context: state.constraints.clone(),

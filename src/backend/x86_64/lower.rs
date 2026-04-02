@@ -516,7 +516,9 @@ impl<'a> FunctionLowerer<'a> {
             // Physical allocation instructions — these are only present in the
             // physical DTAL pipeline (verify-after-regalloc). The current x86
             // lowering path uses virtual DTAL, so these should not appear here.
-            DtalInstr::Cqo
+            DtalInstr::PortIn { .. }
+            | DtalInstr::PortOut { .. }
+            | DtalInstr::Cqo
             | DtalInstr::Idiv { .. }
             | DtalInstr::SpillStore { .. }
             | DtalInstr::SpillLoad { .. }
@@ -670,7 +672,7 @@ impl<'a> FunctionLowerer<'a> {
                         dst: X86Reg::Rax,
                         src: rhs_reg,
                     },
-                    BinaryOp::And => X86Instr::AndRR {
+                    BinaryOp::BitAnd | BinaryOp::And => X86Instr::AndRR {
                         dst: X86Reg::Rax,
                         src: rhs_reg,
                     },

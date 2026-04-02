@@ -79,6 +79,7 @@ fn fmt_expr(expr: &Expr) -> String {
                 BinOp::Mul => "*",
                 BinOp::Div => "/",
                 BinOp::Mod => "%",
+                BinOp::BitAnd => "&",
                 BinOp::Eq => "==",
                 BinOp::NotEq => "!=",
                 BinOp::Lt => "<",
