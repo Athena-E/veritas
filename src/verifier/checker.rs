@@ -321,14 +321,14 @@ fn verify_mov_imm(
     block_label: &str,
 ) -> Result<(), VerifyError> {
     // For singleton types, verify the value matches
-    if let DtalType::SingletonInt(IndexExpr::Const(expected)) = ty {
-        if imm != *expected {
-            return Err(VerifyError::SingletonMismatch {
-                block: block_label.to_string(),
-                expected_value: *expected,
-                actual_value: imm,
-            });
-        }
+    if let DtalType::SingletonInt(IndexExpr::Const(expected)) = ty
+        && imm != *expected
+    {
+        return Err(VerifyError::SingletonMismatch {
+            block: block_label.to_string(),
+            expected_value: *expected,
+            actual_value: imm,
+        });
     }
 
     // For refined types, verify the predicate holds for the immediate value.
@@ -366,30 +366,24 @@ fn substitute_const_in_constraint_inner(
 ) -> Constraint {
     match c {
         Constraint::True | Constraint::False => c.clone(),
-        Constraint::Eq(l, r) => Constraint::Eq(
-            sub_idx(l, var, replacement),
-            sub_idx(r, var, replacement),
-        ),
-        Constraint::Lt(l, r) => Constraint::Lt(
-            sub_idx(l, var, replacement),
-            sub_idx(r, var, replacement),
-        ),
-        Constraint::Le(l, r) => Constraint::Le(
-            sub_idx(l, var, replacement),
-            sub_idx(r, var, replacement),
-        ),
-        Constraint::Gt(l, r) => Constraint::Gt(
-            sub_idx(l, var, replacement),
-            sub_idx(r, var, replacement),
-        ),
-        Constraint::Ge(l, r) => Constraint::Ge(
-            sub_idx(l, var, replacement),
-            sub_idx(r, var, replacement),
-        ),
-        Constraint::Ne(l, r) => Constraint::Ne(
-            sub_idx(l, var, replacement),
-            sub_idx(r, var, replacement),
-        ),
+        Constraint::Eq(l, r) => {
+            Constraint::Eq(sub_idx(l, var, replacement), sub_idx(r, var, replacement))
+        }
+        Constraint::Lt(l, r) => {
+            Constraint::Lt(sub_idx(l, var, replacement), sub_idx(r, var, replacement))
+        }
+        Constraint::Le(l, r) => {
+            Constraint::Le(sub_idx(l, var, replacement), sub_idx(r, var, replacement))
+        }
+        Constraint::Gt(l, r) => {
+            Constraint::Gt(sub_idx(l, var, replacement), sub_idx(r, var, replacement))
+        }
+        Constraint::Ge(l, r) => {
+            Constraint::Ge(sub_idx(l, var, replacement), sub_idx(r, var, replacement))
+        }
+        Constraint::Ne(l, r) => {
+            Constraint::Ne(sub_idx(l, var, replacement), sub_idx(r, var, replacement))
+        }
         Constraint::And(l, r) => Constraint::And(
             Box::new(substitute_const_in_constraint_inner(l, var, replacement)),
             Box::new(substitute_const_in_constraint_inner(r, var, replacement)),
@@ -398,9 +392,11 @@ fn substitute_const_in_constraint_inner(
             Box::new(substitute_const_in_constraint_inner(l, var, replacement)),
             Box::new(substitute_const_in_constraint_inner(r, var, replacement)),
         ),
-        Constraint::Not(inner) => Constraint::Not(Box::new(
-            substitute_const_in_constraint_inner(inner, var, replacement),
-        )),
+        Constraint::Not(inner) => Constraint::Not(Box::new(substitute_const_in_constraint_inner(
+            inner,
+            var,
+            replacement,
+        ))),
         Constraint::Implies(l, r) => Constraint::Implies(
             Box::new(substitute_const_in_constraint_inner(l, var, replacement)),
             Box::new(substitute_const_in_constraint_inner(r, var, replacement)),
@@ -467,10 +463,9 @@ fn sub_idx(expr: &IndexExpr, var: &str, replacement: &IndexExpr) -> IndexExpr {
             Box::new(sub_idx(l, var, replacement)),
             Box::new(sub_idx(r, var, replacement)),
         ),
-        IndexExpr::Select(name, idx) => IndexExpr::Select(
-            name.clone(),
-            Box::new(sub_idx(idx, var, replacement)),
-        ),
+        IndexExpr::Select(name, idx) => {
+            IndexExpr::Select(name.clone(), Box::new(sub_idx(idx, var, replacement)))
+        }
     }
 }
 

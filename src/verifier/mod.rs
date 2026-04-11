@@ -579,7 +579,10 @@ mod tests {
             )],
         )]);
         let result = verify_dtal(&program);
-        assert!(result.is_err(), "Wrong singleton annotation should be rejected");
+        assert!(
+            result.is_err(),
+            "Wrong singleton annotation should be rejected"
+        );
         assert!(matches!(
             result.unwrap_err(),
             VerifyError::SingletonMismatch { .. }
