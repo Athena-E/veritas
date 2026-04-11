@@ -576,14 +576,25 @@ pub(super) fn substitute_args_in_prop<'src>(
     use crate::frontend::typechecker::helpers::rename_expr_var;
     use chumsky::span::SimpleSpan;
 
-    // First pass: rename parameter variables to argument variable names
-    // e.g. if param is "arr" and argument is variable "pos", rename arr -> pos
+    // First pass: substitute parameter names with argument expressions.
+    // - If argument is a variable: rename param -> arg_var
+    // - If argument is a complex expression (e.g., 0 - n): substitute the
+    //   entire expression tree for the parameter name in the precondition
     let mut renamed_expr = precond.predicate.0.clone();
     for ((param_name, _), arg_expr) in params.iter().zip(arg_exprs.iter()) {
-        if let Expr::Variable(arg_var) = arg_expr
-            && *arg_var != param_name.as_str()
-        {
-            renamed_expr = rename_expr_var(&renamed_expr, param_name.as_str(), arg_var);
+        match arg_expr {
+            Expr::Variable(arg_var) if *arg_var != param_name.as_str() => {
+                renamed_expr = rename_expr_var(&renamed_expr, param_name.as_str(), arg_var);
+            }
+            Expr::Variable(_) => {
+                // Same name — no rename needed
+            }
+            _ => {
+                // Complex expression: substitute the expression tree for the param name
+                use crate::frontend::typechecker::helpers::substitute_expr_for_var;
+                renamed_expr =
+                    substitute_expr_for_var(&renamed_expr, param_name.as_str(), arg_expr);
+            }
         }
     }
 

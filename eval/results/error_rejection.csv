@@ -27,5 +27,5 @@ file,expected_error,rejected,error_message
 26_quantifier_in_runtime,type_error,yes,src/examples/errors/26_quantifier_in_runtime.veri
 27_invariant_not_preserved,type_error,yes,src/examples/errors/27_invariant_not_preserved.veri
 28_invariant_not_established,type_error,yes,src/examples/errors/28_invariant_not_established.veri
-division_by_zero_symbolic,type_error,yes,src/examples/errors/division_by_zero_symbolic.veri
 division_by_zero,type_error,yes,src/examples/errors/division_by_zero.veri
+division_by_zero_symbolic,type_error,yes,src/examples/errors/division_by_zero_symbolic.veri

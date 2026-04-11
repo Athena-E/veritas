@@ -316,15 +316,162 @@ pub fn verify_instruction(
 fn verify_mov_imm(
     dst: Reg,
     imm: i64,
-    _ty: &DtalType,
+    ty: &DtalType,
     state: &mut TypeState,
-    _block_label: &str,
+    block_label: &str,
 ) -> Result<(), VerifyError> {
+    // For singleton types, verify the value matches
+    if let DtalType::SingletonInt(IndexExpr::Const(expected)) = ty {
+        if imm != *expected {
+            return Err(VerifyError::SingletonMismatch {
+                block: block_label.to_string(),
+                expected_value: *expected,
+                actual_value: imm,
+            });
+        }
+    }
+
+    // For refined types, verify the predicate holds for the immediate value.
+    // Substitute the value for the bound variable and check provability.
+    if let DtalType::RefinedInt {
+        var, constraint, ..
+    } = ty
+    {
+        let substituted = substitute_const_in_constraint(constraint, var, imm);
+        if !is_constraint_provable(&substituted, &state.constraints) {
+            return Err(VerifyError::UnprovableConstraint {
+                constraint: substituted,
+                context: state.constraints.clone(),
+                block: block_label.to_string(),
+            });
+        }
+    }
+
     let derived_ty = DtalType::SingletonInt(IndexExpr::Const(imm));
     let derived_idx = IndexExpr::Const(imm);
     state.register_types.insert(dst, derived_ty);
     add_register_index_constraint(dst, &derived_idx, state);
     Ok(())
+}
+
+/// Substitute a constant value for a variable name in a constraint.
+fn substitute_const_in_constraint(c: &Constraint, var: &str, value: i64) -> Constraint {
+    substitute_const_in_constraint_inner(c, var, &IndexExpr::Const(value))
+}
+
+fn substitute_const_in_constraint_inner(
+    c: &Constraint,
+    var: &str,
+    replacement: &IndexExpr,
+) -> Constraint {
+    match c {
+        Constraint::True | Constraint::False => c.clone(),
+        Constraint::Eq(l, r) => Constraint::Eq(
+            sub_idx(l, var, replacement),
+            sub_idx(r, var, replacement),
+        ),
+        Constraint::Lt(l, r) => Constraint::Lt(
+            sub_idx(l, var, replacement),
+            sub_idx(r, var, replacement),
+        ),
+        Constraint::Le(l, r) => Constraint::Le(
+            sub_idx(l, var, replacement),
+            sub_idx(r, var, replacement),
+        ),
+        Constraint::Gt(l, r) => Constraint::Gt(
+            sub_idx(l, var, replacement),
+            sub_idx(r, var, replacement),
+        ),
+        Constraint::Ge(l, r) => Constraint::Ge(
+            sub_idx(l, var, replacement),
+            sub_idx(r, var, replacement),
+        ),
+        Constraint::Ne(l, r) => Constraint::Ne(
+            sub_idx(l, var, replacement),
+            sub_idx(r, var, replacement),
+        ),
+        Constraint::And(l, r) => Constraint::And(
+            Box::new(substitute_const_in_constraint_inner(l, var, replacement)),
+            Box::new(substitute_const_in_constraint_inner(r, var, replacement)),
+        ),
+        Constraint::Or(l, r) => Constraint::Or(
+            Box::new(substitute_const_in_constraint_inner(l, var, replacement)),
+            Box::new(substitute_const_in_constraint_inner(r, var, replacement)),
+        ),
+        Constraint::Not(inner) => Constraint::Not(Box::new(
+            substitute_const_in_constraint_inner(inner, var, replacement),
+        )),
+        Constraint::Implies(l, r) => Constraint::Implies(
+            Box::new(substitute_const_in_constraint_inner(l, var, replacement)),
+            Box::new(substitute_const_in_constraint_inner(r, var, replacement)),
+        ),
+        Constraint::Forall {
+            var: bound,
+            lower,
+            upper,
+            body,
+        } => {
+            if bound == var {
+                c.clone() // shadowed
+            } else {
+                Constraint::Forall {
+                    var: bound.clone(),
+                    lower: sub_idx(lower, var, replacement),
+                    upper: sub_idx(upper, var, replacement),
+                    body: Box::new(substitute_const_in_constraint_inner(body, var, replacement)),
+                }
+            }
+        }
+        Constraint::Exists {
+            var: bound,
+            lower,
+            upper,
+            body,
+        } => {
+            if bound == var {
+                c.clone()
+            } else {
+                Constraint::Exists {
+                    var: bound.clone(),
+                    lower: sub_idx(lower, var, replacement),
+                    upper: sub_idx(upper, var, replacement),
+                    body: Box::new(substitute_const_in_constraint_inner(body, var, replacement)),
+                }
+            }
+        }
+    }
+}
+
+fn sub_idx(expr: &IndexExpr, var: &str, replacement: &IndexExpr) -> IndexExpr {
+    match expr {
+        IndexExpr::Const(_) => expr.clone(),
+        IndexExpr::Var(name) if name == var => replacement.clone(),
+        IndexExpr::Var(_) => expr.clone(),
+        IndexExpr::Add(l, r) => IndexExpr::Add(
+            Box::new(sub_idx(l, var, replacement)),
+            Box::new(sub_idx(r, var, replacement)),
+        ),
+        IndexExpr::Sub(l, r) => IndexExpr::Sub(
+            Box::new(sub_idx(l, var, replacement)),
+            Box::new(sub_idx(r, var, replacement)),
+        ),
+        IndexExpr::Mul(l, r) => IndexExpr::Mul(
+            Box::new(sub_idx(l, var, replacement)),
+            Box::new(sub_idx(r, var, replacement)),
+        ),
+        IndexExpr::Div(l, r) => IndexExpr::Div(
+            Box::new(sub_idx(l, var, replacement)),
+            Box::new(sub_idx(r, var, replacement)),
+        ),
+        IndexExpr::Mod(l, r) => IndexExpr::Mod(
+            Box::new(sub_idx(l, var, replacement)),
+            Box::new(sub_idx(r, var, replacement)),
+        ),
+        IndexExpr::Select(name, idx) => IndexExpr::Select(
+            name.clone(),
+            Box::new(sub_idx(idx, var, replacement)),
+        ),
+    }
 }
 
 /// Verify mov register instruction

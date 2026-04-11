@@ -560,8 +560,35 @@ mod tests {
     }
 
     #[test]
-    fn test_movimm_derives_correct_type_ignoring_annotation() {
-        // Derivation-based: verifier derives int(5) regardless of ty annotation
+    fn test_movimm_rejects_wrong_singleton_annotation() {
+        // Verifier checks singleton annotation: mov r0, 5 with ty int(6) should fail
+        let program = make_program(vec![make_func(
+            "bad",
+            vec![],
+            DtalType::SingletonInt(IndexExpr::Const(5)),
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::MovImm {
+                        dst: r0(),
+                        imm: 5,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(6)), // Wrong!
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        let result = verify_dtal(&program);
+        assert!(result.is_err(), "Wrong singleton annotation should be rejected");
+        assert!(matches!(
+            result.unwrap_err(),
+            VerifyError::SingletonMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn test_movimm_accepts_correct_annotation() {
+        // Correct annotation: mov r0, 5 with ty int(5) should pass
         let program = make_program(vec![make_func(
             "ok",
             vec![],
@@ -572,13 +599,12 @@ mod tests {
                     DtalInstr::MovImm {
                         dst: r0(),
                         imm: 5,
-                        ty: DtalType::SingletonInt(IndexExpr::Const(6)), // Wrong annotation, ignored
+                        ty: DtalType::SingletonInt(IndexExpr::Const(5)),
                     },
                     DtalInstr::Ret,
                 ],
             )],
         )]);
-        // Verifier derives int(5) for r0, which matches return type int(5)
         assert!(verify_dtal(&program).is_ok());
     }
 
