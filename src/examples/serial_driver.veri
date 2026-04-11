@@ -42,10 +42,7 @@ fn serial_print_nonneg(n: int) requires n >= 0 {
 fn serial_print_int(n: int) {
     if n < 0 {
         serial_write('-');
-        let pos: int = 0 - n;
-        if pos > 0 {
-            serial_print_positive(pos);
-        }
+        serial_print_positive(0 - n);
     } else {
         serial_print_nonneg(n);
     }

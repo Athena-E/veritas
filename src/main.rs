@@ -219,6 +219,10 @@ fn main() {
                 }
             }
 
+            // Benchmark output should attribute verifier SMT work to the
+            // explicit verification stage only, not to earlier pipeline work.
+            reset_verifier_smt_stats();
+
             // Verify DTAL if requested.
             // When using the physical pipeline (default), skip the virtual DTAL
             // verifier — the physical verifier is strictly stronger and runs
@@ -325,8 +329,10 @@ fn main() {
                         if verbose {
                             println!("\n[8b] Verifying physically-allocated DTAL...");
                         }
+                        let verify_start = Instant::now();
                         match verify_dtal(&physical_dtal) {
                             Ok(()) => {
+                                verify_elapsed = verify_start.elapsed();
                                 if !quiet && !bench {
                                     println!("\nPhysical DTAL verification passed!");
                                 }
@@ -335,6 +341,18 @@ fn main() {
                                 eprintln!("\nPhysical DTAL verification FAILED: {}", e);
                                 std::process::exit(1);
                             }
+                        }
+
+                        if verify_only {
+                            if bench {
+                                print_bench_json(
+                                    file_path,
+                                    &compile_elapsed,
+                                    Some(&verify_elapsed),
+                                    None,
+                                );
+                            }
+                            return;
                         }
                     }
 
