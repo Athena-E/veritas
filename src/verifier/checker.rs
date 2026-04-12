@@ -636,7 +636,7 @@ fn verify_binop(
     // frontend's Z3 proof, so we skip the check (the frontend already verified).
     let is_i64_op = matches!(ty, DtalType::I64)
         || matches!(ty, DtalType::RefinedInt { base, .. } if matches!(base.as_ref(), DtalType::I64));
-    let both_have_constraints = has_constraint_info(&lhs_ty) && has_constraint_info(&rhs_ty);
+    let both_have_constraints = is_concrete_const(&lhs_ty) && is_concrete_const(&rhs_ty);
     if is_i64_op && both_have_constraints
         && !matches!(op, BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
                       | BinaryOp::Shl | BinaryOp::Shr)
@@ -668,14 +668,11 @@ fn verify_binop(
     Ok(())
 }
 
-/// Check if a DTAL type carries constraint information that the verifier
-/// can use for overflow proofs. Returns false for bare `Int`/`I64` types
-/// where the DTAL conversion widened away the refinement.
-fn has_constraint_info(ty: &DtalType) -> bool {
-    matches!(
-        ty,
-        DtalType::SingletonInt(_) | DtalType::RefinedInt { .. } | DtalType::ExistentialInt { .. }
-    )
+/// Check if a DTAL type has a compile-time-known constant value.
+/// Only constant singletons can be overflow-checked at the DTAL level
+/// without the full frontend Z3 context (which includes i64 range axioms).
+fn is_concrete_const(ty: &DtalType) -> bool {
+    matches!(ty, DtalType::SingletonInt(IndexExpr::Const(_)))
 }
 
 /// Check that a symbolic expression is provably within [INT_MIN, INT_MAX]
