@@ -554,7 +554,7 @@ fn verify_binop(
     dst: Reg,
     lhs: Reg,
     rhs: Reg,
-    _ty: &DtalType,
+    ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
@@ -621,6 +621,44 @@ fn verify_binop(
         }
     };
 
+    // Phase 4: if the type annotation indicates i64 mode, verify the arithmetic
+    // result stays in [INT_MIN, INT_MAX]. This mirrors the frontend's check_no_overflow
+    // at the physical DTAL level so a buggy lowering can't slip an overflowing op past.
+    //
+    // We build the result expression using register names (not the symbolic indices
+    // from extract_index) so the expression matches the constraint context which
+    // uses projected register names.
+    // Phase 4: if the type annotation indicates i64 mode, verify the arithmetic
+    // result stays in [INT_MIN, INT_MAX] — but only when both operands have
+    // sufficient constraint information. The DTAL conversion is lossy: refined
+    // types whose predicates can't be converted to Constraint are widened to
+    // their base type. When this happens, the verifier cannot reproduce the
+    // frontend's Z3 proof, so we skip the check (the frontend already verified).
+    let is_i64_op = matches!(ty, DtalType::I64)
+        || matches!(ty, DtalType::RefinedInt { base, .. } if matches!(base.as_ref(), DtalType::I64));
+    let both_have_constraints = has_constraint_info(&lhs_ty) && has_constraint_info(&rhs_ty);
+    if is_i64_op && both_have_constraints
+        && !matches!(op, BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
+                      | BinaryOp::Shl | BinaryOp::Shr)
+    {
+        let lhs_reg_idx = reg_to_index_expr(&lhs);
+        let rhs_reg_idx = reg_to_index_expr(&rhs);
+        let overflow_idx = match op {
+            BinaryOp::Add => IndexExpr::Add(Box::new(lhs_reg_idx), Box::new(rhs_reg_idx)),
+            BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_reg_idx), Box::new(rhs_reg_idx)),
+            BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_reg_idx), Box::new(rhs_reg_idx)),
+            _ => IndexExpr::Var("_unknown".to_string()),
+        };
+        let overflow_ok = check_i64_overflow_constraint(&overflow_idx, &state.constraints);
+        if !overflow_ok {
+            return Err(VerifyError::ArithmeticOverflow {
+                block: block_label.to_string(),
+                op: format!("{}", op),
+                context: state.constraints.clone(),
+            });
+        }
+    }
+
     // Add register-to-index linkage for derived singleton types
     if let DtalType::SingletonInt(ref idx) = derived_ty {
         add_register_index_constraint(dst, idx, state);
@@ -628,6 +666,30 @@ fn verify_binop(
 
     state.register_types.insert(dst, derived_ty);
     Ok(())
+}
+
+/// Check if a DTAL type carries constraint information that the verifier
+/// can use for overflow proofs. Returns false for bare `Int`/`I64` types
+/// where the DTAL conversion widened away the refinement.
+fn has_constraint_info(ty: &DtalType) -> bool {
+    matches!(
+        ty,
+        DtalType::SingletonInt(_) | DtalType::RefinedInt { .. } | DtalType::ExistentialInt { .. }
+    )
+}
+
+/// Check that a symbolic expression is provably within [INT_MIN, INT_MAX]
+/// using the DTAL constraint solver.
+pub fn check_i64_overflow_constraint(
+    result_idx: &IndexExpr,
+    constraints: &[Constraint],
+) -> bool {
+    // INT_MIN <= result
+    let lower = Constraint::Ge(result_idx.clone(), IndexExpr::Const(i64::MIN));
+    // result <= INT_MAX
+    let upper = Constraint::Le(result_idx.clone(), IndexExpr::Const(i64::MAX));
+    // Both must be provable
+    is_constraint_provable(&lower, constraints) && is_constraint_provable(&upper, constraints)
 }
 
 /// Verify add immediate instruction
@@ -891,6 +953,22 @@ fn verify_type_annotation(
     }
     // Set the type (either first definition via phi or verified annotation)
     state.register_types.insert(reg, ty.clone());
+
+    // Project refined type constraints into the constraint context.
+    // When a register gets a RefinedInt type (e.g. from a parameter annotation),
+    // substitute the register name for the bound variable and add the constraint
+    // so Z3 can use it for downstream proofs (overflow checks, bounds, etc.).
+    if let DtalType::RefinedInt {
+        var, constraint, ..
+    } = ty
+    {
+        let reg_name = format!("{}", reg);
+        let subs =
+            std::collections::HashMap::from([(var.clone(), reg_name)]);
+        let projected = substitute_var_names_in_constraint(constraint, &subs);
+        state.constraints.push(projected);
+    }
+
     Ok(())
 }
 

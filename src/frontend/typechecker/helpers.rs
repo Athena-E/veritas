@@ -132,7 +132,7 @@ pub fn check_const_fold_overflow<'src>(
     // Only flag arith ops that can overflow — bitwise and/or/xor never do.
     let can_overflow = matches!(
         op,
-        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Shl
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Shl | BinOp::Shr
     );
     if !can_overflow {
         return Ok(());
@@ -152,6 +152,7 @@ pub fn check_const_fold_overflow<'src>(
                 BinOp::Div => "/",
                 BinOp::Mod => "%",
                 BinOp::Shl => "<<",
+                BinOp::Shr => ">>",
                 _ => unreachable!(),
             };
             return Err(TypeError::IntegerOverflow {
@@ -383,7 +384,7 @@ pub fn check_no_overflow<'src>(
 
     // Bitwise ops (except shifts) and comparison/logical ops cannot overflow.
     match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Shl | BinOp::Div | BinOp::Mod => {}
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Shl | BinOp::Shr | BinOp::Div | BinOp::Mod => {}
         _ => return Ok(()),
     }
 
@@ -393,6 +394,7 @@ pub fn check_no_overflow<'src>(
         BinOp::Sub => "-",
         BinOp::Mul => "*",
         BinOp::Shl => "<<",
+        BinOp::Shr => ">>",
         BinOp::Div => "/",
         BinOp::Mod => "%",
         _ => unreachable!(),
@@ -434,6 +436,39 @@ pub fn check_no_overflow<'src>(
             op: op_str.to_string(),
             span,
         });
+    }
+
+    // For shifts, additionally prove the count is in [0, 64).
+    // x86 masks the count to 6 bits, so `x << 65` silently becomes `x << 1`
+    // — a correctness bug the type system should catch.
+    if matches!(op, BinOp::Shl | BinOp::Shr) {
+        // rhs >= 0
+        let count_lower = Expr::BinOp {
+            op: BinOp::Gte,
+            lhs: Box::new((rhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy_span)),
+        };
+        // rhs < 64
+        let count_upper = Expr::BinOp {
+            op: BinOp::Lt,
+            lhs: Box::new((rhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(64)), dummy_span)),
+        };
+        let count_in_range = Expr::BinOp {
+            op: BinOp::And,
+            lhs: Box::new((count_lower, dummy_span)),
+            rhs: Box::new((count_upper, dummy_span)),
+        };
+        let prop = IProposition {
+            var: "_shift_count".to_string(),
+            predicate: Arc::new((count_in_range, dummy_span)),
+        };
+        if !check_provable(ctx, &prop) {
+            return Err(TypeError::IntegerOverflow {
+                op: op_str.to_string(),
+                span,
+            });
+        }
     }
 
     // For `/` and `%`, additionally rule out INT_MIN / -1 which also overflows.

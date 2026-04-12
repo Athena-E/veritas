@@ -424,6 +424,16 @@ fn seed_register_constraints(state: &mut TypeState) {
                 opened = checker::substitute_select_names(&opened, &subs);
                 Some(opened)
             }
+            DtalType::RefinedInt {
+                var, constraint, ..
+            } => {
+                // Project refinement constraint: substitute the bound variable
+                // with the register name so Z3 can use it in proofs.
+                let reg_name = format!("{}", reg);
+                let subs = std::collections::HashMap::from([(var.clone(), reg_name)]);
+                let projected = checker::substitute_var_names_in_constraint(constraint, &subs);
+                Some(projected)
+            }
             _ => None,
         })
         .collect();
@@ -2225,6 +2235,86 @@ mod tests {
         assert!(
             verify_dtal(&program).is_ok(),
             "Prologue should define scratch registers"
+        );
+    }
+
+    #[test]
+    fn test_i64_overflow_check_function() {
+        // Test the actual check_i64_overflow_constraint function
+        let ctx = vec![
+            Constraint::And(
+                Box::new(Constraint::Ge(
+                    IndexExpr::Var("v0".into()),
+                    IndexExpr::Const(0),
+                )),
+                Box::new(Constraint::Le(
+                    IndexExpr::Var("v0".into()),
+                    IndexExpr::Const(1000),
+                )),
+            ),
+            Constraint::And(
+                Box::new(Constraint::Ge(
+                    IndexExpr::Var("v1".into()),
+                    IndexExpr::Const(0),
+                )),
+                Box::new(Constraint::Le(
+                    IndexExpr::Var("v1".into()),
+                    IndexExpr::Const(1000),
+                )),
+            ),
+        ];
+        let sum = IndexExpr::Add(
+            Box::new(IndexExpr::Var("v0".into())),
+            Box::new(IndexExpr::Var("v1".into())),
+        );
+        assert!(
+            checker::check_i64_overflow_constraint(&sum, &ctx),
+            "check_i64_overflow_constraint should pass for bounded operands"
+        );
+    }
+
+    #[test]
+    fn test_i64_overflow_constraint_proof() {
+        // Direct test: can is_constraint_provable prove overflow bounds
+        // given operand refinement constraints?
+        let ctx = vec![
+            Constraint::And(
+                Box::new(Constraint::Ge(
+                    IndexExpr::Var("v0".into()),
+                    IndexExpr::Const(0),
+                )),
+                Box::new(Constraint::Le(
+                    IndexExpr::Var("v0".into()),
+                    IndexExpr::Const(1000),
+                )),
+            ),
+            Constraint::And(
+                Box::new(Constraint::Ge(
+                    IndexExpr::Var("v1".into()),
+                    IndexExpr::Const(0),
+                )),
+                Box::new(Constraint::Le(
+                    IndexExpr::Var("v1".into()),
+                    IndexExpr::Const(1000),
+                )),
+            ),
+        ];
+
+        let sum = IndexExpr::Add(
+            Box::new(IndexExpr::Var("v0".into())),
+            Box::new(IndexExpr::Var("v1".into())),
+        );
+
+        let lower = Constraint::Ge(sum.clone(), IndexExpr::Const(i64::MIN));
+        let upper = Constraint::Le(sum, IndexExpr::Const(i64::MAX));
+
+        assert!(
+            checker::is_constraint_provable(&lower, &ctx),
+            "v0+v1 >= INT_MIN should be provable from v0,v1 in [0,1000]"
+        );
+        assert!(
+            checker::is_constraint_provable(&upper, &ctx),
+            "v0+v1 <= INT_MAX should be provable from v0,v1 in [0,1000]"
         );
     }
 }

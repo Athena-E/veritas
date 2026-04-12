@@ -1043,6 +1043,14 @@ pub fn check_function<'src>(
         if is_subtype(&func_ctx, ty, &IType::I64) {
             func_ctx = add_i64_range_props(func_ctx, param.name);
         }
+
+        // For array parameters with symbolic size, add axioms:
+        //   len >= 0  (arrays cannot have negative length)
+        //   len <= INT_MAX  (array length fits in a machine word)
+        // These are load-bearing for proving i64 loop counter arithmetic.
+        if let IType::Array { size: IValue::Symbolic(size_var), .. } = ty {
+            func_ctx = add_array_length_axioms(func_ctx, size_var);
+        }
     }
     // Set expected return type for checking return statements
     func_ctx = func_ctx.with_expected_return(return_type.clone());
@@ -1453,6 +1461,49 @@ fn add_i64_range_props<'src>(
     };
 
     ctx.with_proposition(lower_prop).with_proposition(upper_prop)
+}
+
+/// Add implicit axioms for symbolic array lengths:
+///   len >= 0       (arrays cannot have negative length)
+///   len <= INT_MAX (array length is representable as a machine integer)
+///
+/// These are load-bearing for proving loop counter arithmetic on i64 indices.
+fn add_array_length_axioms<'src>(
+    ctx: TypingContext<'src>,
+    size_var: &str,
+) -> TypingContext<'src> {
+    use crate::common::ast::{BinOp, Expr, Literal};
+    use chumsky::prelude::SimpleSpan;
+
+    let dummy = SimpleSpan::new(0, 0);
+    // We leak the string to get a &'src str for use in Expr::Variable.
+    let var_name: &'src str = Box::leak(size_var.to_string().into_boxed_str());
+    let var = Expr::Variable(var_name);
+
+    // len >= 0
+    let nonneg = Expr::BinOp {
+        op: BinOp::Gte,
+        lhs: Box::new((var.clone(), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy)),
+    };
+    let nonneg_prop = IProposition {
+        var: size_var.to_string(),
+        predicate: Arc::new((nonneg, dummy)),
+    };
+
+    // len <= INT_MAX
+    let bounded = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((var, dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX)), dummy)),
+    };
+    let bounded_prop = IProposition {
+        var: size_var.to_string(),
+        predicate: Arc::new((bounded, dummy)),
+    };
+
+    ctx.with_proposition(nonneg_prop)
+        .with_proposition(bounded_prop)
 }
 
 /// Evaluate array size expression to IValue
