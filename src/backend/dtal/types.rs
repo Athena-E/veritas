@@ -146,11 +146,16 @@ impl fmt::Display for DtalType {
             DtalType::RefMut(inner) => write!(f, "&mut {}", inner),
             DtalType::SingletonInt(idx) => write!(f, "int({})", idx),
             DtalType::RefinedInt {
-                base: _,
+                base,
                 var,
                 constraint,
             } => {
-                write!(f, "{{{}: int | {} }}", var, constraint)
+                let base_name = if matches!(base.as_ref(), DtalType::I64) {
+                    "i64"
+                } else {
+                    "int"
+                };
+                write!(f, "{{{}: {} | {} }}", var, base_name, constraint)
             }
             DtalType::Master(inner) => write!(f, "master({})", inner),
             DtalType::ExistentialInt {

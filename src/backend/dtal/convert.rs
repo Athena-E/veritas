@@ -5,7 +5,7 @@
 //! during `DtalType::from_itype` conversion.
 
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-use crate::common::ast::{BinOp, Expr, Literal};
+use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 
 /// Convert an Expr to a Constraint (for boolean expressions)
 pub fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
@@ -54,6 +54,10 @@ pub fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
                 _ => None,
             }
         }
+        Expr::UnaryOp {
+            op: UnaryOp::Not,
+            cond,
+        } => Some(Constraint::Not(Box::new(expr_to_constraint(&cond.0)?))),
         Expr::Literal(Literal::Bool(true)) => Some(Constraint::True),
         Expr::Literal(Literal::Bool(false)) => Some(Constraint::False),
         Expr::Forall {
@@ -98,6 +102,17 @@ pub fn expr_to_index(expr: &Expr) -> Option<IndexExpr> {
                 BinOp::Mod => Some(IndexExpr::Mod(Box::new(l), Box::new(r))),
                 _ => None,
             }
+        }
+        // Unary negation: -e  →  Sub(0, e)
+        Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            cond,
+        } => {
+            let inner = expr_to_index(&cond.0)?;
+            Some(IndexExpr::Sub(
+                Box::new(IndexExpr::Const(0)),
+                Box::new(inner),
+            ))
         }
         Expr::Index { base, index } => {
             if let Expr::Variable(name) = &base.0 {
