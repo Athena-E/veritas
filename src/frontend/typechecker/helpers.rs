@@ -327,6 +327,144 @@ pub fn check_array_bounds_expr<'src>(
     Ok(())
 }
 
+/// Check that a binary arithmetic operation cannot overflow 64-bit signed range.
+///
+/// Builds the proposition `INT_MIN <= lhs op rhs <= INT_MAX` and asks the SMT oracle
+/// to prove it under the current typing context. If the oracle cannot discharge it,
+/// returns `TypeError::IntegerOverflow`.
+///
+/// Phase 1: this helper exists but is not yet called from `synth_expr`. Wiring happens
+/// in Phase 3 behind the `--check-overflow` flag.
+#[allow(dead_code)]
+pub fn check_no_overflow<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    op: BinOp,
+    lhs_expr: &Expr<'src>,
+    rhs_expr: &Expr<'src>,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::{TypeError, check_provable};
+
+    // Bitwise ops (except shifts) and comparison/logical ops cannot overflow.
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Shl | BinOp::Div | BinOp::Mod => {}
+        _ => return Ok(()),
+    }
+
+    let dummy_span = SimpleSpan::new(0, 0);
+    let op_str = match op {
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Shl => "<<",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        _ => unreachable!(),
+    };
+
+    // result = lhs op rhs
+    let result_expr = Expr::BinOp {
+        op,
+        lhs: Box::new((lhs_expr.clone(), dummy_span)),
+        rhs: Box::new((rhs_expr.clone(), dummy_span)),
+    };
+
+    // INT_MIN <= result
+    let lower = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy_span)),
+        rhs: Box::new((result_expr.clone(), dummy_span)),
+    };
+    // result <= INT_MAX
+    let upper = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((result_expr, dummy_span)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX)), dummy_span)),
+    };
+    // (INT_MIN <= result) && (result <= INT_MAX)
+    let in_range = Expr::BinOp {
+        op: BinOp::And,
+        lhs: Box::new((lower, dummy_span)),
+        rhs: Box::new((upper, dummy_span)),
+    };
+
+    let prop = IProposition {
+        var: "_ov".to_string(),
+        predicate: Arc::new((in_range, dummy_span)),
+    };
+
+    if !check_provable(ctx, &prop) {
+        return Err(TypeError::IntegerOverflow {
+            op: op_str.to_string(),
+            span,
+        });
+    }
+
+    // For `/` and `%`, additionally rule out INT_MIN / -1 which also overflows.
+    if matches!(op, BinOp::Div | BinOp::Mod) {
+        // NOT (lhs == INT_MIN && rhs == -1)
+        let lhs_is_min = Expr::BinOp {
+            op: BinOp::Eq,
+            lhs: Box::new((lhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy_span)),
+        };
+        let rhs_is_neg_one = Expr::BinOp {
+            op: BinOp::Eq,
+            lhs: Box::new((rhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(-1)), dummy_span)),
+        };
+        let both = Expr::BinOp {
+            op: BinOp::And,
+            lhs: Box::new((lhs_is_min, dummy_span)),
+            rhs: Box::new((rhs_is_neg_one, dummy_span)),
+        };
+        let not_both = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            cond: Box::new((both, dummy_span)),
+        };
+        let prop = IProposition {
+            var: "_ov_div".to_string(),
+            predicate: Arc::new((not_both, dummy_span)),
+        };
+        if !check_provable(ctx, &prop) {
+            return Err(TypeError::IntegerOverflow {
+                op: op_str.to_string(),
+                span,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Check that unary negation cannot overflow (operand must not be `INT_MIN`).
+///
+/// Phase 1: not yet called from `synth_expr`. Wiring happens in Phase 3.
+#[allow(dead_code)]
+pub fn check_no_negation_overflow<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    operand_expr: &Expr<'src>,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::{TypeError, check_provable};
+
+    let dummy_span = SimpleSpan::new(0, 0);
+    let not_min = Expr::BinOp {
+        op: BinOp::NotEq,
+        lhs: Box::new((operand_expr.clone(), dummy_span)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy_span)),
+    };
+    let prop = IProposition {
+        var: "_neg_ov".to_string(),
+        predicate: Arc::new((not_min, dummy_span)),
+    };
+
+    if !check_provable(ctx, &prop) {
+        return Err(TypeError::NegationOverflow { span });
+    }
+    Ok(())
+}
+
 /// Check that the divisor in a division expression is provably non-zero
 pub fn check_divisor_nonzero<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,

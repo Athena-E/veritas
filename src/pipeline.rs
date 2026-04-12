@@ -265,6 +265,58 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
     })
 }
 
+/// Compile source code with overflow checking enabled.
+/// Phase 1: plumbing only — the typechecker helpers that actually emit the
+/// obligation are not yet wired. This entry point flips the context flag so
+/// Phase 3's wiring will begin checking as soon as it lands, without further
+/// changes in main.rs.
+pub fn compile_verbose_with_overflow<'src>(
+    source: &'src str,
+    bare_metal: bool,
+) -> Result<VerboseOutput<'src>, CompileError<'src>> {
+    use crate::frontend::typechecker::check_program_with_overflow;
+
+    let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
+        CompileError::LexError(
+            errors
+                .iter()
+                .map(|e| format!("{:?}", e))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    })?;
+    let token_strings: Vec<(String, String)> = raw_tokens
+        .iter()
+        .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
+        .collect();
+    let eoi = (source.len()..source.len()).into();
+    let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
+    let ast = program_parser()
+        .parse(token_stream)
+        .into_result()
+        .map_err(|errors| {
+            CompileError::ParseError(
+                errors
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        })?;
+    let tast =
+        check_program_with_overflow(&ast, bare_metal, true).map_err(CompileError::TypeError)?;
+    let tir = lower_program(&tast);
+    let dtal_program = codegen_program(&tir);
+    let dtal = emit_program(&dtal_program);
+    Ok(VerboseOutput {
+        tokens: token_strings,
+        tast,
+        tir,
+        dtal_program,
+        dtal,
+    })
+}
+
 /// Compile source code for bare-metal target (no Linux intrinsics)
 pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     use crate::frontend::typechecker::check_program_bare_metal;

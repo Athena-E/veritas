@@ -8,6 +8,7 @@ use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
 use veritas::frontend::typechecker::smt::{get_frontend_smt_stats, reset_frontend_smt_stats};
 use veritas::pipeline::{
     CompileError, compile_verbose, compile_verbose_bare_metal, compile_verbose_optimized,
+    compile_verbose_with_overflow,
 };
 use veritas::verifier::smt::{get_verifier_smt_stats, reset_verifier_smt_stats};
 use veritas::verifier::verify_dtal;
@@ -59,6 +60,8 @@ fn main() {
         eprintln!("                       the default verify-after-regalloc pipeline");
         eprintln!("  --target-bare-metal  Generate Multiboot ELF for bare-metal/QEMU:");
         eprintln!("                       qemu-system-x86_64 -kernel <binary> -serial stdio");
+        eprintln!("  --check-overflow     Prove every arithmetic op cannot overflow i64");
+        eprintln!("                       (experimental, off by default)");
         eprintln!();
         eprintln!("Optimisation:");
         eprintln!("  -O, --optimize     Enable all optimisations");
@@ -120,6 +123,7 @@ fn main() {
     let native = args.iter().any(|a| a == "--native");
     let physical = !args.iter().any(|a| a == "--legacy-pipeline");
     let bare_metal = args.iter().any(|a| a == "--target-bare-metal");
+    let check_overflow = args.iter().any(|a| a == "--check-overflow");
     let output_file = args
         .iter()
         .position(|a| a == "-o")
@@ -177,6 +181,8 @@ fn main() {
     // Use optimized compilation if any optimizations are enabled
     let compile_result = if opt_config.any_enabled() {
         compile_verbose_optimized(&src, &opt_config)
+    } else if check_overflow {
+        compile_verbose_with_overflow(&src, bare_metal)
     } else if bare_metal {
         compile_verbose_bare_metal(&src)
     } else {

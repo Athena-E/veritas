@@ -133,6 +133,15 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
+    IntegerOverflow {
+        op: String,
+        span: Span,
+    },
+
+    NegationOverflow {
+        span: Span,
+    },
+
     InvariantNotEstablished {
         invariant_span: Span,
     },
@@ -352,6 +361,22 @@ impl<'src> fmt::Display for TypeError<'src> {
 
             TypeError::DivisionByZero { span } => {
                 write!(f, "Possible division by zero at {:?}", span)
+            }
+
+            TypeError::IntegerOverflow { op, span } => {
+                write!(
+                    f,
+                    "Possible integer overflow in `{}` at {:?}",
+                    op, span
+                )
+            }
+
+            TypeError::NegationOverflow { span } => {
+                write!(
+                    f,
+                    "Possible overflow in negation at {:?} (operand may be INT_MIN)",
+                    span
+                )
             }
 
             TypeError::InvariantNotEstablished { invariant_span } => {

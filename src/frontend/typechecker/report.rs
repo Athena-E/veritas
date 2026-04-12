@@ -42,6 +42,8 @@ fn get_span_start(error: &TypeError) -> usize {
         TypeError::NotAConstant { span, .. } => span.start,
         TypeError::InvalidPostconditionVariable { span, .. } => span.start,
         TypeError::DivisionByZero { span, .. } => span.start,
+        TypeError::IntegerOverflow { span, .. } => span.start,
+        TypeError::NegationOverflow { span, .. } => span.start,
         TypeError::InvariantNotEstablished { invariant_span, .. } => invariant_span.start,
         TypeError::InvariantNotPreserved { invariant_span, .. } => invariant_span.start,
     }
@@ -430,6 +432,36 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
             )
             .with_help("Ensure the divisor is provably non-zero, e.g. by using a refined type like `{v: int | v != 0}` or guarding with an `if` check.")
             .finish(),
+
+        TypeError::IntegerOverflow { op, span } => {
+            Report::build(ReportKind::Error, span.start..span.end)
+                .with_code("E023")
+                .with_message("Possible integer overflow")
+                .with_label(
+                    Label::new(span.start..span.end)
+                        .with_message(format!("`{}` may overflow 64-bit signed range", op))
+                        .with_color(Color::Red),
+                )
+                .with_help(
+                    "Tighten operand bounds with a refined type like `{v: int | INT_MIN/2 < v && v < INT_MAX/2}`, or guard the operation with an explicit range check.",
+                )
+                .finish()
+        }
+
+        TypeError::NegationOverflow { span } => {
+            Report::build(ReportKind::Error, span.start..span.end)
+                .with_code("E024")
+                .with_message("Possible overflow in negation")
+                .with_label(
+                    Label::new(span.start..span.end)
+                        .with_message("operand may be INT_MIN, whose negation overflows")
+                        .with_color(Color::Red),
+                )
+                .with_help(
+                    "Rule out `INT_MIN` with a refinement (e.g. `v > INT_MIN`) or an explicit guard.",
+                )
+                .finish()
+        }
 
         TypeError::InvariantNotPreserved { invariant_span } => {
             Report::build(ReportKind::Error, invariant_span.start..invariant_span.end)

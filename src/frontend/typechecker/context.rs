@@ -54,6 +54,11 @@ pub struct TypingContext<'src> {
     // Whether quantifier expressions (forall/exists) are allowed
     // True in specification contexts (invariants, requires, ensures)
     pub allow_quantifiers: bool,
+
+    // Whether arithmetic operations must be proved overflow-free.
+    // Phase 1: plumbing only — helpers exist but are not yet called from synth_expr.
+    // Phase 3 will gate `check_no_overflow` calls on this flag.
+    pub check_overflow: bool,
 }
 
 impl<'src> TypingContext<'src> {
@@ -67,6 +72,7 @@ impl<'src> TypingContext<'src> {
             postcondition: None,
             current_function: None,
             allow_quantifiers: false,
+            check_overflow: false,
         }
     }
 
@@ -81,6 +87,7 @@ impl<'src> TypingContext<'src> {
             postcondition: None,
             current_function: None,
             allow_quantifiers: false,
+            check_overflow: false,
         }
     }
 
