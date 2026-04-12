@@ -53,78 +53,110 @@ pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'
 /// Constant folding (join-op from formal semantics)
 /// Attempts to compute the result type of binary operations on singleton types
 pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'src> {
-    match (op, ty1, ty2) {
-        // Arithmetic on singleton ints
-        (
-            BinOp::Add,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 + n2)),
-        (
-            BinOp::Sub,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 - n2)),
-        (
-            BinOp::Mul,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 * n2)),
-        (
-            BinOp::Div,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) if *n2 != 0 => IType::SingletonInt(IValue::Int(n1 / n2)),
-        (
-            BinOp::Mod,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) if *n2 != 0 => IType::SingletonInt(IValue::Int(n1 % n2)),
-        (
-            BinOp::BitAnd,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 & n2)),
-        (
-            BinOp::BitOr,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 | n2)),
-        (
-            BinOp::BitXor,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 ^ n2)),
-        (
-            BinOp::Shl,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 << n2)),
-        (
-            BinOp::Shr,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 >> n2)),
+    // Try constant folding when both operands are compile-time singleton ints.
+    // Uses checked arithmetic to avoid silently wrapping at compile time.
+    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) =
+        (ty1, ty2)
+    {
+        if let Some(folded) = checked_fold(op, *n1, *n2) {
+            return IType::SingletonInt(IValue::Int(folded));
+        }
+    }
 
-        // Fallback to base int type
-        (
-            BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Div
-            | BinOp::Mod
-            | BinOp::BitAnd
-            | BinOp::BitOr
-            | BinOp::BitXor
-            | BinOp::Shl
-            | BinOp::Shr,
-            _,
-            _,
-        ) => IType::Int,
+    match op {
+        BinOp::Add
+        | BinOp::Sub
+        | BinOp::Mul
+        | BinOp::Div
+        | BinOp::Mod
+        | BinOp::BitAnd
+        | BinOp::BitOr
+        | BinOp::BitXor
+        | BinOp::Shl
+        | BinOp::Shr => IType::Int,
 
         // Comparisons always produce bool
         _ => IType::Bool,
     }
+}
+
+/// Attempt to constant-fold a binary arithmetic op on two `i64` values using
+/// checked arithmetic. Returns `None` if the op overflows 64-bit signed range,
+/// is undefined (shift count out of range), or is not foldable.
+///
+/// Overflow cases deliberately return `None` instead of wrapping — callers in
+/// Phase 2+ use this to reject compile-time-known overflowing literals.
+pub fn checked_fold(op: BinOp, n1: i64, n2: i64) -> Option<i64> {
+    match op {
+        BinOp::Add => n1.checked_add(n2),
+        BinOp::Sub => n1.checked_sub(n2),
+        BinOp::Mul => n1.checked_mul(n2),
+        BinOp::Div if n2 != 0 => n1.checked_div(n2),
+        BinOp::Mod if n2 != 0 => n1.checked_rem(n2),
+        BinOp::Div | BinOp::Mod => None,
+        BinOp::BitAnd => Some(n1 & n2),
+        BinOp::BitOr => Some(n1 | n2),
+        BinOp::BitXor => Some(n1 ^ n2),
+        BinOp::Shl => u32::try_from(n2).ok().and_then(|k| n1.checked_shl(k)),
+        BinOp::Shr => u32::try_from(n2).ok().and_then(|k| n1.checked_shr(k)),
+        _ => None,
+    }
+}
+
+/// Phase 2 entry point: when the typechecker has `check_overflow` enabled,
+/// this helper rejects any compile-time-known arithmetic that would overflow
+/// 64-bit signed range.
+///
+/// If both operands are singleton ints and `checked_fold` returns `None` for
+/// an arithmetic op, this raises `IntegerOverflow`. Otherwise it returns
+/// `Ok(())` and the normal folding / refinement path continues.
+///
+/// For `/` and `%`, the existing `check_divisor_nonzero` catches `n2 == 0`;
+/// this helper additionally catches `INT_MIN / -1`.
+pub fn check_const_fold_overflow<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    op: BinOp,
+    ty1: &IType<'src>,
+    ty2: &IType<'src>,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::TypeError;
+
+    if !ctx.check_overflow {
+        return Ok(());
+    }
+    // Only flag arith ops that can overflow — bitwise and/or/xor never do.
+    let can_overflow = matches!(
+        op,
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Shl
+    );
+    if !can_overflow {
+        return Ok(());
+    }
+    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) =
+        (ty1, ty2)
+    {
+        // Divide-by-zero is a separate error; don't mask it with IntegerOverflow.
+        if matches!(op, BinOp::Div | BinOp::Mod) && *n2 == 0 {
+            return Ok(());
+        }
+        if checked_fold(op, *n1, *n2).is_none() {
+            let op_str = match op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::Mod => "%",
+                BinOp::Shl => "<<",
+                _ => unreachable!(),
+            };
+            return Err(TypeError::IntegerOverflow {
+                op: op_str.to_string(),
+                span,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Converts comparison expressions into propositions

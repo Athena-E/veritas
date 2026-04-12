@@ -4,6 +4,7 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
+use crate::frontend::typechecker::helpers::check_const_fold_overflow;
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
     check_divisor_nonzero, check_stmts, extract_proposition, is_subtype, join_op,
@@ -105,6 +106,10 @@ pub fn synth_expr<'src>(
             if *op == BinOp::Div || *op == BinOp::Mod {
                 check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
+
+            // Phase 2: reject compile-time-known overflowing folds
+            // (no-op when ctx.check_overflow is false)
+            check_const_fold_overflow(ctx, *op, &ty1, &ty2, span)?;
 
             // Try constant folding first for precise singleton types
             let ty = match join_op(*op, &ty1, &ty2) {
