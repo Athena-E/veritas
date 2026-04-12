@@ -99,9 +99,10 @@ verify_example!(e2e_20_array_loop_invariant, "20_array_loop_invariant.veri");
 verify_example!(e2e_selective_invalidation, "selective_invalidation.veri");
 verify_example!(e2e_sortedness, "sortedness.veri");
 verify_example!(e2e_29_i64_basic, "29_i64_basic.veri");
+verify_example!(e2e_30_i64_safe_midpoint, "30_i64_safe_midpoint.veri");
 
 // ============================================================================
-// Error cases: should fail during compilation (30 tests)
+// Error cases: should fail during compilation
 // ============================================================================
 
 expect_compile_error!(e2e_err_01_type_mismatch, "01_type_mismatch.veri");
@@ -177,3 +178,15 @@ expect_compile_error!(
     "division_by_zero_symbolic.veri"
 );
 expect_compile_error!(e2e_err_i64_overflow, "i64_overflow.veri");
+expect_compile_error!(
+    e2e_err_i64_midpoint_overflow,
+    "i64_midpoint_overflow.veri"
+);
+expect_compile_error!(
+    e2e_err_i64_shift_out_of_range,
+    "i64_shift_out_of_range.veri"
+);
+expect_compile_error!(
+    e2e_err_i64_negation_overflow,
+    "i64_negation_overflow.veri"
+);
