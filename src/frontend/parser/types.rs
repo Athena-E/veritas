@@ -14,6 +14,7 @@ where
 
         let basic_type = select! {
             Token::Int => Type::Int,
+            Token::I64 => Type::I64,
             Token::Bool => Type::Bool,
         }
         .map_with(|t, e| (t, e.span()));
@@ -42,7 +43,7 @@ where
             )
             .map_with(|expr, e| (Type::SingletonInt(Box::new(expr)), e.span()));
 
-        // Refined int type
+        // Refined int type: {v: int | P}
         let refined_type = select! { Token::Ident(name) => name }
             .then_ignore(just(Token::Ctrl(':')))
             .then_ignore(just(Token::Int))
@@ -52,6 +53,23 @@ where
             .map_with(|(var, predicate), e| {
                 (
                     Type::RefinedInt {
+                        var,
+                        predicate: Box::new(predicate),
+                    },
+                    e.span(),
+                )
+            });
+
+        // Refined i64 type: {v: i64 | P}
+        let refined_i64_type = select! { Token::Ident(name) => name }
+            .then_ignore(just(Token::Ctrl(':')))
+            .then_ignore(just(Token::I64))
+            .then_ignore(just(Token::Op("|")))
+            .then(expr.clone())
+            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+            .map_with(|(var, predicate), e| {
+                (
+                    Type::RefinedI64 {
                         var,
                         predicate: Box::new(predicate),
                     },
@@ -73,6 +91,7 @@ where
             array_type,
             singleton_type,
             refined_type,
+            refined_i64_type,
             ref_type,
             basic_type,
         ))

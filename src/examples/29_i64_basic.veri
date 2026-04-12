@@ -1,0 +1,16 @@
+// Basic i64 arithmetic — all operations provably overflow-free.
+
+fn add_small(x: {v: i64 | v >= 0 && v <= 1000}, y: {v: i64 | v >= 0 && v <= 1000}) -> i64 {
+    x + y
+}
+
+fn negate_safe(n: {v: i64 | v > -9223372036854775807}) -> i64 {
+    0 - n
+}
+
+fn main() -> int {
+    let a: i64 = 3;
+    let b: i64 = 7;
+    let c: i64 = add_small(a, b);
+    0
+}

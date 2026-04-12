@@ -1036,6 +1036,13 @@ pub fn check_function<'src>(
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
+
+        // For i64-typed parameters, add implicit range bounds [INT_MIN, INT_MAX].
+        // Z3 models integers as unbounded; these axioms tell it the value is
+        // representable as a 64-bit signed machine integer.
+        if is_subtype(&func_ctx, ty, &IType::I64) {
+            func_ctx = add_i64_range_props(func_ctx, param.name);
+        }
     }
     // Set expected return type for checking return statements
     func_ctx = func_ctx.with_expected_return(return_type.clone());
@@ -1349,6 +1356,7 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
     match &ty.0 {
         AstType::Unit => Ok(IType::Unit),
         AstType::Int => Ok(IType::Int),
+        AstType::I64 => Ok(IType::I64),
         AstType::Bool => Ok(IType::Bool),
 
         AstType::Array { element_type, size } => {
@@ -1386,12 +1394,65 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
             })
         }
 
+        AstType::RefinedI64 { var, predicate } => {
+            let prop = crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new(*predicate.clone()),
+            };
+
+            Ok(IType::RefinedInt {
+                base: Arc::new(IType::I64),
+                prop,
+            })
+        }
+
         AstType::SingletonInt(expr) => {
             // Evaluate the expression to get the singleton value
             let value = eval_array_size(expr)?;
             Ok(IType::SingletonInt(value))
         }
     }
+}
+
+/// Add implicit `[INT_MIN, INT_MAX]` range propositions for an i64 binding.
+///
+/// Z3's Int sort is unbounded. When the user writes `x: i64`, we axiomatise
+/// that the value is representable as a 64-bit signed integer so that
+/// arithmetic overflow obligations like `INT_MIN <= x + y <= INT_MAX` can
+/// be discharged.
+fn add_i64_range_props<'src>(
+    ctx: TypingContext<'src>,
+    var_name: &'src str,
+) -> TypingContext<'src> {
+    use crate::common::ast::{BinOp, Expr, Literal};
+    use chumsky::prelude::SimpleSpan;
+
+    let dummy = SimpleSpan::new(0, 0);
+    let var = Expr::Variable(var_name);
+
+    // var >= INT_MIN
+    let lower = Expr::BinOp {
+        op: BinOp::Gte,
+        lhs: Box::new((var.clone(), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy)),
+    };
+    let lower_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((lower, dummy)),
+    };
+
+    // var <= INT_MAX
+    let upper = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((var, dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX)), dummy)),
+    };
+    let upper_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((upper, dummy)),
+    };
+
+    ctx.with_proposition(lower_prop).with_proposition(upper_prop)
 }
 
 /// Evaluate array size expression to IValue

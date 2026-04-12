@@ -100,6 +100,7 @@ pub fn lexer<'src>()
             "exists" => Token::Exists,
             "const" => Token::Const,
             "int" => Token::Int,
+            "i64" => Token::I64,
             "bool" => Token::Bool,
             "true" => Token::True,
             "false" => Token::False,

@@ -871,6 +871,7 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
     match s {
         "unit" | "()" => Ok(DtalType::Unit),
         "int" => Ok(DtalType::Int),
+        "i64" => Ok(DtalType::I64),
         "bool" => Ok(DtalType::Bool),
         _ if s.starts_with("int(") && s.ends_with(')') => {
             let inner = &s[4..s.len() - 1];

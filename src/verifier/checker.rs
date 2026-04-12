@@ -489,7 +489,7 @@ fn verify_mov_reg(
             add_register_index_constraint(dst, idx, state);
         }
         // Scalar types: link dst to src register variable
-        DtalType::Int | DtalType::RefinedInt { .. } | DtalType::Bool => {
+        DtalType::Int | DtalType::I64 | DtalType::RefinedInt { .. } | DtalType::Bool => {
             let src_idx = extract_index(&derived_ty, &src);
             add_register_index_constraint(dst, &src_idx, state);
         }
@@ -865,14 +865,17 @@ fn verify_type_annotation(
         let is_existential_narrowing = matches!(ty, DtalType::ExistentialInt { .. })
             && matches!(
                 existing_ty,
-                DtalType::Int | DtalType::SingletonInt(_) | DtalType::ExistentialInt { .. }
+                DtalType::Int
+                    | DtalType::I64
+                    | DtalType::SingletonInt(_)
+                    | DtalType::ExistentialInt { .. }
             );
 
         // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
         let is_prologue_refinement =
-            matches!(existing_ty, DtalType::Int) && matches!(reg, Reg::Physical(_));
+            matches!(existing_ty, DtalType::Int | DtalType::I64) && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
             && !is_prologue_refinement
@@ -954,6 +957,7 @@ fn is_numeric_type(ty: &DtalType) -> bool {
     matches!(
         ty,
         DtalType::Int
+            | DtalType::I64
             | DtalType::SingletonInt(_)
             | DtalType::RefinedInt { .. }
             | DtalType::ExistentialInt { .. }
@@ -984,16 +988,22 @@ pub fn types_compatible_with_constraints(
 ) -> bool {
     match (actual, expected) {
         (DtalType::Int, DtalType::Int) => true,
+        (DtalType::I64, DtalType::I64) => true,
+        (DtalType::I64, DtalType::Int) => true,
         (DtalType::Bool, DtalType::Bool) => true,
         (DtalType::Unit, DtalType::Unit) => true,
         (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => {
             a == b || is_constraint_provable(&Constraint::Eq(a.clone(), b.clone()), constraints)
         }
         (DtalType::SingletonInt(_), DtalType::Int) => true,
+        (DtalType::SingletonInt(_), DtalType::I64) => true,
         // At the DTAL level, booleans are integers 0/1
         (DtalType::SingletonInt(IndexExpr::Const(0 | 1)), DtalType::Bool) => true,
         (DtalType::Bool, DtalType::SingletonInt(IndexExpr::Const(0 | 1))) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
+        (DtalType::RefinedInt { base, .. }, DtalType::I64) => {
+            types_compatible_with_constraints(base, &DtalType::I64, constraints)
+        }
         (DtalType::SingletonInt(_), DtalType::RefinedInt { base, .. }) => {
             // A singleton is compatible with a refined type if it's compatible with the base
             types_compatible_with_constraints(actual, base.as_ref(), constraints)
@@ -1030,8 +1040,9 @@ pub fn types_compatible_with_constraints(
             augmented_ctx.push(witness_eq);
             is_constraint_provable(constraint, &augmented_ctx)
         }
-        // ExistentialInt <: Int — always true (erasure)
+        // ExistentialInt <: Int/I64 — always true (erasure)
         (DtalType::ExistentialInt { .. }, DtalType::Int) => true,
+        (DtalType::ExistentialInt { .. }, DtalType::I64) => true,
         // ExistentialInt <: RefinedInt — check existential constraint implies refinement
         (
             DtalType::ExistentialInt {

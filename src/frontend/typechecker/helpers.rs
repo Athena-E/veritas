@@ -28,7 +28,11 @@ pub fn reset_fresh_var_counter() {
 /// For expr `n + n`, produces `{v: int | v = n + n}`
 /// This enables SMT-based synthesis: the solver can derive properties
 /// from the equality constraint combined with known refinements
-pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'src> {
+pub fn build_equality_refinement<'src>(
+    expr: &Expr<'src>,
+    span: Span,
+    base: IType<'src>,
+) -> IType<'src> {
     let bound_var = fresh_var_name();
     let bound_var_leaked: &'src str = Box::leak(bound_var.clone().into_boxed_str());
 
@@ -42,7 +46,7 @@ pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'
     };
 
     IType::RefinedInt {
-        base: Arc::new(IType::Int),
+        base: Arc::new(base),
         prop: IProposition {
             var: bound_var,
             predicate: Arc::new((eq_predicate, span)),

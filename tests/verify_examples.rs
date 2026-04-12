@@ -98,6 +98,7 @@ verify_roundtrip!(e2e_roundtrip_add, "add.veri");
 verify_example!(e2e_20_array_loop_invariant, "20_array_loop_invariant.veri");
 verify_example!(e2e_selective_invalidation, "selective_invalidation.veri");
 verify_example!(e2e_sortedness, "sortedness.veri");
+verify_example!(e2e_29_i64_basic, "29_i64_basic.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation (30 tests)
@@ -175,3 +176,4 @@ expect_compile_error!(
     e2e_err_division_by_zero_symbolic,
     "division_by_zero_symbolic.veri"
 );
+expect_compile_error!(e2e_err_i64_overflow, "i64_overflow.veri");

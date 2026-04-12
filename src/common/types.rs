@@ -34,6 +34,7 @@ pub struct IProposition<'src> {
 pub enum IType<'src> {
     Unit,
     Int,
+    I64,
     Bool,
     Array {
         element_type: Arc<Self>,
@@ -157,6 +158,7 @@ impl<'src> fmt::Display for IType<'src> {
         match self {
             IType::Unit => write!(f, "()"),
             IType::Int => write!(f, "int"),
+            IType::I64 => write!(f, "i64"),
             IType::Bool => write!(f, "bool"),
             IType::Array { element_type, size } => {
                 write!(f, "[{}; {}]", element_type, size)

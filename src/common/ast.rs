@@ -26,6 +26,7 @@ pub enum Token<'src> {
     Const,
     // Type keywords
     Int,
+    I64,
     Bool,
     True,
     False,
@@ -54,6 +55,7 @@ impl fmt::Display for Token<'_> {
             Token::Exists => write!(f, "exists"),
             Token::Const => write!(f, "const"),
             Token::Int => write!(f, "int"),
+            Token::I64 => write!(f, "i64"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
@@ -130,6 +132,7 @@ pub enum Literal {
 pub enum Type<'src> {
     Unit,
     Int,
+    I64,
     Bool,
     Array {
         element_type: Box<Spanned<Self>>,
@@ -139,6 +142,10 @@ pub enum Type<'src> {
     RefMut(Box<Spanned<Self>>),
     SingletonInt(Box<Spanned<Expr<'src>>>),
     RefinedInt {
+        var: &'src str,
+        predicate: Box<Spanned<Expr<'src>>>,
+    },
+    RefinedI64 {
         var: &'src str,
         predicate: Box<Spanned<Expr<'src>>>,
     },
