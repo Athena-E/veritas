@@ -74,6 +74,10 @@ pub fn verify_instruction(
             verify_neg(*dst, *src, ty, state, block_label)?;
         }
 
+        DtalInstr::ShlImm { dst, src, ty, .. } | DtalInstr::ShrImm { dst, src, ty, .. } => {
+            verify_shift_imm(*dst, *src, ty, state, block_label)?;
+        }
+
         DtalInstr::TypeAnnotation { reg, ty } => {
             verify_type_annotation(*reg, ty, state, block_label)?;
         }
@@ -919,6 +923,18 @@ fn verify_not(
 }
 
 fn verify_neg(
+    dst: Reg,
+    src: Reg,
+    ty: &DtalType,
+    state: &mut TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    check_register_defined(src, state, block_label)?;
+    state.register_types.insert(dst, ty.clone());
+    Ok(())
+}
+
+fn verify_shift_imm(
     dst: Reg,
     src: Reg,
     ty: &DtalType,

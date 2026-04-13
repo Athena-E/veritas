@@ -542,6 +542,8 @@ fn allocate_instruction(
         | DtalInstr::MovReg { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
+        | DtalInstr::ShlImm { dst, .. }
+        | DtalInstr::ShrImm { dst, .. }
         | DtalInstr::Load { dst, .. }
         | DtalInstr::SetCC { dst, .. }
         | DtalInstr::Not { dst, .. }
@@ -761,6 +763,21 @@ fn allocate_instruction(
                 src: RAX,
                 ty: ty.clone(),
             });
+            emit_store_from(instrs, RAX, &dst_loc, ty.clone());
+        }
+
+        DtalInstr::ShlImm { dst, src, imm, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            let dst_loc = resolve_reg(*dst, alloc);
+            emit_load_to(instrs, &src_loc, RAX, ty.clone());
+            instrs.push(DtalInstr::ShlImm { dst: RAX, src: RAX, imm: *imm, ty: ty.clone() });
+            emit_store_from(instrs, RAX, &dst_loc, ty.clone());
+        }
+        DtalInstr::ShrImm { dst, src, imm, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            let dst_loc = resolve_reg(*dst, alloc);
+            emit_load_to(instrs, &src_loc, RAX, ty.clone());
+            instrs.push(DtalInstr::ShrImm { dst: RAX, src: RAX, imm: *imm, ty: ty.clone() });
             emit_store_from(instrs, RAX, &dst_loc, ty.clone());
         }
 

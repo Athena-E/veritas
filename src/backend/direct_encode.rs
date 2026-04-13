@@ -168,6 +168,13 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             });
         }
 
+        DtalInstr::ShlImm { dst, imm, .. } => {
+            out.push(X86Instr::ShlRI { dst: reg_to_x86(dst), imm: *imm });
+        }
+        DtalInstr::ShrImm { dst, imm, .. } => {
+            out.push(X86Instr::ShrRI { dst: reg_to_x86(dst), imm: *imm });
+        }
+
         DtalInstr::Load {
             dst, base, offset, ..
         } => {

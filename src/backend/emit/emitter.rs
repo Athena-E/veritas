@@ -215,6 +215,13 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::ShlImm { dst, src, imm, ty } => {
+            writeln!(output, "    shli {}, {}, {}    : {}", emit_reg(dst), emit_reg(src), imm, emit_type(ty)).unwrap();
+        }
+        DtalInstr::ShrImm { dst, src, imm, ty } => {
+            writeln!(output, "    shri {}, {}, {}    : {}", emit_reg(dst), emit_reg(src), imm, emit_type(ty)).unwrap();
+        }
+
         DtalInstr::Jmp { target } => {
             writeln!(output, "    jmp {}", target).unwrap();
         }

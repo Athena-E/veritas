@@ -101,6 +101,16 @@ fn try_peephole_pair(first: &DtalInstr, second: &DtalInstr) -> Option<DtalInstr>
 /// Returns true if the instruction was rewritten
 fn try_peephole(instr: &mut DtalInstr) -> bool {
     match instr {
+        // Shift by 0 → MovReg (identity)
+        DtalInstr::ShlImm { dst, src, imm: 0, ty } | DtalInstr::ShrImm { dst, src, imm: 0, ty } => {
+            *instr = DtalInstr::MovReg {
+                dst: *dst,
+                src: *src,
+                ty: ty.clone(),
+            };
+            true
+        }
+
         // AddImm with immediate 0 → MovReg (identity)
         DtalInstr::AddImm { dst, src, imm, ty } if *imm == 0 => {
             *instr = DtalInstr::MovReg {

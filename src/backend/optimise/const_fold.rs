@@ -29,6 +29,7 @@
 
 use crate::backend::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
 use crate::backend::dtal::regs::{Reg, VirtualReg};
+use crate::backend::dtal::types::DtalType;
 use std::collections::HashMap;
 
 /// Type alias for the constant map: virtual register → known immediate value
@@ -175,6 +176,45 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
+                // Strength reduction: Mul by power of 2 → ShlImm (commutative)
+                (Some(imm), None)
+                    if *op == BinaryOp::Mul && is_power_of_two(imm) =>
+                {
+                    *instr = DtalInstr::ShlImm {
+                        dst: *dst,
+                        src: *rhs,
+                        imm: imm.trailing_zeros() as u8,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+                (None, Some(imm))
+                    if *op == BinaryOp::Mul && is_power_of_two(imm) =>
+                {
+                    *instr = DtalInstr::ShlImm {
+                        dst: *dst,
+                        src: *lhs,
+                        imm: imm.trailing_zeros() as u8,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+
+                // Strength reduction: unsigned Div by power of 2 → ShrImm
+                (None, Some(imm))
+                    if *op == BinaryOp::Div
+                        && is_unsigned(ty)
+                        && is_power_of_two(imm) =>
+                {
+                    *instr = DtalInstr::ShrImm {
+                        dst: *dst,
+                        src: *lhs,
+                        imm: imm.trailing_zeros() as u8,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+
                 _ => false,
             }
         }
@@ -203,6 +243,16 @@ fn lookup(reg: &Reg, const_map: &ConstMap) -> Option<i128> {
         Reg::Virtual(vreg) => const_map.get(vreg).copied(),
         Reg::Physical(_) => None,
     }
+}
+
+/// Check if a value is a power of two (positive, exactly one bit set)
+fn is_power_of_two(val: i128) -> bool {
+    val > 1 && (val & (val - 1)) == 0
+}
+
+/// Check if a DTAL type is unsigned
+fn is_unsigned(ty: &DtalType) -> bool {
+    matches!(ty, DtalType::U64)
 }
 
 /// Evaluate a binary operation at compile time
@@ -266,6 +316,8 @@ fn instruction_dst(instr: &DtalInstr) -> Option<Reg> {
         | DtalInstr::Load { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
+        | DtalInstr::ShlImm { dst, .. }
+        | DtalInstr::ShrImm { dst, .. }
         | DtalInstr::Not { dst, .. }
         | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }
@@ -900,5 +952,166 @@ mod tests {
             &func.blocks[0].instructions[1],
             DtalInstr::MovImm { imm: 0, .. }
         ));
+    }
+
+    #[test]
+    fn test_mul_by_power_of_two_to_shl() {
+        // v0 = 8; v2 = v1 * v0  →  v2 = shlimm v1, 3
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 8,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mul,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::ShlImm { dst, src, imm, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+            assert_eq!(*imm, 3); // log2(8) = 3
+        } else {
+            panic!("Expected ShlImm, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_mul_by_power_of_two_commutative() {
+        // v0 = 4; v2 = v0 * v1  →  v2 = shlimm v1, 2
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 4,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mul,
+                dst: vreg(2),
+                lhs: vreg(0),
+                rhs: vreg(1),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::ShlImm { dst, src, imm, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+            assert_eq!(*imm, 2); // log2(4) = 2
+        } else {
+            panic!("Expected ShlImm, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_mul_by_non_power_of_two_unchanged() {
+        // v0 = 7; v2 = v1 * v0  →  no strength reduction
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 7,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mul,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        // No change — 7 is not a power of 2
+        assert!(!changed);
+    }
+
+    #[test]
+    fn test_unsigned_div_by_power_of_two_to_shr() {
+        // v0 = 16; v2 = v1 / v0  →  v2 = shrimm v1, 4  (U64 type)
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 16,
+                ty: DtalType::U64,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Div,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::U64,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::U64,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::ShrImm { dst, src, imm, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+            assert_eq!(*imm, 4); // log2(16) = 4
+        } else {
+            panic!("Expected ShrImm, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_signed_div_by_power_of_two_not_reduced() {
+        // v0 = 8; v2 = v1 / v0  →  no reduction (signed Int type)
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 8,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Div,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        // No change — signed division cannot use shift
+        assert!(!changed);
     }
 }

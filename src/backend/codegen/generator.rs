@@ -400,6 +400,8 @@ fn find_original_comparison(
             | DtalInstr::MovReg { dst, .. }
             | DtalInstr::BinOp { dst, .. }
             | DtalInstr::AddImm { dst, .. }
+            | DtalInstr::ShlImm { dst, .. }
+            | DtalInstr::ShrImm { dst, .. }
             | DtalInstr::Load { dst, .. }
             | DtalInstr::Not { dst, .. }
             | DtalInstr::Neg { dst, .. }

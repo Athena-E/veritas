@@ -571,6 +571,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::Neg { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
         }
+        DtalInstr::ShlImm { dst, ty, .. } | DtalInstr::ShrImm { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
         DtalInstr::TypeAnnotation { reg, ty } => {
             state.register_types.insert(*reg, ty.clone());
         }

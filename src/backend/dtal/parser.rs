@@ -369,6 +369,8 @@ impl<'a> DtalParser<'a> {
             "cmp" => self.parse_cmp(&tokens),
             "not" => self.parse_not(&tokens, ty_comment),
             "neg" => self.parse_neg(&tokens, ty_comment),
+            "shli" => self.parse_shli(&tokens, ty_comment),
+            "shri" => self.parse_shri(&tokens, ty_comment),
             "jmp" => self.parse_jmp(&tokens),
             "call" => self.parse_call(&tokens, ty_comment),
             "ret" => Ok(Some(DtalInstr::Ret)),
@@ -695,6 +697,30 @@ impl<'a> DtalParser<'a> {
             .unwrap_or(DtalType::Int);
 
         Ok(Some(DtalInstr::Neg { dst, src, ty }))
+    }
+
+    fn parse_shli(&self, tokens: &[&str], ty_comment: Option<&str>) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 4 { return Err(self.err("shli requires 3 operands")); }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2].trim_end_matches(',');
+        let imm_str = tokens[3].trim_end_matches(',');
+        let dst = parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src = parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let imm: u8 = imm_str.parse().map_err(|_| self.err(format!("invalid imm '{}'", imm_str)))?;
+        let ty = ty_comment.map(parse_type_str).transpose()?.unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::ShlImm { dst, src, imm, ty }))
+    }
+
+    fn parse_shri(&self, tokens: &[&str], ty_comment: Option<&str>) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 4 { return Err(self.err("shri requires 3 operands")); }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2].trim_end_matches(',');
+        let imm_str = tokens[3].trim_end_matches(',');
+        let dst = parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src = parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let imm: u8 = imm_str.parse().map_err(|_| self.err(format!("invalid imm '{}'", imm_str)))?;
+        let ty = ty_comment.map(parse_type_str).transpose()?.unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::ShrImm { dst, src, imm, ty }))
     }
 
     fn parse_jmp(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {

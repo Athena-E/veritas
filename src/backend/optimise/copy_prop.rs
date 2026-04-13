@@ -96,7 +96,7 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
             changed |= try_replace_virtual(lhs, copy_map);
             changed |= try_replace_virtual(rhs, copy_map);
         }
-        DtalInstr::AddImm { src, .. } => {
+        DtalInstr::AddImm { src, .. } | DtalInstr::ShlImm { src, .. } | DtalInstr::ShrImm { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
         DtalInstr::Cmp { lhs, rhs } => {
@@ -159,6 +159,8 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         | DtalInstr::Load { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
+        | DtalInstr::ShlImm { dst, .. }
+        | DtalInstr::ShrImm { dst, .. }
         | DtalInstr::Not { dst, .. }
         | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }

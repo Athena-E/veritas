@@ -189,6 +189,20 @@ pub enum DtalInstr {
         imm: i128,
         ty: DtalType,
     },
+    /// rd = rs << imm (left shift by immediate)
+    ShlImm {
+        dst: Reg,
+        src: Reg,
+        imm: u8,
+        ty: DtalType,
+    },
+    /// rd = rs >> imm (logical right shift by immediate)
+    ShrImm {
+        dst: Reg,
+        src: Reg,
+        imm: u8,
+        ty: DtalType,
+    },
 
     // Comparison
     /// cmp lhs, rhs

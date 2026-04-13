@@ -140,6 +140,8 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
         | DtalInstr::Load { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
+        | DtalInstr::ShlImm { dst, .. }
+        | DtalInstr::ShrImm { dst, .. }
         | DtalInstr::Not { dst, .. }
         | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }

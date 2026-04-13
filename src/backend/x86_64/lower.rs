@@ -374,6 +374,13 @@ impl<'a> FunctionLowerer<'a> {
                 self.lower_neg(*dst, *src);
             }
 
+            DtalInstr::ShlImm { dst, src, imm, .. } => {
+                self.lower_shl_imm(*dst, *src, *imm);
+            }
+            DtalInstr::ShrImm { dst, src, imm, .. } => {
+                self.lower_shr_imm(*dst, *src, *imm);
+            }
+
             DtalInstr::Jmp { target } => {
                 self.instructions.push(X86Instr::Jmp {
                     target: target.clone(),
@@ -873,6 +880,22 @@ impl<'a> FunctionLowerer<'a> {
 
         self.load_to_fixed_reg(src_loc, X86Reg::Rax);
         self.instructions.push(X86Instr::Neg { dst: X86Reg::Rax });
+        self.store_from_reg(X86Reg::Rax, dst_loc);
+    }
+
+    fn lower_shl_imm(&mut self, dst: Reg, src: Reg, imm: u8) {
+        let src_loc = self.get_reg_location(src);
+        let dst_loc = self.get_vreg_location(dst);
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
+        self.instructions.push(X86Instr::ShlRI { dst: X86Reg::Rax, imm });
+        self.store_from_reg(X86Reg::Rax, dst_loc);
+    }
+
+    fn lower_shr_imm(&mut self, dst: Reg, src: Reg, imm: u8) {
+        let src_loc = self.get_reg_location(src);
+        let dst_loc = self.get_vreg_location(dst);
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
+        self.instructions.push(X86Instr::ShrRI { dst: X86Reg::Rax, imm });
         self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 
