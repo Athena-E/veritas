@@ -37,7 +37,7 @@ pub enum Constraint {
 /// An expression in the index domain
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndexExpr {
-    Const(i64),
+    Const(i128),
     Var(String),
     Add(Box<IndexExpr>, Box<IndexExpr>),
     Sub(Box<IndexExpr>, Box<IndexExpr>),

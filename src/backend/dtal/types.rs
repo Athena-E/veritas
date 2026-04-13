@@ -25,6 +25,7 @@ pub enum DtalType {
     Unit,
     Int,
     I64,
+    U64,
     Bool,
     Array {
         element_type: Arc<Self>,
@@ -53,6 +54,7 @@ impl PartialEq for DtalType {
             (DtalType::Unit, DtalType::Unit) => true,
             (DtalType::Int, DtalType::Int) => true,
             (DtalType::I64, DtalType::I64) => true,
+            (DtalType::U64, DtalType::U64) => true,
             (DtalType::Bool, DtalType::Bool) => true,
             (
                 DtalType::Array {
@@ -99,7 +101,7 @@ impl std::hash::Hash for DtalType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
         match self {
-            DtalType::Unit | DtalType::Int | DtalType::I64 | DtalType::Bool => {}
+            DtalType::Unit | DtalType::Int | DtalType::I64 | DtalType::U64 | DtalType::Bool => {}
             DtalType::Array { element_type, size } => {
                 element_type.hash(state);
                 format!("{}", size).hash(state);
@@ -138,6 +140,7 @@ impl fmt::Display for DtalType {
             DtalType::Unit => write!(f, "unit"),
             DtalType::Int => write!(f, "int"),
             DtalType::I64 => write!(f, "i64"),
+            DtalType::U64 => write!(f, "u64"),
             DtalType::Bool => write!(f, "bool"),
             DtalType::Array { element_type, size } => {
                 write!(f, "[{}; {}]", element_type, size)
@@ -150,10 +153,10 @@ impl fmt::Display for DtalType {
                 var,
                 constraint,
             } => {
-                let base_name = if matches!(base.as_ref(), DtalType::I64) {
-                    "i64"
-                } else {
-                    "int"
+                let base_name = match base.as_ref() {
+                    DtalType::I64 => "i64",
+                    DtalType::U64 => "u64",
+                    _ => "int",
                 };
                 write!(f, "{{{}: {} | {} }}", var, base_name, constraint)
             }
@@ -185,6 +188,7 @@ impl DtalType {
             IType::Unit => DtalType::Unit,
             IType::Int => DtalType::Int,
             IType::I64 => DtalType::I64,
+            IType::U64 => DtalType::U64,
             IType::Bool => DtalType::Bool,
             IType::Array { element_type, size } => DtalType::Array {
                 element_type: Arc::new(DtalType::from_itype(element_type)),

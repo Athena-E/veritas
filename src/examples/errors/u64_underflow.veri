@@ -1,0 +1,10 @@
+// u64 subtraction underflow: a - b may be negative when a < b.
+// Expected: IntegerOverflow error E023.
+
+fn sub_unsafe(a: u64, b: u64) -> u64 {
+    a - b
+}
+
+fn main() -> int {
+    0
+}

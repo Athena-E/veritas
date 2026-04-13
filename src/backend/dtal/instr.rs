@@ -14,7 +14,7 @@ pub enum CmpOperands {
     /// cmp reg, reg
     RegReg(Reg, Reg),
     /// cmp reg, imm
-    RegImm(Reg, i64),
+    RegImm(Reg, i128),
 }
 
 /// Type state at a program point
@@ -160,7 +160,7 @@ impl fmt::Display for CmpOp {
 pub enum DtalInstr {
     // Data movement
     /// mov rd, imm
-    MovImm { dst: Reg, imm: i64, ty: DtalType },
+    MovImm { dst: Reg, imm: i128, ty: DtalType },
     /// mov rd, rs
     MovReg { dst: Reg, src: Reg, ty: DtalType },
     /// load rd, [base + offset]
@@ -186,7 +186,7 @@ pub enum DtalInstr {
     AddImm {
         dst: Reg,
         src: Reg,
-        imm: i64,
+        imm: i128,
         ty: DtalType,
     },
 
@@ -194,7 +194,7 @@ pub enum DtalInstr {
     /// cmp lhs, rhs
     Cmp { lhs: Reg, rhs: Reg },
     /// cmp lhs, imm
-    CmpImm { lhs: Reg, imm: i64 },
+    CmpImm { lhs: Reg, imm: i128 },
     /// Set dst to 1 if condition is true (based on flags), else 0
     SetCC { dst: Reg, cond: CmpOp },
 

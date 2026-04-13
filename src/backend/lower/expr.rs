@@ -174,7 +174,7 @@ pub fn lower_expr<'src>(
                 let dst = ctx.fresh_reg();
                 ctx.emit(TirInstr::LoadImm {
                     dst,
-                    value: *n,
+                    value: i64::try_from(*n).expect("singleton value exceeds i64 range"),
                     ty: ty.clone(),
                 });
                 dst
@@ -221,7 +221,7 @@ fn lower_literal<'src>(
         Literal::Int(n) => {
             ctx.emit(TirInstr::LoadImm {
                 dst,
-                value: *n,
+                value: i64::try_from(*n).expect("literal value exceeds i64 range"),
                 ty: ty.clone(),
             });
         }
@@ -387,7 +387,7 @@ fn lower_array_init<'src>(
         TExpr::Literal {
             value: Literal::Int(n),
             ..
-        } => *n,
+        } => i64::try_from(*n).expect("array size exceeds i64 range"),
         _ => panic!("Array size must be a constant integer"),
     };
 
@@ -424,8 +424,8 @@ fn lower_array_init<'src>(
             index: idx_reg,
             value: init_val_reg,
             bounds_constraint: Constraint::And(
-                Box::new(Constraint::Ge(IndexExpr::Const(i), IndexExpr::Const(0))),
-                Box::new(Constraint::Lt(IndexExpr::Const(i), IndexExpr::Const(size))),
+                Box::new(Constraint::Ge(IndexExpr::Const(i as i128), IndexExpr::Const(0))),
+                Box::new(Constraint::Lt(IndexExpr::Const(i as i128), IndexExpr::Const(size as i128))),
             ),
         });
     }

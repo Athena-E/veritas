@@ -14,7 +14,7 @@ pub fn lexer<'src>()
                 .at_least(1)
                 .to_slice(),
         )
-        .map(|s: &str| Token::Num(i64::from_str_radix(s, 16).unwrap()));
+        .map(|s: &str| Token::Num(i128::from_str_radix(s, 16).unwrap()));
 
     let dec_num = text::int(10)
         .to_slice()
@@ -24,15 +24,15 @@ pub fn lexer<'src>()
 
     // Character literals: 'a', '\n', '\t', '\\', '\''
     let char_escape = just('\\').ignore_then(choice((
-        just('n').to(10i64),  // newline
-        just('t').to(9i64),   // tab
-        just('\\').to(92i64), // backslash
-        just('\'').to(39i64), // single quote
-        just('0').to(0i64),   // null
+        just('n').to(10i128),  // newline
+        just('t').to(9i128),   // tab
+        just('\\').to(92i128), // backslash
+        just('\'').to(39i128), // single quote
+        just('0').to(0i128),   // null
     )));
     let char_plain = any()
         .filter(|c: &char| *c != '\\' && *c != '\'')
-        .map(|c: char| c as i64);
+        .map(|c: char| c as i128);
     let char_lit = just('\'')
         .ignore_then(char_escape.or(char_plain))
         .then_ignore(just('\''))
@@ -101,6 +101,7 @@ pub fn lexer<'src>()
             "const" => Token::Const,
             "int" => Token::Int,
             "i64" => Token::I64,
+            "u64" => Token::U64,
             "bool" => Token::Bool,
             "true" => Token::True,
             "false" => Token::False,

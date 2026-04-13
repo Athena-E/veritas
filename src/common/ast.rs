@@ -4,7 +4,7 @@ use std::fmt;
 // Token definition
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token<'src> {
-    Num(i64),
+    Num(i128),
     Ident(&'src str),
     Op(&'src str),
     Ctrl(char),
@@ -27,6 +27,7 @@ pub enum Token<'src> {
     // Type keywords
     Int,
     I64,
+    U64,
     Bool,
     True,
     False,
@@ -56,6 +57,7 @@ impl fmt::Display for Token<'_> {
             Token::Const => write!(f, "const"),
             Token::Int => write!(f, "int"),
             Token::I64 => write!(f, "i64"),
+            Token::U64 => write!(f, "u64"),
             Token::Bool => write!(f, "bool"),
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
@@ -123,7 +125,7 @@ pub enum UnaryOp {
 // Literals
 #[derive(Clone, Debug)]
 pub enum Literal {
-    Int(i64),
+    Int(i128),
     Bool(bool),
 }
 
@@ -133,6 +135,7 @@ pub enum Type<'src> {
     Unit,
     Int,
     I64,
+    U64,
     Bool,
     Array {
         element_type: Box<Spanned<Self>>,
@@ -146,6 +149,10 @@ pub enum Type<'src> {
         predicate: Box<Spanned<Expr<'src>>>,
     },
     RefinedI64 {
+        var: &'src str,
+        predicate: Box<Spanned<Expr<'src>>>,
+    },
+    RefinedU64 {
         var: &'src str,
         predicate: Box<Spanned<Expr<'src>>>,
     },

@@ -16,14 +16,18 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
         (IType::Unit, IType::Unit) => true,
         (IType::Int, IType::Int) => true,
         (IType::I64, IType::I64) => true,
+        (IType::U64, IType::U64) => true,
         (IType::Bool, IType::Bool) => true,
 
         // i64 <: int (machine integers are mathematical integers)
         (IType::I64, IType::Int) => true,
+        // u64 <: int (unsigned machine integers are mathematical integers)
+        (IType::U64, IType::Int) => true,
 
         // Singleton to base: int(n) <: int, int(n) <: i64
         (IType::SingletonInt(_), IType::Int) => true,
         (IType::SingletonInt(IValue::Int(_)), IType::I64) => true,
+        (IType::SingletonInt(IValue::Int(n)), IType::U64) => *n >= 0 && *n <= u64::MAX as i128,
 
         // Singleton reflexivity: int(n) <: int(n)
         (IType::SingletonInt(v1), IType::SingletonInt(v2)) => v1 == v2,
@@ -38,6 +42,7 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
         // Refined to base: {x: T | P} <: T (drop refinement)
         (IType::RefinedInt { .. }, IType::Int) => true,
         (IType::RefinedInt { base, .. }, IType::I64) => is_subtype(ctx, base, &IType::I64),
+        (IType::RefinedInt { base, .. }, IType::U64) => is_subtype(ctx, base, &IType::U64),
 
         // Refined to refined: {x: int | P} <: {x: int | Q} if Phi /\ P |- Q
         (
@@ -104,6 +109,7 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
         (IType::Unit, IType::Unit) => true,
         (IType::Int, IType::Int) => true,
         (IType::I64, IType::I64) => true,
+        (IType::U64, IType::U64) => true,
         (IType::Bool, IType::Bool) => true,
 
         (IType::SingletonInt(v1), IType::SingletonInt(v2)) => v1 == v2,

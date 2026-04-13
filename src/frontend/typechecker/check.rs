@@ -1043,6 +1043,9 @@ pub fn check_function<'src>(
         if is_subtype(&func_ctx, ty, &IType::I64) {
             func_ctx = add_i64_range_props(func_ctx, param.name);
         }
+        if is_subtype(&func_ctx, ty, &IType::U64) {
+            func_ctx = add_u64_range_props(func_ctx, param.name);
+        }
 
         // For array parameters with symbolic size, add axioms:
         //   len >= 0  (arrays cannot have negative length)
@@ -1365,6 +1368,7 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
         AstType::Unit => Ok(IType::Unit),
         AstType::Int => Ok(IType::Int),
         AstType::I64 => Ok(IType::I64),
+        AstType::U64 => Ok(IType::U64),
         AstType::Bool => Ok(IType::Bool),
 
         AstType::Array { element_type, size } => {
@@ -1414,6 +1418,18 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
             })
         }
 
+        AstType::RefinedU64 { var, predicate } => {
+            let prop = crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new(*predicate.clone()),
+            };
+
+            Ok(IType::RefinedInt {
+                base: Arc::new(IType::U64),
+                prop,
+            })
+        }
+
         AstType::SingletonInt(expr) => {
             // Evaluate the expression to get the singleton value
             let value = eval_array_size(expr)?;
@@ -1442,7 +1458,7 @@ fn add_i64_range_props<'src>(
     let lower = Expr::BinOp {
         op: BinOp::Gte,
         lhs: Box::new((var.clone(), dummy)),
-        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN as i128)), dummy)),
     };
     let lower_prop = IProposition {
         var: var_name.to_string(),
@@ -1453,7 +1469,46 @@ fn add_i64_range_props<'src>(
     let upper = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((var, dummy)),
-        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX)), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX as i128)), dummy)),
+    };
+    let upper_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((upper, dummy)),
+    };
+
+    ctx.with_proposition(lower_prop).with_proposition(upper_prop)
+}
+
+/// Add implicit `[0, U64_MAX]` range propositions for a u64 binding.
+///
+/// Same idea as `add_i64_range_props` but for unsigned 64-bit integers:
+/// the value is in `[0, 18446744073709551615]`.
+fn add_u64_range_props<'src>(
+    ctx: TypingContext<'src>,
+    var_name: &'src str,
+) -> TypingContext<'src> {
+    use crate::common::ast::{BinOp, Expr, Literal};
+    use chumsky::prelude::SimpleSpan;
+
+    let dummy = SimpleSpan::new(0, 0);
+    let var = Expr::Variable(var_name);
+
+    // var >= 0
+    let lower = Expr::BinOp {
+        op: BinOp::Gte,
+        lhs: Box::new((var.clone(), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy)),
+    };
+    let lower_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((lower, dummy)),
+    };
+
+    // var <= U64_MAX
+    let upper = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((var, dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(u64::MAX as i128)), dummy)),
     };
     let upper_prop = IProposition {
         var: var_name.to_string(),
@@ -1495,7 +1550,7 @@ fn add_array_length_axioms<'src>(
     let bounded = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((var, dummy)),
-        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX)), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX as i128)), dummy)),
     };
     let bounded_prop = IProposition {
         var: size_var.to_string(),
@@ -1555,7 +1610,7 @@ fn substitute_result_in_postcond<'src>(
 fn substitute_var_with_literal<'src>(
     expr: &crate::common::ast::Expr<'src>,
     var_name: &str,
-    value: i64,
+    value: i128,
 ) -> crate::common::ast::Expr<'src> {
     use crate::common::ast::{Expr, Literal};
 
@@ -1688,7 +1743,7 @@ fn substitute_var_with_literal<'src>(
 fn substitute_var_in_stmt<'src>(
     stmt: &crate::common::ast::Stmt<'src>,
     var_name: &str,
-    value: i64,
+    value: i128,
 ) -> crate::common::ast::Stmt<'src> {
     use crate::common::ast::Stmt;
 

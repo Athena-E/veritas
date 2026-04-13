@@ -84,13 +84,16 @@ pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'
     }
 }
 
-/// Attempt to constant-fold a binary arithmetic op on two `i64` values using
-/// checked arithmetic. Returns `None` if the op overflows 64-bit signed range,
-/// is undefined (shift count out of range), or is not foldable.
+/// Attempt to constant-fold a binary arithmetic op on two values.
+/// Computes the mathematical result in i128, then checks it fits within
+/// the i128 range (which subsumes i64 and u64 ranges).
 ///
-/// Overflow cases deliberately return `None` instead of wrapping — callers in
-/// Phase 2+ use this to reject compile-time-known overflowing literals.
-pub fn checked_fold(op: BinOp, n1: i64, n2: i64) -> Option<i64> {
+/// For type-specific overflow checking (i64 or u64 bounds), use
+/// `checked_fold_in_range` instead.
+///
+/// Returns `None` if the op overflows i128, is undefined (shift count
+/// out of range, div by zero), or is not foldable.
+pub fn checked_fold(op: BinOp, n1: i128, n2: i128) -> Option<i128> {
     match op {
         BinOp::Add => n1.checked_add(n2),
         BinOp::Sub => n1.checked_sub(n2),
@@ -107,28 +110,42 @@ pub fn checked_fold(op: BinOp, n1: i64, n2: i64) -> Option<i64> {
     }
 }
 
-/// Phase 2 entry point: when the typechecker has `check_overflow` enabled,
-/// this helper rejects any compile-time-known arithmetic that would overflow
-/// 64-bit signed range.
+/// Constant-fold with a range check: compute the result in i128, then
+/// verify it lies within `[lo, hi]`. Returns `None` if the result is
+/// out of the specified range or if `checked_fold` itself fails.
 ///
-/// If both operands are singleton ints and `checked_fold` returns `None` for
-/// an arithmetic op, this raises `IntegerOverflow`. Otherwise it returns
-/// `Ok(())` and the normal folding / refinement path continues.
+/// Use `(i64::MIN as i128, i64::MAX as i128)` for i64-typed folding,
+/// `(0, u64::MAX as i128)` for u64-typed folding.
+pub fn checked_fold_in_range(op: BinOp, n1: i128, n2: i128, lo: i128, hi: i128) -> Option<i128> {
+    let result = checked_fold(op, n1, n2)?;
+    if result >= lo && result <= hi {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+/// Phase 2 entry point: when the typechecker detects i64-mode arithmetic
+/// (or has `check_overflow` enabled globally), this helper rejects any
+/// compile-time-known arithmetic that would overflow the given bounds.
 ///
-/// For `/` and `%`, the existing `check_divisor_nonzero` catches `n2 == 0`;
-/// this helper additionally catches `INT_MIN / -1`.
+/// `range_lo` and `range_hi` specify the valid result range:
+///  - For i64: `(i64::MIN as i128, i64::MAX as i128)`
+///  - For u64 (future): `(0, u64::MAX as i128)`
+///  - For --check-overflow on int: same as i64
+///
+/// If both operands are singleton ints and the result exceeds the range,
+/// this raises `IntegerOverflow`.
 pub fn check_const_fold_overflow<'src>(
-    ctx: &crate::frontend::typechecker::TypingContext<'src>,
     op: BinOp,
     ty1: &IType<'src>,
     ty2: &IType<'src>,
+    range_lo: i128,
+    range_hi: i128,
     span: Span,
 ) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
     use crate::frontend::typechecker::TypeError;
 
-    if !ctx.check_overflow {
-        return Ok(());
-    }
     // Only flag arith ops that can overflow — bitwise and/or/xor never do.
     let can_overflow = matches!(
         op,
@@ -144,7 +161,7 @@ pub fn check_const_fold_overflow<'src>(
         if matches!(op, BinOp::Div | BinOp::Mod) && *n2 == 0 {
             return Ok(());
         }
-        if checked_fold(op, *n1, *n2).is_none() {
+        if checked_fold_in_range(op, *n1, *n2, range_lo, range_hi).is_none() {
             let op_str = match op {
                 BinOp::Add => "+",
                 BinOp::Sub => "-",
@@ -378,6 +395,8 @@ pub fn check_no_overflow<'src>(
     op: BinOp,
     lhs_expr: &Expr<'src>,
     rhs_expr: &Expr<'src>,
+    range_lo: i128,
+    range_hi: i128,
     span: Span,
 ) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
     use crate::frontend::typechecker::{TypeError, check_provable};
@@ -407,19 +426,19 @@ pub fn check_no_overflow<'src>(
         rhs: Box::new((rhs_expr.clone(), dummy_span)),
     };
 
-    // INT_MIN <= result
+    // range_lo <= result
     let lower = Expr::BinOp {
         op: BinOp::Lte,
-        lhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy_span)),
+        lhs: Box::new((Expr::Literal(Literal::Int(range_lo)), dummy_span)),
         rhs: Box::new((result_expr.clone(), dummy_span)),
     };
-    // result <= INT_MAX
+    // result <= range_hi
     let upper = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((result_expr, dummy_span)),
-        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX)), dummy_span)),
+        rhs: Box::new((Expr::Literal(Literal::Int(range_hi)), dummy_span)),
     };
-    // (INT_MIN <= result) && (result <= INT_MAX)
+    // (range_lo <= result) && (result <= range_hi)
     let in_range = Expr::BinOp {
         op: BinOp::And,
         lhs: Box::new((lower, dummy_span)),
@@ -471,13 +490,14 @@ pub fn check_no_overflow<'src>(
         }
     }
 
-    // For `/` and `%`, additionally rule out INT_MIN / -1 which also overflows.
-    if matches!(op, BinOp::Div | BinOp::Mod) {
-        // NOT (lhs == INT_MIN && rhs == -1)
+    // For `/` and `%`, additionally rule out range_lo / -1 which also overflows
+    // (only relevant for signed types where range_lo is negative).
+    if matches!(op, BinOp::Div | BinOp::Mod) && range_lo < 0 {
+        // NOT (lhs == range_lo && rhs == -1)
         let lhs_is_min = Expr::BinOp {
             op: BinOp::Eq,
             lhs: Box::new((lhs_expr.clone(), dummy_span)),
-            rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(range_lo)), dummy_span)),
         };
         let rhs_is_neg_one = Expr::BinOp {
             op: BinOp::Eq,
@@ -523,7 +543,7 @@ pub fn check_no_negation_overflow<'src>(
     let not_min = Expr::BinOp {
         op: BinOp::NotEq,
         lhs: Box::new((operand_expr.clone(), dummy_span)),
-        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN)), dummy_span)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN as i128)), dummy_span)),
     };
     let prop = IProposition {
         var: "_neg_ov".to_string(),

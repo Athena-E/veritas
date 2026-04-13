@@ -7,7 +7,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 pub enum IValue {
-    Int(i64),
+    Int(i128),
     Bool(bool),
     Symbolic(String),
 }
@@ -35,6 +35,7 @@ pub enum IType<'src> {
     Unit,
     Int,
     I64,
+    U64,
     Bool,
     Array {
         element_type: Arc<Self>,
@@ -159,6 +160,7 @@ impl<'src> fmt::Display for IType<'src> {
             IType::Unit => write!(f, "()"),
             IType::Int => write!(f, "int"),
             IType::I64 => write!(f, "i64"),
+            IType::U64 => write!(f, "u64"),
             IType::Bool => write!(f, "bool"),
             IType::Array { element_type, size } => {
                 write!(f, "[{}; {}]", element_type, size)

@@ -19,7 +19,7 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
         TirInstr::LoadImm { dst, value, ty } => {
             instrs.push(DtalInstr::MovImm {
                 dst: Reg::Virtual(*dst),
-                imm: *value,
+                imm: *value as i128,
                 ty: DtalType::from_itype(ty),
             });
         }
@@ -110,7 +110,7 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             let element_dtal_ty = widen_to_base(DtalType::from_itype(element_ty));
             let array_ty = DtalType::Array {
                 element_type: Arc::new(element_dtal_ty),
-                size: IndexExpr::Const(*size),
+                size: IndexExpr::Const(*size as i128),
             };
 
             instrs.push(DtalInstr::Alloca {

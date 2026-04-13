@@ -15,6 +15,7 @@ where
         let basic_type = select! {
             Token::Int => Type::Int,
             Token::I64 => Type::I64,
+            Token::U64 => Type::U64,
             Token::Bool => Type::Bool,
         }
         .map_with(|t, e| (t, e.span()));
@@ -77,6 +78,23 @@ where
                 )
             });
 
+        // Refined u64 type: {v: u64 | P}
+        let refined_u64_type = select! { Token::Ident(name) => name }
+            .then_ignore(just(Token::Ctrl(':')))
+            .then_ignore(just(Token::U64))
+            .then_ignore(just(Token::Op("|")))
+            .then(expr.clone())
+            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+            .map_with(|(var, predicate), e| {
+                (
+                    Type::RefinedU64 {
+                        var,
+                        predicate: Box::new(predicate),
+                    },
+                    e.span(),
+                )
+            });
+
         // Reference types
         let ref_type = just(Token::Op("&"))
             .ignore_then(
@@ -92,6 +110,7 @@ where
             singleton_type,
             refined_type,
             refined_i64_type,
+            refined_u64_type,
             ref_type,
             basic_type,
         ))

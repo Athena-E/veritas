@@ -2305,8 +2305,8 @@ mod tests {
             Box::new(IndexExpr::Var("v1".into())),
         );
 
-        let lower = Constraint::Ge(sum.clone(), IndexExpr::Const(i64::MIN));
-        let upper = Constraint::Le(sum, IndexExpr::Const(i64::MAX));
+        let lower = Constraint::Ge(sum.clone(), IndexExpr::Const(i64::MIN as i128));
+        let upper = Constraint::Le(sum, IndexExpr::Const(i64::MAX as i128));
 
         assert!(
             checker::is_constraint_provable(&lower, &ctx),

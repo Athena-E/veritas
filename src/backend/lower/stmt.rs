@@ -208,7 +208,7 @@ fn lower_for_loop<'src>(
     // The witness variable uses the register name so codegen can emit it directly.
     let phi_witness = format!("v{}", i_phi_reg.0);
     let phi_start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
-    let phi_end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX));
+    let phi_end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX as i128));
     let existential_constraint = Constraint::And(
         Box::new(Constraint::Ge(
             IndexExpr::Var(phi_witness.clone()),
@@ -287,7 +287,7 @@ fn lower_for_loop<'src>(
     // the register-based verification context.
     let loop_var_idx = IndexExpr::Var(format!("v{}", i_phi_reg.0));
     let start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
-    let end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX));
+    let end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX as i128));
     // True branch (body): i >= start AND i < end
     let true_constraint = Constraint::And(
         Box::new(Constraint::Ge(loop_var_idx.clone(), start_idx)),

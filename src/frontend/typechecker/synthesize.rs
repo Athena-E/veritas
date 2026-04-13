@@ -107,23 +107,43 @@ pub fn synth_expr<'src>(
             let rhs_i64 = is_subtype(ctx, &ty2, &IType::I64);
             let i64_mode = lhs_i64 && rhs_i64;
 
+            let lhs_u64 = is_subtype(ctx, &ty1, &IType::U64);
+            let rhs_u64 = is_subtype(ctx, &ty2, &IType::U64);
+            let u64_mode = lhs_u64 && rhs_u64 && !i64_mode;
+
             // Division safety: prove divisor is non-zero
             if *op == BinOp::Div || *op == BinOp::Mod {
                 check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
 
-            // Phase 2: reject compile-time-known overflowing folds
-            // (no-op when ctx.check_overflow is false)
-            check_const_fold_overflow(ctx, *op, &ty1, &ty2, span)?;
+            // Phase 2: reject compile-time-known overflowing folds.
+            // In i64 mode or --check-overflow mode, check against i64 bounds.
+            // In u64 mode, check against u64 bounds.
+            if u64_mode {
+                check_const_fold_overflow(
+                    *op, &ty1, &ty2,
+                    0, u64::MAX as i128,
+                    span,
+                )?;
+            } else if i64_mode || ctx.check_overflow {
+                check_const_fold_overflow(
+                    *op, &ty1, &ty2,
+                    i64::MIN as i128, i64::MAX as i128,
+                    span,
+                )?;
+            }
 
-            // i64 mode: emit overflow obligation via Z3
-            if i64_mode || ctx.check_overflow {
+            // i64/u64 mode: emit overflow obligation via Z3
+            if u64_mode {
                 use crate::frontend::typechecker::helpers::check_no_overflow;
-                check_no_overflow(ctx, *op, &lhs.0, &rhs.0, span)?;
+                check_no_overflow(ctx, *op, &lhs.0, &rhs.0, 0, u64::MAX as i128, span)?;
+            } else if i64_mode || ctx.check_overflow {
+                use crate::frontend::typechecker::helpers::check_no_overflow;
+                check_no_overflow(ctx, *op, &lhs.0, &rhs.0, i64::MIN as i128, i64::MAX as i128, span)?;
             }
 
             // Choose the base type for the result refinement
-            let result_base = if i64_mode { IType::I64 } else { IType::Int };
+            let result_base = if i64_mode { IType::I64 } else if u64_mode { IType::U64 } else { IType::Int };
 
             // Try constant folding first for precise singleton types
             let ty = match join_op(*op, &ty1, &ty2) {
@@ -255,6 +275,15 @@ pub fn synth_expr<'src>(
                     expected: IType::Int,
                     found: ty,
                     span: cond.1,
+                });
+            }
+
+            // u64 negation: unsigned types cannot be negated at all
+            let neg_u64 = is_subtype(ctx, &ty, &IType::U64) && !is_subtype(ctx, &ty, &IType::I64);
+            if neg_u64 {
+                return Err(TypeError::IntegerOverflow {
+                    op: "-".to_string(),
+                    span,
                 });
             }
 

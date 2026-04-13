@@ -298,7 +298,7 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_instruction(&mut self, instr: &DtalInstr) {
         match instr {
             DtalInstr::MovImm { dst, imm, .. } => {
-                self.lower_mov_imm(*dst, *imm);
+                self.lower_mov_imm(*dst, i64::try_from(*imm).expect("MovImm value exceeds i64 range"));
             }
 
             DtalInstr::MovReg { dst, src, .. } => {
@@ -312,7 +312,7 @@ impl<'a> FunctionLowerer<'a> {
             }
 
             DtalInstr::AddImm { dst, src, imm, .. } => {
-                self.lower_add_imm(*dst, *src, *imm);
+                self.lower_add_imm(*dst, *src, i64::try_from(*imm).expect("AddImm value exceeds i64 range"));
             }
 
             DtalInstr::Load {
@@ -330,7 +330,7 @@ impl<'a> FunctionLowerer<'a> {
             }
 
             DtalInstr::CmpImm { lhs, imm } => {
-                self.lower_cmp_imm(*lhs, *imm);
+                self.lower_cmp_imm(*lhs, i64::try_from(*imm).expect("CmpImm value exceeds i64 range"));
             }
 
             DtalInstr::SetCC { dst, cond } => {

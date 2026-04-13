@@ -41,8 +41,8 @@ pub enum VerifyError {
     /// Singleton type value mismatch
     SingletonMismatch {
         block: String,
-        expected_value: i64,
-        actual_value: i64,
+        expected_value: i128,
+        actual_value: i128,
     },
 
     /// Binary operation type error
