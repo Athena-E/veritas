@@ -402,6 +402,7 @@ fn find_original_comparison(
             | DtalInstr::AddImm { dst, .. }
             | DtalInstr::Load { dst, .. }
             | DtalInstr::Not { dst, .. }
+            | DtalInstr::Neg { dst, .. }
             | DtalInstr::Pop { dst, .. }
             | DtalInstr::Alloca { dst, .. }
                 if *dst == target =>

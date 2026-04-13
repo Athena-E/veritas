@@ -210,7 +210,7 @@ impl LivenessAnalysis {
             DtalInstr::Load { dst, .. } => Some(*dst),
             DtalInstr::BinOp { dst, .. } => Some(*dst),
             DtalInstr::AddImm { dst, .. } => Some(*dst),
-            DtalInstr::Not { dst, .. } => Some(*dst),
+            DtalInstr::Not { dst, .. } | DtalInstr::Neg { dst, .. } => Some(*dst),
             DtalInstr::Pop { dst, .. } => Some(*dst),
             DtalInstr::Alloca { dst, .. } => Some(*dst),
             DtalInstr::SetCC { dst, .. } => Some(*dst),
@@ -234,7 +234,7 @@ impl LivenessAnalysis {
             DtalInstr::AddImm { src, .. } => vec![*src],
             DtalInstr::Cmp { lhs, rhs } => vec![*lhs, *rhs],
             DtalInstr::CmpImm { lhs, .. } => vec![*lhs],
-            DtalInstr::Not { src, .. } => vec![*src],
+            DtalInstr::Not { src, .. } | DtalInstr::Neg { src, .. } => vec![*src],
             DtalInstr::Push { src, .. } => vec![*src],
             _ => vec![],
         };

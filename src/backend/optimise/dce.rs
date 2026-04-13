@@ -90,6 +90,14 @@ fn should_keep_instruction(instr: &DtalInstr, live_after: &HashSet<VirtualReg>) 
         return true;
     }
 
+    // TypeAnnotation is metadata — keep only if its register is still live
+    if let DtalInstr::TypeAnnotation { reg, .. } = instr {
+        return match reg {
+            Reg::Virtual(vreg) => live_after.contains(vreg),
+            Reg::Physical(_) => true,
+        };
+    }
+
     // Check if the instruction defines a register
     let def_reg = instruction_def(instr);
 
@@ -133,6 +141,7 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
         | DtalInstr::Not { dst, .. }
+        | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }
         | DtalInstr::Alloca { dst, .. }
         | DtalInstr::SetCC { dst, .. } => Some(*dst),
@@ -361,5 +370,87 @@ mod tests {
         // Only ret should remain
         assert_eq!(func.blocks[0].instructions.len(), 1);
         assert!(matches!(&func.blocks[0].instructions[0], DtalInstr::Ret));
+    }
+
+    #[test]
+    fn test_remove_dead_type_annotation() {
+        // v0 = 42 (unused)
+        // TypeAnnotation v0, Bool (should be removed — v0 is dead)
+        // ret
+        let v0 = Reg::Virtual(VirtualReg(0));
+
+        let mut func = DtalFunction {
+            name: "test".to_string(),
+            params: vec![],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![DtalBlock {
+                label: "entry".to_string(),
+                entry_state: TypeState::new(),
+                instructions: vec![
+                    DtalInstr::MovImm {
+                        dst: v0,
+                        imm: 42,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::TypeAnnotation {
+                        reg: v0,
+                        ty: DtalType::Bool,
+                    },
+                    DtalInstr::Ret,
+                ],
+            }],
+        };
+
+        // First pass removes MovImm (v0 unused) and TypeAnnotation (v0 dead)
+        let changed = eliminate_dead_code(&mut func);
+        assert!(changed);
+
+        // Only ret should remain
+        assert_eq!(func.blocks[0].instructions.len(), 1);
+        assert!(matches!(&func.blocks[0].instructions[0], DtalInstr::Ret));
+    }
+
+    #[test]
+    fn test_keep_live_type_annotation() {
+        // v0 = 42 (used by push)
+        // TypeAnnotation v0, Bool (should be kept — v0 is live)
+        // push v0
+        // ret
+        let v0 = Reg::Virtual(VirtualReg(0));
+
+        let mut func = DtalFunction {
+            name: "test".to_string(),
+            params: vec![],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![DtalBlock {
+                label: "entry".to_string(),
+                entry_state: TypeState::new(),
+                instructions: vec![
+                    DtalInstr::MovImm {
+                        dst: v0,
+                        imm: 42,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::TypeAnnotation {
+                        reg: v0,
+                        ty: DtalType::Bool,
+                    },
+                    DtalInstr::Push {
+                        src: v0,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            }],
+        };
+
+        let changed = eliminate_dead_code(&mut func);
+        // Nothing should be removed
+        assert!(!changed);
+        assert_eq!(func.blocks[0].instructions.len(), 4);
     }
 }

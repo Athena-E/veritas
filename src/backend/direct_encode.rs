@@ -162,6 +162,12 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             });
         }
 
+        DtalInstr::Neg { dst, .. } => {
+            out.push(X86Instr::Neg {
+                dst: reg_to_x86(dst),
+            });
+        }
+
         DtalInstr::Load {
             dst, base, offset, ..
         } => {

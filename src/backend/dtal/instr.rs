@@ -198,9 +198,11 @@ pub enum DtalInstr {
     /// Set dst to 1 if condition is true (based on flags), else 0
     SetCC { dst: Reg, cond: CmpOp },
 
-    // Logical
+    // Logical / Unary
     /// not rd, rs
     Not { dst: Reg, src: Reg, ty: DtalType },
+    /// neg rd, rs (rd = 0 - rs)
+    Neg { dst: Reg, src: Reg, ty: DtalType },
 
     // Control flow
     /// jmp label

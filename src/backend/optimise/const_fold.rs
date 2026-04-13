@@ -267,6 +267,7 @@ fn instruction_dst(instr: &DtalInstr) -> Option<Reg> {
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
         | DtalInstr::Not { dst, .. }
+        | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }
         | DtalInstr::Alloca { dst, .. }
         | DtalInstr::SetCC { dst, .. }

@@ -368,6 +368,7 @@ impl<'a> DtalParser<'a> {
             "addi" => self.parse_addi(&tokens, ty_comment),
             "cmp" => self.parse_cmp(&tokens),
             "not" => self.parse_not(&tokens, ty_comment),
+            "neg" => self.parse_neg(&tokens, ty_comment),
             "jmp" => self.parse_jmp(&tokens),
             "call" => self.parse_call(&tokens, ty_comment),
             "ret" => Ok(Some(DtalInstr::Ret)),
@@ -669,6 +670,31 @@ impl<'a> DtalParser<'a> {
             .unwrap_or(DtalType::Bool);
 
         Ok(Some(DtalInstr::Not { dst, src, ty }))
+    }
+
+    fn parse_neg(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        // neg v0, v1    : int
+        if tokens.len() < 3 {
+            return Err(self.err("neg requires 2 operands"));
+        }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2].trim_end_matches(',');
+
+        let dst =
+            parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+
+        Ok(Some(DtalInstr::Neg { dst, src, ty }))
     }
 
     fn parse_jmp(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {

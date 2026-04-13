@@ -70,6 +70,10 @@ pub fn verify_instruction(
             verify_not(*dst, *src, ty, state, block_label)?;
         }
 
+        DtalInstr::Neg { dst, src, ty } => {
+            verify_neg(*dst, *src, ty, state, block_label)?;
+        }
+
         DtalInstr::TypeAnnotation { reg, ty } => {
             verify_type_annotation(*reg, ty, state, block_label)?;
         }
@@ -911,6 +915,18 @@ fn verify_not(
 ) -> Result<(), VerifyError> {
     check_register_defined(src, state, block_label)?;
     state.register_types.insert(dst, DtalType::Bool);
+    Ok(())
+}
+
+fn verify_neg(
+    dst: Reg,
+    src: Reg,
+    ty: &DtalType,
+    state: &mut TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    check_register_defined(src, state, block_label)?;
+    state.register_types.insert(dst, ty.clone());
     Ok(())
 }
 

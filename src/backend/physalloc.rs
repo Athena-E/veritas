@@ -545,6 +545,7 @@ fn allocate_instruction(
         | DtalInstr::Load { dst, .. }
         | DtalInstr::SetCC { dst, .. }
         | DtalInstr::Not { dst, .. }
+        | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }
         | DtalInstr::Alloca { dst, .. } => {
             if is_dead_dst(dst, alloc) {
@@ -744,6 +745,18 @@ fn allocate_instruction(
             let dst_loc = resolve_reg(*dst, alloc);
             emit_load_to(instrs, &src_loc, RAX, ty.clone());
             instrs.push(DtalInstr::Not {
+                dst: RAX,
+                src: RAX,
+                ty: ty.clone(),
+            });
+            emit_store_from(instrs, RAX, &dst_loc, ty.clone());
+        }
+
+        DtalInstr::Neg { dst, src, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            let dst_loc = resolve_reg(*dst, alloc);
+            emit_load_to(instrs, &src_loc, RAX, ty.clone());
+            instrs.push(DtalInstr::Neg {
                 dst: RAX,
                 src: RAX,
                 ty: ty.clone(),

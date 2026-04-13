@@ -204,6 +204,17 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::Neg { dst, src, ty } => {
+            writeln!(
+                output,
+                "    neg {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
         DtalInstr::Jmp { target } => {
             writeln!(output, "    jmp {}", target).unwrap();
         }
