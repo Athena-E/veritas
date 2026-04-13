@@ -4,6 +4,7 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
+use crate::frontend::typechecker::helpers::check_const_fold_overflow;
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
     check_divisor_nonzero, check_stmts, extract_proposition, is_subtype, join_op,
@@ -101,23 +102,73 @@ pub fn synth_expr<'src>(
                 });
             }
 
+            // Determine arithmetic mode: i64 if both operands are subtypes of i64
+            let lhs_i64 = is_subtype(ctx, &ty1, &IType::I64);
+            let rhs_i64 = is_subtype(ctx, &ty2, &IType::I64);
+            let i64_mode = lhs_i64 && rhs_i64;
+
+            let lhs_u64 = is_subtype(ctx, &ty1, &IType::U64);
+            let rhs_u64 = is_subtype(ctx, &ty2, &IType::U64);
+            let u64_mode = lhs_u64 && rhs_u64 && !i64_mode;
+
             // Division safety: prove divisor is non-zero
             if *op == BinOp::Div || *op == BinOp::Mod {
                 check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
+
+            // Phase 2: reject compile-time-known overflowing folds.
+            // In i64 mode or --check-overflow mode, check against i64 bounds.
+            // In u64 mode, check against u64 bounds.
+            if u64_mode {
+                check_const_fold_overflow(*op, &ty1, &ty2, 0, u64::MAX as i128, span)?;
+            } else if i64_mode || ctx.check_overflow {
+                check_const_fold_overflow(
+                    *op,
+                    &ty1,
+                    &ty2,
+                    i64::MIN as i128,
+                    i64::MAX as i128,
+                    span,
+                )?;
+            }
+
+            // i64/u64 mode: emit overflow obligation via Z3
+            if u64_mode {
+                use crate::frontend::typechecker::helpers::check_no_overflow;
+                check_no_overflow(ctx, *op, &lhs.0, &rhs.0, 0, u64::MAX as i128, span)?;
+            } else if i64_mode || ctx.check_overflow {
+                use crate::frontend::typechecker::helpers::check_no_overflow;
+                check_no_overflow(
+                    ctx,
+                    *op,
+                    &lhs.0,
+                    &rhs.0,
+                    i64::MIN as i128,
+                    i64::MAX as i128,
+                    span,
+                )?;
+            }
+
+            // Choose the base type for the result refinement
+            let result_base = if i64_mode {
+                IType::I64
+            } else if u64_mode {
+                IType::U64
+            } else {
+                IType::Int
+            };
 
             // Try constant folding first for precise singleton types
             let ty = match join_op(*op, &ty1, &ty2) {
                 IType::Int => {
                     // Constant folding failed (non-singleton operands)
                     // Use SMT synthesis: produce {v | v = lhs op rhs}
-                    // This allows the SMT solver to derive properties from the equality
                     let result_expr = Expr::BinOp {
                         op: *op,
                         lhs: Box::new((**lhs).clone()),
                         rhs: Box::new((**rhs).clone()),
                     };
-                    build_equality_refinement(&result_expr, span)
+                    build_equality_refinement(&result_expr, span, result_base)
                 }
                 singleton_ty => singleton_ty, // Keep singleton if folding worked
             };
@@ -240,7 +291,23 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            let result_ty = IType::Int;
+            // u64 negation: unsigned types cannot be negated at all
+            let neg_u64 = is_subtype(ctx, &ty, &IType::U64) && !is_subtype(ctx, &ty, &IType::I64);
+            if neg_u64 {
+                return Err(TypeError::IntegerOverflow {
+                    op: "-".to_string(),
+                    span,
+                });
+            }
+
+            // i64 negation: check operand != INT_MIN
+            let neg_i64 = is_subtype(ctx, &ty, &IType::I64);
+            if neg_i64 || ctx.check_overflow {
+                use crate::frontend::typechecker::helpers::check_no_negation_overflow;
+                check_no_negation_overflow(ctx, &cond.0, cond.1)?;
+            }
+
+            let result_ty = if neg_i64 { IType::I64 } else { IType::Int };
             let texpr = TExpr::UnaryOp {
                 op: UnaryOp::Neg,
                 operand: Box::new(tcond),

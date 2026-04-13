@@ -24,7 +24,7 @@ pub fn make_refined_int<'src>(var: &str, predicate_expr: Expr<'src>) -> IType<'s
 
 /// Create a comparison expression: var op value
 /// Example: x > 5
-pub fn make_comparison<'src>(var: &'src str, op: BinOp, value: i64) -> Expr<'src> {
+pub fn make_comparison<'src>(var: &'src str, op: BinOp, value: i128) -> Expr<'src> {
     Expr::BinOp {
         op,
         lhs: Box::new((Expr::Variable(var), SimpleSpan::new(0, 0))),
@@ -44,7 +44,7 @@ pub fn make_var_equality<'src>(var1: &'src str, var2: &'src str) -> Expr<'src> {
 
 /// Create an arithmetic expression: var + offset
 #[allow(dead_code)]
-pub fn make_add_expr<'src>(var: &'src str, offset: i64) -> Expr<'src> {
+pub fn make_add_expr<'src>(var: &'src str, offset: i128) -> Expr<'src> {
     Expr::BinOp {
         op: BinOp::Add,
         lhs: Box::new((Expr::Variable(var), SimpleSpan::new(0, 0))),

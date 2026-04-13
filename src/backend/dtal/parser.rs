@@ -460,7 +460,7 @@ impl<'a> DtalParser<'a> {
 
         if let Some(reg) = parse_reg(src_str) {
             Ok(Some(DtalInstr::MovReg { dst, src: reg, ty }))
-        } else if let Ok(imm) = src_str.parse::<i64>() {
+        } else if let Ok(imm) = src_str.parse::<i128>() {
             Ok(Some(DtalInstr::MovImm { dst, imm, ty }))
         } else {
             Err(self.err(format!("invalid mov source '{}'", src_str)))
@@ -600,7 +600,7 @@ impl<'a> DtalParser<'a> {
             parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
         let src =
             parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
-        let imm: i64 = imm_str
+        let imm: i128 = imm_str
             .parse()
             .map_err(|_| self.err(format!("invalid imm '{}'", imm_str)))?;
 
@@ -625,7 +625,7 @@ impl<'a> DtalParser<'a> {
 
         if let Some(rhs_reg) = parse_reg(rhs_str) {
             Ok(Some(DtalInstr::Cmp { lhs, rhs: rhs_reg }))
-        } else if let Ok(imm) = rhs_str.parse::<i64>() {
+        } else if let Ok(imm) = rhs_str.parse::<i128>() {
             Ok(Some(DtalInstr::CmpImm { lhs, imm }))
         } else {
             Err(self.err(format!("invalid cmp rhs '{}'", rhs_str)))
@@ -871,6 +871,8 @@ fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
     match s {
         "unit" | "()" => Ok(DtalType::Unit),
         "int" => Ok(DtalType::Int),
+        "i64" => Ok(DtalType::I64),
+        "u64" => Ok(DtalType::U64),
         "bool" => Ok(DtalType::Bool),
         _ if s.starts_with("int(") && s.ends_with(')') => {
             let inner = &s[4..s.len() - 1];
@@ -1140,13 +1142,13 @@ fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
     }
 
     // Integer constant
-    if let Ok(n) = s.parse::<i64>() {
+    if let Ok(n) = s.parse::<i128>() {
         return Ok(IndexExpr::Const(n));
     }
 
     // Negative integer
     if s.starts_with('-')
-        && let Ok(n) = s[1..].parse::<i64>()
+        && let Ok(n) = s[1..].parse::<i128>()
     {
         return Ok(IndexExpr::Const(-n));
     }

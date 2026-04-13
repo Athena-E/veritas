@@ -54,6 +54,11 @@ pub struct TypingContext<'src> {
     // Whether quantifier expressions (forall/exists) are allowed
     // True in specification contexts (invariants, requires, ensures)
     pub allow_quantifiers: bool,
+
+    // Whether arithmetic operations must be proved overflow-free.
+    // Phase 1: plumbing only — helpers exist but are not yet called from synth_expr.
+    // Phase 3 will gate `check_no_overflow` calls on this flag.
+    pub check_overflow: bool,
 }
 
 impl<'src> TypingContext<'src> {
@@ -67,6 +72,7 @@ impl<'src> TypingContext<'src> {
             postcondition: None,
             current_function: None,
             allow_quantifiers: false,
+            check_overflow: false,
         }
     }
 
@@ -81,6 +87,7 @@ impl<'src> TypingContext<'src> {
             postcondition: None,
             current_function: None,
             allow_quantifiers: false,
+            check_overflow: false,
         }
     }
 
@@ -290,7 +297,7 @@ impl<'src> TypingContext<'src> {
 
     /// Try to resolve an expression to a concrete i64 value.
     /// Handles literal ints and variables with singleton int types.
-    pub fn resolve_expr_to_int(&self, expr: &Expr<'src>) -> Option<i64> {
+    pub fn resolve_expr_to_int(&self, expr: &Expr<'src>) -> Option<i128> {
         match expr {
             Expr::Literal(Literal::Int(n)) => Some(*n),
             Expr::Variable(name) => match self.lookup_var(name) {
@@ -365,7 +372,7 @@ impl<'src> TypingContext<'src> {
     /// Remove the pointwise proposition for arr_name[idx_val] == ... and any
     /// quantified propositions over arr_name (since modifying one element
     /// invalidates a universal claim).
-    pub fn without_array_element_prop(&self, arr_name: &str, idx_val: i64) -> Self {
+    pub fn without_array_element_prop(&self, arr_name: &str, idx_val: i128) -> Self {
         let mut new_ctx = self.clone();
         new_ctx.phi = new_ctx
             .phi

@@ -601,7 +601,7 @@ mod tests {
         for i in 0..20 {
             instructions.push(DtalInstr::MovImm {
                 dst: Reg::Virtual(VirtualReg(i)),
-                imm: i as i64,
+                imm: i as i128,
                 ty: DtalType::Int,
             });
         }

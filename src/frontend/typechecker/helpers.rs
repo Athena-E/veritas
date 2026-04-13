@@ -28,7 +28,11 @@ pub fn reset_fresh_var_counter() {
 /// For expr `n + n`, produces `{v: int | v = n + n}`
 /// This enables SMT-based synthesis: the solver can derive properties
 /// from the equality constraint combined with known refinements
-pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'src> {
+pub fn build_equality_refinement<'src>(
+    expr: &Expr<'src>,
+    span: Span,
+    base: IType<'src>,
+) -> IType<'src> {
     let bound_var = fresh_var_name();
     let bound_var_leaked: &'src str = Box::leak(bound_var.clone().into_boxed_str());
 
@@ -42,7 +46,7 @@ pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'
     };
 
     IType::RefinedInt {
-        base: Arc::new(IType::Int),
+        base: Arc::new(base),
         prop: IProposition {
             var: bound_var,
             predicate: Arc::new((eq_predicate, span)),
@@ -53,78 +57,125 @@ pub fn build_equality_refinement<'src>(expr: &Expr<'src>, span: Span) -> IType<'
 /// Constant folding (join-op from formal semantics)
 /// Attempts to compute the result type of binary operations on singleton types
 pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'src> {
-    match (op, ty1, ty2) {
-        // Arithmetic on singleton ints
-        (
-            BinOp::Add,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 + n2)),
-        (
-            BinOp::Sub,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 - n2)),
-        (
-            BinOp::Mul,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 * n2)),
-        (
-            BinOp::Div,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) if *n2 != 0 => IType::SingletonInt(IValue::Int(n1 / n2)),
-        (
-            BinOp::Mod,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) if *n2 != 0 => IType::SingletonInt(IValue::Int(n1 % n2)),
-        (
-            BinOp::BitAnd,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 & n2)),
-        (
-            BinOp::BitOr,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 | n2)),
-        (
-            BinOp::BitXor,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 ^ n2)),
-        (
-            BinOp::Shl,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 << n2)),
-        (
-            BinOp::Shr,
-            IType::SingletonInt(IValue::Int(n1)),
-            IType::SingletonInt(IValue::Int(n2)),
-        ) => IType::SingletonInt(IValue::Int(n1 >> n2)),
+    // Try constant folding when both operands are compile-time singleton ints.
+    // Uses checked arithmetic to avoid silently wrapping at compile time.
+    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) = (ty1, ty2)
+        && let Some(folded) = checked_fold(op, *n1, *n2)
+    {
+        return IType::SingletonInt(IValue::Int(folded));
+    }
 
-        // Fallback to base int type
-        (
-            BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Div
-            | BinOp::Mod
-            | BinOp::BitAnd
-            | BinOp::BitOr
-            | BinOp::BitXor
-            | BinOp::Shl
-            | BinOp::Shr,
-            _,
-            _,
-        ) => IType::Int,
+    match op {
+        BinOp::Add
+        | BinOp::Sub
+        | BinOp::Mul
+        | BinOp::Div
+        | BinOp::Mod
+        | BinOp::BitAnd
+        | BinOp::BitOr
+        | BinOp::BitXor
+        | BinOp::Shl
+        | BinOp::Shr => IType::Int,
 
         // Comparisons always produce bool
         _ => IType::Bool,
     }
+}
+
+/// Attempt to constant-fold a binary arithmetic op on two values.
+/// Computes the mathematical result in i128, then checks it fits within
+/// the i128 range (which subsumes i64 and u64 ranges).
+///
+/// For type-specific overflow checking (i64 or u64 bounds), use
+/// `checked_fold_in_range` instead.
+///
+/// Returns `None` if the op overflows i128, is undefined (shift count
+/// out of range, div by zero), or is not foldable.
+pub fn checked_fold(op: BinOp, n1: i128, n2: i128) -> Option<i128> {
+    match op {
+        BinOp::Add => n1.checked_add(n2),
+        BinOp::Sub => n1.checked_sub(n2),
+        BinOp::Mul => n1.checked_mul(n2),
+        BinOp::Div if n2 != 0 => n1.checked_div(n2),
+        BinOp::Mod if n2 != 0 => n1.checked_rem(n2),
+        BinOp::Div | BinOp::Mod => None,
+        BinOp::BitAnd => Some(n1 & n2),
+        BinOp::BitOr => Some(n1 | n2),
+        BinOp::BitXor => Some(n1 ^ n2),
+        BinOp::Shl => u32::try_from(n2).ok().and_then(|k| n1.checked_shl(k)),
+        BinOp::Shr => u32::try_from(n2).ok().and_then(|k| n1.checked_shr(k)),
+        _ => None,
+    }
+}
+
+/// Constant-fold with a range check: compute the result in i128, then
+/// verify it lies within `[lo, hi]`. Returns `None` if the result is
+/// out of the specified range or if `checked_fold` itself fails.
+///
+/// Use `(i64::MIN as i128, i64::MAX as i128)` for i64-typed folding,
+/// `(0, u64::MAX as i128)` for u64-typed folding.
+pub fn checked_fold_in_range(op: BinOp, n1: i128, n2: i128, lo: i128, hi: i128) -> Option<i128> {
+    let result = checked_fold(op, n1, n2)?;
+    if result >= lo && result <= hi {
+        Some(result)
+    } else {
+        None
+    }
+}
+
+/// Phase 2 entry point: when the typechecker detects i64-mode arithmetic
+/// (or has `check_overflow` enabled globally), this helper rejects any
+/// compile-time-known arithmetic that would overflow the given bounds.
+///
+/// `range_lo` and `range_hi` specify the valid result range:
+///  - For i64: `(i64::MIN as i128, i64::MAX as i128)`
+///  - For u64 (future): `(0, u64::MAX as i128)`
+///  - For --check-overflow on int: same as i64
+///
+/// If both operands are singleton ints and the result exceeds the range,
+/// this raises `IntegerOverflow`.
+pub fn check_const_fold_overflow<'src>(
+    op: BinOp,
+    ty1: &IType<'src>,
+    ty2: &IType<'src>,
+    range_lo: i128,
+    range_hi: i128,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::TypeError;
+
+    // Only flag arith ops that can overflow — bitwise and/or/xor never do.
+    let can_overflow = matches!(
+        op,
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Shl | BinOp::Shr
+    );
+    if !can_overflow {
+        return Ok(());
+    }
+    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) = (ty1, ty2)
+    {
+        // Divide-by-zero is a separate error; don't mask it with IntegerOverflow.
+        if matches!(op, BinOp::Div | BinOp::Mod) && *n2 == 0 {
+            return Ok(());
+        }
+        if checked_fold_in_range(op, *n1, *n2, range_lo, range_hi).is_none() {
+            let op_str = match op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::Mod => "%",
+                BinOp::Shl => "<<",
+                BinOp::Shr => ">>",
+                _ => unreachable!(),
+            };
+            return Err(TypeError::IntegerOverflow {
+                op: op_str.to_string(),
+                span,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Converts comparison expressions into propositions
@@ -324,6 +375,187 @@ pub fn check_array_bounds_expr<'src>(
         });
     }
 
+    Ok(())
+}
+
+/// Check that a binary arithmetic operation cannot overflow 64-bit signed range.
+///
+/// Builds the proposition `INT_MIN <= lhs op rhs <= INT_MAX` and asks the SMT oracle
+/// to prove it under the current typing context. If the oracle cannot discharge it,
+/// returns `TypeError::IntegerOverflow`.
+///
+/// Phase 1: this helper exists but is not yet called from `synth_expr`. Wiring happens
+/// in Phase 3 behind the `--check-overflow` flag.
+#[allow(dead_code)]
+pub fn check_no_overflow<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    op: BinOp,
+    lhs_expr: &Expr<'src>,
+    rhs_expr: &Expr<'src>,
+    range_lo: i128,
+    range_hi: i128,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::{TypeError, check_provable};
+
+    // Bitwise ops (except shifts) and comparison/logical ops cannot overflow.
+    match op {
+        BinOp::Add
+        | BinOp::Sub
+        | BinOp::Mul
+        | BinOp::Shl
+        | BinOp::Shr
+        | BinOp::Div
+        | BinOp::Mod => {}
+        _ => return Ok(()),
+    }
+
+    let dummy_span = SimpleSpan::new(0, 0);
+    let op_str = match op {
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Shl => "<<",
+        BinOp::Shr => ">>",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        _ => unreachable!(),
+    };
+
+    // result = lhs op rhs
+    let result_expr = Expr::BinOp {
+        op,
+        lhs: Box::new((lhs_expr.clone(), dummy_span)),
+        rhs: Box::new((rhs_expr.clone(), dummy_span)),
+    };
+
+    // range_lo <= result
+    let lower = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((Expr::Literal(Literal::Int(range_lo)), dummy_span)),
+        rhs: Box::new((result_expr.clone(), dummy_span)),
+    };
+    // result <= range_hi
+    let upper = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((result_expr, dummy_span)),
+        rhs: Box::new((Expr::Literal(Literal::Int(range_hi)), dummy_span)),
+    };
+    // (range_lo <= result) && (result <= range_hi)
+    let in_range = Expr::BinOp {
+        op: BinOp::And,
+        lhs: Box::new((lower, dummy_span)),
+        rhs: Box::new((upper, dummy_span)),
+    };
+
+    let prop = IProposition {
+        var: "_ov".to_string(),
+        predicate: Arc::new((in_range, dummy_span)),
+    };
+
+    if !check_provable(ctx, &prop) {
+        return Err(TypeError::IntegerOverflow {
+            op: op_str.to_string(),
+            span,
+        });
+    }
+
+    // For shifts, additionally prove the count is in [0, 64).
+    // x86 masks the count to 6 bits, so `x << 65` silently becomes `x << 1`
+    // — a correctness bug the type system should catch.
+    if matches!(op, BinOp::Shl | BinOp::Shr) {
+        // rhs >= 0
+        let count_lower = Expr::BinOp {
+            op: BinOp::Gte,
+            lhs: Box::new((rhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy_span)),
+        };
+        // rhs < 64
+        let count_upper = Expr::BinOp {
+            op: BinOp::Lt,
+            lhs: Box::new((rhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(64)), dummy_span)),
+        };
+        let count_in_range = Expr::BinOp {
+            op: BinOp::And,
+            lhs: Box::new((count_lower, dummy_span)),
+            rhs: Box::new((count_upper, dummy_span)),
+        };
+        let prop = IProposition {
+            var: "_shift_count".to_string(),
+            predicate: Arc::new((count_in_range, dummy_span)),
+        };
+        if !check_provable(ctx, &prop) {
+            return Err(TypeError::IntegerOverflow {
+                op: op_str.to_string(),
+                span,
+            });
+        }
+    }
+
+    // For `/` and `%`, additionally rule out range_lo / -1 which also overflows
+    // (only relevant for signed types where range_lo is negative).
+    if matches!(op, BinOp::Div | BinOp::Mod) && range_lo < 0 {
+        // NOT (lhs == range_lo && rhs == -1)
+        let lhs_is_min = Expr::BinOp {
+            op: BinOp::Eq,
+            lhs: Box::new((lhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(range_lo)), dummy_span)),
+        };
+        let rhs_is_neg_one = Expr::BinOp {
+            op: BinOp::Eq,
+            lhs: Box::new((rhs_expr.clone(), dummy_span)),
+            rhs: Box::new((Expr::Literal(Literal::Int(-1)), dummy_span)),
+        };
+        let both = Expr::BinOp {
+            op: BinOp::And,
+            lhs: Box::new((lhs_is_min, dummy_span)),
+            rhs: Box::new((rhs_is_neg_one, dummy_span)),
+        };
+        let not_both = Expr::UnaryOp {
+            op: UnaryOp::Not,
+            cond: Box::new((both, dummy_span)),
+        };
+        let prop = IProposition {
+            var: "_ov_div".to_string(),
+            predicate: Arc::new((not_both, dummy_span)),
+        };
+        if !check_provable(ctx, &prop) {
+            return Err(TypeError::IntegerOverflow {
+                op: op_str.to_string(),
+                span,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Check that unary negation cannot overflow (operand must not be `INT_MIN`).
+///
+/// Phase 1: not yet called from `synth_expr`. Wiring happens in Phase 3.
+#[allow(dead_code)]
+pub fn check_no_negation_overflow<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    operand_expr: &Expr<'src>,
+    span: Span,
+) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
+    use crate::frontend::typechecker::{TypeError, check_provable};
+
+    let dummy_span = SimpleSpan::new(0, 0);
+    let not_min = Expr::BinOp {
+        op: BinOp::NotEq,
+        lhs: Box::new((operand_expr.clone(), dummy_span)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN as i128)), dummy_span)),
+    };
+    let prop = IProposition {
+        var: "_neg_ov".to_string(),
+        predicate: Arc::new((not_min, dummy_span)),
+    };
+
+    if !check_provable(ctx, &prop) {
+        return Err(TypeError::NegationOverflow { span });
+    }
     Ok(())
 }
 

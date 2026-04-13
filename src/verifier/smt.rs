@@ -27,6 +27,16 @@ pub fn get_verifier_smt_stats() -> (u64, u64) {
     )
 }
 
+/// Convert an i128 value to a Z3 Int, falling back to string parsing for
+/// values outside the i64 range.
+fn z3_int_from_i128(n: i128) -> Int {
+    if let Ok(n64) = i64::try_from(n) {
+        Int::from_i64(n64)
+    } else {
+        n.to_string().parse::<Int>().unwrap()
+    }
+}
+
 /// Z3-based constraint oracle for the verifier
 pub struct ConstraintOracle;
 
@@ -34,7 +44,7 @@ impl ConstraintOracle {
     /// Translate an IndexExpr into a Z3 integer expression
     fn translate_index_expr(expr: &IndexExpr) -> Int {
         match expr {
-            IndexExpr::Const(n) => Int::from_i64(*n),
+            IndexExpr::Const(n) => z3_int_from_i128(*n),
             IndexExpr::Var(s) => Int::new_const(s.to_string()),
             IndexExpr::Add(l, r) => Self::translate_index_expr(l) + Self::translate_index_expr(r),
             IndexExpr::Sub(l, r) => Self::translate_index_expr(l) - Self::translate_index_expr(r),

@@ -1036,6 +1036,28 @@ pub fn check_function<'src>(
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
+
+        // For i64-typed parameters, add implicit range bounds [INT_MIN, INT_MAX].
+        // Z3 models integers as unbounded; these axioms tell it the value is
+        // representable as a 64-bit signed machine integer.
+        if is_subtype(&func_ctx, ty, &IType::I64) {
+            func_ctx = add_i64_range_props(func_ctx, param.name);
+        }
+        if is_subtype(&func_ctx, ty, &IType::U64) {
+            func_ctx = add_u64_range_props(func_ctx, param.name);
+        }
+
+        // For array parameters with symbolic size, add axioms:
+        //   len >= 0  (arrays cannot have negative length)
+        //   len <= INT_MAX  (array length fits in a machine word)
+        // These are load-bearing for proving i64 loop counter arithmetic.
+        if let IType::Array {
+            size: IValue::Symbolic(size_var),
+            ..
+        } = ty
+        {
+            func_ctx = add_array_length_axioms(func_ctx, size_var);
+        }
     }
     // Set expected return type for checking return statements
     func_ctx = func_ctx.with_expected_return(return_type.clone());
@@ -1154,18 +1176,30 @@ pub fn check_function<'src>(
 
 /// Check an entire program
 pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, TypeError<'src>> {
-    check_program_with_target(program, false)
+    check_program_with_options(program, false, false)
 }
 
 pub fn check_program_bare_metal<'src>(
     program: &Program<'src>,
 ) -> Result<TProgram<'src>, TypeError<'src>> {
-    check_program_with_target(program, true)
+    check_program_with_options(program, true, false)
 }
 
-fn check_program_with_target<'src>(
+/// Check a program with an explicit `check_overflow` flag.
+/// When `check_overflow` is true, arithmetic operations must be proved
+/// to stay within `[INT_MIN, INT_MAX]` (Phase 3 and later).
+pub fn check_program_with_overflow<'src>(
     program: &Program<'src>,
     bare_metal: bool,
+    check_overflow: bool,
+) -> Result<TProgram<'src>, TypeError<'src>> {
+    check_program_with_options(program, bare_metal, check_overflow)
+}
+
+fn check_program_with_options<'src>(
+    program: &Program<'src>,
+    bare_metal: bool,
+    check_overflow: bool,
 ) -> Result<TProgram<'src>, TypeError<'src>> {
     let mut signatures = HashMap::new();
 
@@ -1302,6 +1336,7 @@ fn check_program_with_target<'src>(
     );
 
     let mut global_ctx = TypingContext::with_functions(signatures);
+    global_ctx.check_overflow = check_overflow;
 
     // Process constant declarations — add as immutable singleton bindings
     for (constant, _span) in &program.constants {
@@ -1336,6 +1371,8 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
     match &ty.0 {
         AstType::Unit => Ok(IType::Unit),
         AstType::Int => Ok(IType::Int),
+        AstType::I64 => Ok(IType::I64),
+        AstType::U64 => Ok(IType::U64),
         AstType::Bool => Ok(IType::Bool),
 
         AstType::Array { element_type, size } => {
@@ -1373,12 +1410,152 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
             })
         }
 
+        AstType::RefinedI64 { var, predicate } => {
+            let prop = crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new(*predicate.clone()),
+            };
+
+            Ok(IType::RefinedInt {
+                base: Arc::new(IType::I64),
+                prop,
+            })
+        }
+
+        AstType::RefinedU64 { var, predicate } => {
+            let prop = crate::common::types::IProposition {
+                var: var.to_string(),
+                predicate: Arc::new(*predicate.clone()),
+            };
+
+            Ok(IType::RefinedInt {
+                base: Arc::new(IType::U64),
+                prop,
+            })
+        }
+
         AstType::SingletonInt(expr) => {
             // Evaluate the expression to get the singleton value
             let value = eval_array_size(expr)?;
             Ok(IType::SingletonInt(value))
         }
     }
+}
+
+/// Add implicit `[INT_MIN, INT_MAX]` range propositions for an i64 binding.
+///
+/// Z3's Int sort is unbounded. When the user writes `x: i64`, we axiomatise
+/// that the value is representable as a 64-bit signed integer so that
+/// arithmetic overflow obligations like `INT_MIN <= x + y <= INT_MAX` can
+/// be discharged.
+fn add_i64_range_props<'src>(ctx: TypingContext<'src>, var_name: &'src str) -> TypingContext<'src> {
+    use crate::common::ast::{BinOp, Expr, Literal};
+    use chumsky::prelude::SimpleSpan;
+
+    let dummy = SimpleSpan::new(0, 0);
+    let var = Expr::Variable(var_name);
+
+    // var >= INT_MIN
+    let lower = Expr::BinOp {
+        op: BinOp::Gte,
+        lhs: Box::new((var.clone(), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MIN as i128)), dummy)),
+    };
+    let lower_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((lower, dummy)),
+    };
+
+    // var <= INT_MAX
+    let upper = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((var, dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX as i128)), dummy)),
+    };
+    let upper_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((upper, dummy)),
+    };
+
+    ctx.with_proposition(lower_prop)
+        .with_proposition(upper_prop)
+}
+
+/// Add implicit `[0, U64_MAX]` range propositions for a u64 binding.
+///
+/// Same idea as `add_i64_range_props` but for unsigned 64-bit integers:
+/// the value is in `[0, 18446744073709551615]`.
+fn add_u64_range_props<'src>(ctx: TypingContext<'src>, var_name: &'src str) -> TypingContext<'src> {
+    use crate::common::ast::{BinOp, Expr, Literal};
+    use chumsky::prelude::SimpleSpan;
+
+    let dummy = SimpleSpan::new(0, 0);
+    let var = Expr::Variable(var_name);
+
+    // var >= 0
+    let lower = Expr::BinOp {
+        op: BinOp::Gte,
+        lhs: Box::new((var.clone(), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy)),
+    };
+    let lower_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((lower, dummy)),
+    };
+
+    // var <= U64_MAX
+    let upper = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((var, dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(u64::MAX as i128)), dummy)),
+    };
+    let upper_prop = IProposition {
+        var: var_name.to_string(),
+        predicate: Arc::new((upper, dummy)),
+    };
+
+    ctx.with_proposition(lower_prop)
+        .with_proposition(upper_prop)
+}
+
+/// Add implicit axioms for symbolic array lengths:
+///   len >= 0       (arrays cannot have negative length)
+///   len <= INT_MAX (array length is representable as a machine integer)
+///
+/// These are load-bearing for proving loop counter arithmetic on i64 indices.
+fn add_array_length_axioms<'src>(ctx: TypingContext<'src>, size_var: &str) -> TypingContext<'src> {
+    use crate::common::ast::{BinOp, Expr, Literal};
+    use chumsky::prelude::SimpleSpan;
+
+    let dummy = SimpleSpan::new(0, 0);
+    // We leak the string to get a &'src str for use in Expr::Variable.
+    let var_name: &'src str = Box::leak(size_var.to_string().into_boxed_str());
+    let var = Expr::Variable(var_name);
+
+    // len >= 0
+    let nonneg = Expr::BinOp {
+        op: BinOp::Gte,
+        lhs: Box::new((var.clone(), dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy)),
+    };
+    let nonneg_prop = IProposition {
+        var: size_var.to_string(),
+        predicate: Arc::new((nonneg, dummy)),
+    };
+
+    // len <= INT_MAX
+    let bounded = Expr::BinOp {
+        op: BinOp::Lte,
+        lhs: Box::new((var, dummy)),
+        rhs: Box::new((Expr::Literal(Literal::Int(i64::MAX as i128)), dummy)),
+    };
+    let bounded_prop = IProposition {
+        var: size_var.to_string(),
+        predicate: Arc::new((bounded, dummy)),
+    };
+
+    ctx.with_proposition(nonneg_prop)
+        .with_proposition(bounded_prop)
 }
 
 /// Evaluate array size expression to IValue
@@ -1430,7 +1607,7 @@ fn substitute_result_in_postcond<'src>(
 fn substitute_var_with_literal<'src>(
     expr: &crate::common::ast::Expr<'src>,
     var_name: &str,
-    value: i64,
+    value: i128,
 ) -> crate::common::ast::Expr<'src> {
     use crate::common::ast::{Expr, Literal};
 
@@ -1563,7 +1740,7 @@ fn substitute_var_with_literal<'src>(
 fn substitute_var_in_stmt<'src>(
     stmt: &crate::common::ast::Stmt<'src>,
     var_name: &str,
-    value: i64,
+    value: i128,
 ) -> crate::common::ast::Stmt<'src> {
     use crate::common::ast::Stmt;
 

@@ -1,0 +1,24 @@
+// Basic u64 arithmetic — all operations provably within [0, u64::MAX].
+
+fn add_bounded(x: {v: u64 | v <= 1000}, y: {v: u64 | v <= 1000}) -> u64 {
+    x + y
+}
+
+fn mul_small(x: {v: u64 | v <= 100}, y: {v: u64 | v <= 100}) -> u64 {
+    x * y
+}
+
+fn sub_safe(a: u64, b: u64) -> u64
+    requires a >= b
+{
+    a - b
+}
+
+fn main() -> int {
+    let a: u64 = 10;
+    let b: u64 = 20;
+    let c: u64 = add_bounded(a, b);
+    let d: u64 = mul_small(a, b);
+    let e: u64 = sub_safe(b, a);
+    0
+}

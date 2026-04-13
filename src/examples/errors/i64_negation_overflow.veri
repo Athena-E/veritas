@@ -1,0 +1,14 @@
+// Negation overflow: -(INT_MIN) does not fit in i64.
+//
+// When n has type i64, it could be INT_MIN = -9223372036854775808.
+// Negating INT_MIN produces 9223372036854775808 = INT_MAX + 1, which overflows.
+//
+// Expected: NegationOverflow error E024.
+
+fn negate(n: i64) -> i64 {
+    0 - n
+}
+
+fn main() -> int {
+    0
+}

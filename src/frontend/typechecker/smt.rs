@@ -39,7 +39,13 @@ impl SmtOracle {
     /// (function calls, if-expressions, etc.). Callers treat None as "unprovable".
     fn translate_expr(expr: &Expr) -> Option<Int> {
         match expr {
-            Expr::Literal(Literal::Int(n)) => Some(Int::from_i64(*n)),
+            Expr::Literal(Literal::Int(n)) => {
+                if let Ok(n64) = i64::try_from(*n) {
+                    Some(Int::from_i64(n64))
+                } else {
+                    Some(n.to_string().parse::<Int>().unwrap())
+                }
+            }
 
             Expr::Variable(name) => Some(Int::new_const(name.to_string())),
 

@@ -41,8 +41,8 @@ pub enum VerifyError {
     /// Singleton type value mismatch
     SingletonMismatch {
         block: String,
-        expected_value: i64,
-        actual_value: i64,
+        expected_value: i128,
+        actual_value: i128,
     },
 
     /// Binary operation type error
@@ -86,6 +86,13 @@ pub enum VerifyError {
         block: String,
         callee: String,
         constraint: Constraint,
+        context: Vec<Constraint>,
+    },
+
+    /// Arithmetic overflow on i64-typed operation
+    ArithmeticOverflow {
+        block: String,
+        op: String,
         context: Vec<Constraint>,
     },
 
@@ -212,6 +219,13 @@ impl fmt::Display for VerifyError {
                     f,
                     "Precondition not provable at call to '{}' in block '{}': cannot prove '{}'\nContext: {:?}",
                     callee, block, constraint, context
+                )
+            }
+            VerifyError::ArithmeticOverflow { block, op, context } => {
+                write!(
+                    f,
+                    "Arithmetic overflow: i64 operation '{}' in block '{}' may exceed 64-bit signed range\nContext: {:?}",
+                    op, block, context
                 )
             }
             VerifyError::InternalError { msg } => {

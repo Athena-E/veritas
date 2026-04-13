@@ -13,7 +13,9 @@ pub mod synthesize;
 mod tests;
 
 // Re-export commonly used types
-pub use check::{check_program, check_program_bare_metal, check_stmts};
+pub use check::{
+    check_program, check_program_bare_metal, check_program_with_overflow, check_stmts,
+};
 pub use context::{TypingContext, VarBinding};
 pub use error::TypeError;
 pub use helpers::{

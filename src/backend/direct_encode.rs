@@ -98,7 +98,7 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         DtalInstr::MovImm { dst, imm, .. } => {
             out.push(X86Instr::MovRI {
                 dst: reg_to_x86(dst),
-                imm: *imm,
+                imm: i64::try_from(*imm).expect("immediate value exceeds i64 range"),
             });
         }
 

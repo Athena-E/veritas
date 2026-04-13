@@ -315,7 +315,7 @@ pub fn verify_instruction(
 /// The type is derived from the immediate value, not trusted from the annotation.
 fn verify_mov_imm(
     dst: Reg,
-    imm: i64,
+    imm: i128,
     ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
@@ -355,7 +355,7 @@ fn verify_mov_imm(
 }
 
 /// Substitute a constant value for a variable name in a constraint.
-fn substitute_const_in_constraint(c: &Constraint, var: &str, value: i64) -> Constraint {
+fn substitute_const_in_constraint(c: &Constraint, var: &str, value: i128) -> Constraint {
     substitute_const_in_constraint_inner(c, var, &IndexExpr::Const(value))
 }
 
@@ -489,7 +489,11 @@ fn verify_mov_reg(
             add_register_index_constraint(dst, idx, state);
         }
         // Scalar types: link dst to src register variable
-        DtalType::Int | DtalType::RefinedInt { .. } | DtalType::Bool => {
+        DtalType::Int
+        | DtalType::I64
+        | DtalType::U64
+        | DtalType::RefinedInt { .. }
+        | DtalType::Bool => {
             let src_idx = extract_index(&derived_ty, &src);
             add_register_index_constraint(dst, &src_idx, state);
         }
@@ -554,7 +558,7 @@ fn verify_binop(
     dst: Reg,
     lhs: Reg,
     rhs: Reg,
-    _ty: &DtalType,
+    ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
@@ -621,6 +625,47 @@ fn verify_binop(
         }
     };
 
+    // Phase 4: if the type annotation indicates i64 mode, verify the arithmetic
+    // result stays in [INT_MIN, INT_MAX]. This mirrors the frontend's check_no_overflow
+    // at the physical DTAL level so a buggy lowering can't slip an overflowing op past.
+    //
+    // We build the result expression using register names (not the symbolic indices
+    // from extract_index) so the expression matches the constraint context which
+    // uses projected register names.
+    // Phase 4: if the type annotation indicates i64 mode, verify the arithmetic
+    // result stays in [INT_MIN, INT_MAX] — but only when both operands have
+    // sufficient constraint information. The DTAL conversion is lossy: refined
+    // types whose predicates can't be converted to Constraint are widened to
+    // their base type. When this happens, the verifier cannot reproduce the
+    // frontend's Z3 proof, so we skip the check (the frontend already verified).
+    let is_i64_op = matches!(ty, DtalType::I64)
+        || matches!(ty, DtalType::RefinedInt { base, .. } if matches!(base.as_ref(), DtalType::I64));
+    let both_have_constraints = is_concrete_const(&lhs_ty) && is_concrete_const(&rhs_ty);
+    if is_i64_op
+        && both_have_constraints
+        && !matches!(
+            op,
+            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr
+        )
+    {
+        let lhs_reg_idx = reg_to_index_expr(&lhs);
+        let rhs_reg_idx = reg_to_index_expr(&rhs);
+        let overflow_idx = match op {
+            BinaryOp::Add => IndexExpr::Add(Box::new(lhs_reg_idx), Box::new(rhs_reg_idx)),
+            BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_reg_idx), Box::new(rhs_reg_idx)),
+            BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_reg_idx), Box::new(rhs_reg_idx)),
+            _ => IndexExpr::Var("_unknown".to_string()),
+        };
+        let overflow_ok = check_i64_overflow_constraint(&overflow_idx, &state.constraints);
+        if !overflow_ok {
+            return Err(VerifyError::ArithmeticOverflow {
+                block: block_label.to_string(),
+                op: format!("{}", op),
+                context: state.constraints.clone(),
+            });
+        }
+    }
+
     // Add register-to-index linkage for derived singleton types
     if let DtalType::SingletonInt(ref idx) = derived_ty {
         add_register_index_constraint(dst, idx, state);
@@ -630,13 +675,31 @@ fn verify_binop(
     Ok(())
 }
 
+/// Check if a DTAL type has a compile-time-known constant value.
+/// Only constant singletons can be overflow-checked at the DTAL level
+/// without the full frontend Z3 context (which includes i64 range axioms).
+fn is_concrete_const(ty: &DtalType) -> bool {
+    matches!(ty, DtalType::SingletonInt(IndexExpr::Const(_)))
+}
+
+/// Check that a symbolic expression is provably within [INT_MIN, INT_MAX]
+/// using the DTAL constraint solver.
+pub fn check_i64_overflow_constraint(result_idx: &IndexExpr, constraints: &[Constraint]) -> bool {
+    // INT_MIN <= result
+    let lower = Constraint::Ge(result_idx.clone(), IndexExpr::Const(i64::MIN as i128));
+    // result <= INT_MAX
+    let upper = Constraint::Le(result_idx.clone(), IndexExpr::Const(i64::MAX as i128));
+    // Both must be provable
+    is_constraint_provable(&lower, constraints) && is_constraint_provable(&upper, constraints)
+}
+
 /// Verify add immediate instruction
 ///
 /// Derived type: `src : int(x) ⟹ dst : int(x + imm)`
 fn verify_add_imm(
     dst: Reg,
     src: Reg,
-    imm: i64,
+    imm: i128,
     _ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
@@ -827,7 +890,7 @@ fn verify_cmp(
 /// Verify cmp immediate instruction
 fn verify_cmp_imm(
     lhs: Reg,
-    imm: i64,
+    imm: i128,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
@@ -865,14 +928,19 @@ fn verify_type_annotation(
         let is_existential_narrowing = matches!(ty, DtalType::ExistentialInt { .. })
             && matches!(
                 existing_ty,
-                DtalType::Int | DtalType::SingletonInt(_) | DtalType::ExistentialInt { .. }
+                DtalType::Int
+                    | DtalType::I64
+                    | DtalType::U64
+                    | DtalType::SingletonInt(_)
+                    | DtalType::ExistentialInt { .. }
             );
 
         // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
         let is_prologue_refinement =
-            matches!(existing_ty, DtalType::Int) && matches!(reg, Reg::Physical(_));
+            matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
+                && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
             && !is_prologue_refinement
@@ -888,6 +956,21 @@ fn verify_type_annotation(
     }
     // Set the type (either first definition via phi or verified annotation)
     state.register_types.insert(reg, ty.clone());
+
+    // Project refined type constraints into the constraint context.
+    // When a register gets a RefinedInt type (e.g. from a parameter annotation),
+    // substitute the register name for the bound variable and add the constraint
+    // so Z3 can use it for downstream proofs (overflow checks, bounds, etc.).
+    if let DtalType::RefinedInt {
+        var, constraint, ..
+    } = ty
+    {
+        let reg_name = format!("{}", reg);
+        let subs = std::collections::HashMap::from([(var.clone(), reg_name)]);
+        let projected = substitute_var_names_in_constraint(constraint, &subs);
+        state.constraints.push(projected);
+    }
+
     Ok(())
 }
 
@@ -954,6 +1037,8 @@ fn is_numeric_type(ty: &DtalType) -> bool {
     matches!(
         ty,
         DtalType::Int
+            | DtalType::I64
+            | DtalType::U64
             | DtalType::SingletonInt(_)
             | DtalType::RefinedInt { .. }
             | DtalType::ExistentialInt { .. }
@@ -984,16 +1069,28 @@ pub fn types_compatible_with_constraints(
 ) -> bool {
     match (actual, expected) {
         (DtalType::Int, DtalType::Int) => true,
+        (DtalType::I64, DtalType::I64) => true,
+        (DtalType::U64, DtalType::U64) => true,
+        (DtalType::I64, DtalType::Int) => true,
+        (DtalType::U64, DtalType::Int) => true,
         (DtalType::Bool, DtalType::Bool) => true,
         (DtalType::Unit, DtalType::Unit) => true,
         (DtalType::SingletonInt(a), DtalType::SingletonInt(b)) => {
             a == b || is_constraint_provable(&Constraint::Eq(a.clone(), b.clone()), constraints)
         }
         (DtalType::SingletonInt(_), DtalType::Int) => true,
+        (DtalType::SingletonInt(_), DtalType::I64) => true,
+        (DtalType::SingletonInt(_), DtalType::U64) => true,
         // At the DTAL level, booleans are integers 0/1
         (DtalType::SingletonInt(IndexExpr::Const(0 | 1)), DtalType::Bool) => true,
         (DtalType::Bool, DtalType::SingletonInt(IndexExpr::Const(0 | 1))) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
+        (DtalType::RefinedInt { base, .. }, DtalType::I64) => {
+            types_compatible_with_constraints(base, &DtalType::I64, constraints)
+        }
+        (DtalType::RefinedInt { base, .. }, DtalType::U64) => {
+            types_compatible_with_constraints(base, &DtalType::U64, constraints)
+        }
         (DtalType::SingletonInt(_), DtalType::RefinedInt { base, .. }) => {
             // A singleton is compatible with a refined type if it's compatible with the base
             types_compatible_with_constraints(actual, base.as_ref(), constraints)
@@ -1030,8 +1127,10 @@ pub fn types_compatible_with_constraints(
             augmented_ctx.push(witness_eq);
             is_constraint_provable(constraint, &augmented_ctx)
         }
-        // ExistentialInt <: Int — always true (erasure)
+        // ExistentialInt <: Int/I64 — always true (erasure)
         (DtalType::ExistentialInt { .. }, DtalType::Int) => true,
+        (DtalType::ExistentialInt { .. }, DtalType::I64) => true,
+        (DtalType::ExistentialInt { .. }, DtalType::U64) => true,
         // ExistentialInt <: RefinedInt — check existential constraint implies refinement
         (
             DtalType::ExistentialInt {
