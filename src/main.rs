@@ -131,6 +131,7 @@ fn main() {
 
     // Optimization flags
     let optimize_all = args.iter().any(|a| a == "-O" || a == "--optimize");
+    let const_fold = args.iter().any(|a| a == "--const-fold");
     let copy_prop = args.iter().any(|a| a == "--copy-prop");
     let dce = args.iter().any(|a| a == "--dce");
 
@@ -139,6 +140,7 @@ fn main() {
         OptConfig::all()
     } else {
         OptConfig {
+            constant_folding: const_fold,
             copy_propagation: copy_prop,
             dead_code_elimination: dce,
             max_iterations: Some(10),

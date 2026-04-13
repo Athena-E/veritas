@@ -8,6 +8,7 @@
 //! - **Copy Propagation**: Replaces uses of `dst` with `src` when `MovReg { dst, src }` is encountered
 //! - **Dead Code Elimination**: Removes instructions whose destination registers are never used
 
+pub mod const_fold;
 pub mod copy_prop;
 pub mod dce;
 
@@ -16,6 +17,8 @@ use crate::backend::dtal::instr::DtalProgram;
 /// Configuration for optimization passes
 #[derive(Clone, Debug, Default)]
 pub struct OptConfig {
+    /// Enable constant folding pass
+    pub constant_folding: bool,
     /// Enable copy propagation pass
     pub copy_propagation: bool,
     /// Enable dead code elimination pass
@@ -28,6 +31,7 @@ impl OptConfig {
     /// Create config with all optimizations enabled
     pub fn all() -> Self {
         Self {
+            constant_folding: true,
             copy_propagation: true,
             dead_code_elimination: true,
             max_iterations: Some(10),
@@ -41,7 +45,7 @@ impl OptConfig {
 
     /// Check if any optimization is enabled
     pub fn any_enabled(&self) -> bool {
-        self.copy_propagation || self.dead_code_elimination
+        self.constant_folding || self.copy_propagation || self.dead_code_elimination
     }
 }
 
@@ -52,8 +56,9 @@ impl OptConfig {
 ///
 /// # Pass Ordering
 ///
-/// 1. Copy propagation (exposes dead copies)
-/// 2. Dead code elimination (removes useless copies)
+/// 1. Constant folding (evaluates compile-time constants, folds immediates)
+/// 2. Copy propagation (exposes dead copies)
+/// 3. Dead code elimination (removes useless copies and folded-away MovImms)
 pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     if !config.any_enabled() {
         return;
@@ -63,6 +68,13 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
 
     for _ in 0..max_iters {
         let mut changed = false;
+
+        // Run constant folding (before copy prop so folded constants propagate)
+        if config.constant_folding {
+            for func in &mut program.functions {
+                changed |= const_fold::constant_fold_function(func);
+            }
+        }
 
         // Run copy propagation
         if config.copy_propagation {
