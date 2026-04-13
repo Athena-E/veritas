@@ -90,7 +90,9 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     false
                 }
 
-                // One known → immediate operand folding (Add only, commutative)
+                // One known → immediate operand folding and identity rewrites
+
+                // Add: fold to AddImm (commutative)
                 (Some(imm), None) if *op == BinaryOp::Add => {
                     let src = *rhs;
                     *instr = DtalInstr::AddImm {
@@ -107,6 +109,67 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                         dst: *dst,
                         src,
                         imm,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+
+                // Sub: x - 0 = x
+                (None, Some(0)) if *op == BinaryOp::Sub => {
+                    let src = *lhs;
+                    *instr = DtalInstr::MovReg {
+                        dst: *dst,
+                        src,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+
+                // Mul: x * 0 = 0 (commutative)
+                (Some(0), None) | (None, Some(0)) if *op == BinaryOp::Mul => {
+                    *instr = DtalInstr::MovImm {
+                        dst: *dst,
+                        imm: 0,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+                // Mul: x * 1 = x (commutative)
+                (Some(1), None) if *op == BinaryOp::Mul => {
+                    let src = *rhs;
+                    *instr = DtalInstr::MovReg {
+                        dst: *dst,
+                        src,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+                (None, Some(1)) if *op == BinaryOp::Mul => {
+                    let src = *lhs;
+                    *instr = DtalInstr::MovReg {
+                        dst: *dst,
+                        src,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+
+                // Div: x / 1 = x
+                (None, Some(1)) if *op == BinaryOp::Div => {
+                    let src = *lhs;
+                    *instr = DtalInstr::MovReg {
+                        dst: *dst,
+                        src,
+                        ty: ty.clone(),
+                    };
+                    true
+                }
+
+                // Mod: x % 1 = 0
+                (None, Some(1)) if *op == BinaryOp::Mod => {
+                    *instr = DtalInstr::MovImm {
+                        dst: *dst,
+                        imm: 0,
                         ty: ty.clone(),
                     };
                     true
@@ -634,7 +697,207 @@ mod tests {
         ]);
 
         let changed = constant_fold_function(&mut func);
-        // Sub with one known operand should NOT be folded to AddImm
+        // Sub with non-zero known RHS should NOT be folded
         assert!(!changed);
+    }
+
+    #[test]
+    fn test_sub_rhs_zero_identity() {
+        // v0 = 0; v2 = v1 - v0  →  v2 = v1
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 0,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Sub,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::MovReg { dst, src, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+        } else {
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_mul_by_zero() {
+        // v0 = 0; v2 = v1 * v0  →  v2 = 0
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 0,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mul,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        assert!(matches!(
+            &func.blocks[0].instructions[1],
+            DtalInstr::MovImm { imm: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn test_mul_by_one() {
+        // v0 = 1; v2 = v1 * v0  →  v2 = v1
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 1,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mul,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::MovReg { dst, src, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+        } else {
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_mul_by_one_commutative() {
+        // v0 = 1; v2 = v0 * v1  →  v2 = v1
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 1,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mul,
+                dst: vreg(2),
+                lhs: vreg(0),
+                rhs: vreg(1),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::MovReg { dst, src, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+        } else {
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_div_by_one() {
+        // v0 = 1; v2 = v1 / v0  →  v2 = v1
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 1,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Div,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        if let DtalInstr::MovReg { dst, src, .. } = &func.blocks[0].instructions[1] {
+            assert_eq!(*dst, vreg(2));
+            assert_eq!(*src, vreg(1));
+        } else {
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
+        }
+    }
+
+    #[test]
+    fn test_mod_by_one() {
+        // v0 = 1; v2 = v1 % v0  →  v2 = 0
+        let mut func = make_func(vec![
+            DtalInstr::MovImm {
+                dst: vreg(0),
+                imm: 1,
+                ty: DtalType::Int,
+            },
+            DtalInstr::BinOp {
+                op: BinaryOp::Mod,
+                dst: vreg(2),
+                lhs: vreg(1),
+                rhs: vreg(0),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Push {
+                src: vreg(2),
+                ty: DtalType::Int,
+            },
+            DtalInstr::Ret,
+        ]);
+
+        let changed = constant_fold_function(&mut func);
+        assert!(changed);
+
+        assert!(matches!(
+            &func.blocks[0].instructions[1],
+            DtalInstr::MovImm { imm: 0, .. }
+        ));
     }
 }

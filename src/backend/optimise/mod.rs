@@ -11,6 +11,7 @@
 pub mod const_fold;
 pub mod copy_prop;
 pub mod dce;
+pub mod peephole;
 
 use crate::backend::dtal::instr::DtalProgram;
 
@@ -19,6 +20,8 @@ use crate::backend::dtal::instr::DtalProgram;
 pub struct OptConfig {
     /// Enable constant folding pass
     pub constant_folding: bool,
+    /// Enable peephole optimisation pass
+    pub peephole: bool,
     /// Enable copy propagation pass
     pub copy_propagation: bool,
     /// Enable dead code elimination pass
@@ -32,6 +35,7 @@ impl OptConfig {
     pub fn all() -> Self {
         Self {
             constant_folding: true,
+            peephole: true,
             copy_propagation: true,
             dead_code_elimination: true,
             max_iterations: Some(10),
@@ -45,7 +49,10 @@ impl OptConfig {
 
     /// Check if any optimization is enabled
     pub fn any_enabled(&self) -> bool {
-        self.constant_folding || self.copy_propagation || self.dead_code_elimination
+        self.constant_folding
+            || self.peephole
+            || self.copy_propagation
+            || self.dead_code_elimination
     }
 }
 
@@ -57,8 +64,9 @@ impl OptConfig {
 /// # Pass Ordering
 ///
 /// 1. Constant folding (evaluates compile-time constants, folds immediates)
-/// 2. Copy propagation (exposes dead copies)
-/// 3. Dead code elimination (removes useless copies and folded-away MovImms)
+/// 2. Peephole (structural rewrites: algebraic identities, degenerate immediates)
+/// 3. Copy propagation (exposes dead copies)
+/// 4. Dead code elimination (removes useless copies and folded-away MovImms)
 pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     if !config.any_enabled() {
         return;
@@ -69,10 +77,17 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     for _ in 0..max_iters {
         let mut changed = false;
 
-        // Run constant folding (before copy prop so folded constants propagate)
+        // Run constant folding (before peephole so folded constants expose patterns)
         if config.constant_folding {
             for func in &mut program.functions {
                 changed |= const_fold::constant_fold_function(func);
+            }
+        }
+
+        // Run peephole (before copy prop so new MovRegs get propagated)
+        if config.peephole {
+            for func in &mut program.functions {
+                changed |= peephole::peephole_function(func);
             }
         }
 
