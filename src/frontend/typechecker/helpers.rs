@@ -59,12 +59,10 @@ pub fn build_equality_refinement<'src>(
 pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'src> {
     // Try constant folding when both operands are compile-time singleton ints.
     // Uses checked arithmetic to avoid silently wrapping at compile time.
-    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) =
-        (ty1, ty2)
+    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) = (ty1, ty2)
+        && let Some(folded) = checked_fold(op, *n1, *n2)
     {
-        if let Some(folded) = checked_fold(op, *n1, *n2) {
-            return IType::SingletonInt(IValue::Int(folded));
-        }
+        return IType::SingletonInt(IValue::Int(folded));
     }
 
     match op {
@@ -154,8 +152,7 @@ pub fn check_const_fold_overflow<'src>(
     if !can_overflow {
         return Ok(());
     }
-    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) =
-        (ty1, ty2)
+    if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) = (ty1, ty2)
     {
         // Divide-by-zero is a separate error; don't mask it with IntegerOverflow.
         if matches!(op, BinOp::Div | BinOp::Mod) && *n2 == 0 {
@@ -403,7 +400,13 @@ pub fn check_no_overflow<'src>(
 
     // Bitwise ops (except shifts) and comparison/logical ops cannot overflow.
     match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Shl | BinOp::Shr | BinOp::Div | BinOp::Mod => {}
+        BinOp::Add
+        | BinOp::Sub
+        | BinOp::Mul
+        | BinOp::Shl
+        | BinOp::Shr
+        | BinOp::Div
+        | BinOp::Mod => {}
         _ => return Ok(()),
     }
 

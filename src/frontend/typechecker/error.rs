@@ -364,11 +364,7 @@ impl<'src> fmt::Display for TypeError<'src> {
             }
 
             TypeError::IntegerOverflow { op, span } => {
-                write!(
-                    f,
-                    "Possible integer overflow in `{}` at {:?}",
-                    op, span
-                )
+                write!(f, "Possible integer overflow in `{}` at {:?}", op, span)
             }
 
             TypeError::NegationOverflow { span } => {

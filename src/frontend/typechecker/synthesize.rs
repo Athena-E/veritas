@@ -120,15 +120,14 @@ pub fn synth_expr<'src>(
             // In i64 mode or --check-overflow mode, check against i64 bounds.
             // In u64 mode, check against u64 bounds.
             if u64_mode {
-                check_const_fold_overflow(
-                    *op, &ty1, &ty2,
-                    0, u64::MAX as i128,
-                    span,
-                )?;
+                check_const_fold_overflow(*op, &ty1, &ty2, 0, u64::MAX as i128, span)?;
             } else if i64_mode || ctx.check_overflow {
                 check_const_fold_overflow(
-                    *op, &ty1, &ty2,
-                    i64::MIN as i128, i64::MAX as i128,
+                    *op,
+                    &ty1,
+                    &ty2,
+                    i64::MIN as i128,
+                    i64::MAX as i128,
                     span,
                 )?;
             }
@@ -139,11 +138,25 @@ pub fn synth_expr<'src>(
                 check_no_overflow(ctx, *op, &lhs.0, &rhs.0, 0, u64::MAX as i128, span)?;
             } else if i64_mode || ctx.check_overflow {
                 use crate::frontend::typechecker::helpers::check_no_overflow;
-                check_no_overflow(ctx, *op, &lhs.0, &rhs.0, i64::MIN as i128, i64::MAX as i128, span)?;
+                check_no_overflow(
+                    ctx,
+                    *op,
+                    &lhs.0,
+                    &rhs.0,
+                    i64::MIN as i128,
+                    i64::MAX as i128,
+                    span,
+                )?;
             }
 
             // Choose the base type for the result refinement
-            let result_base = if i64_mode { IType::I64 } else if u64_mode { IType::U64 } else { IType::Int };
+            let result_base = if i64_mode {
+                IType::I64
+            } else if u64_mode {
+                IType::U64
+            } else {
+                IType::Int
+            };
 
             // Try constant folding first for precise singleton types
             let ty = match join_op(*op, &ty1, &ty2) {

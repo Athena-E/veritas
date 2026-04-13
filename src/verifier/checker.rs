@@ -489,7 +489,11 @@ fn verify_mov_reg(
             add_register_index_constraint(dst, idx, state);
         }
         // Scalar types: link dst to src register variable
-        DtalType::Int | DtalType::I64 | DtalType::U64 | DtalType::RefinedInt { .. } | DtalType::Bool => {
+        DtalType::Int
+        | DtalType::I64
+        | DtalType::U64
+        | DtalType::RefinedInt { .. }
+        | DtalType::Bool => {
             let src_idx = extract_index(&derived_ty, &src);
             add_register_index_constraint(dst, &src_idx, state);
         }
@@ -637,9 +641,12 @@ fn verify_binop(
     let is_i64_op = matches!(ty, DtalType::I64)
         || matches!(ty, DtalType::RefinedInt { base, .. } if matches!(base.as_ref(), DtalType::I64));
     let both_have_constraints = is_concrete_const(&lhs_ty) && is_concrete_const(&rhs_ty);
-    if is_i64_op && both_have_constraints
-        && !matches!(op, BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
-                      | BinaryOp::Shl | BinaryOp::Shr)
+    if is_i64_op
+        && both_have_constraints
+        && !matches!(
+            op,
+            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr
+        )
     {
         let lhs_reg_idx = reg_to_index_expr(&lhs);
         let rhs_reg_idx = reg_to_index_expr(&rhs);
@@ -677,10 +684,7 @@ fn is_concrete_const(ty: &DtalType) -> bool {
 
 /// Check that a symbolic expression is provably within [INT_MIN, INT_MAX]
 /// using the DTAL constraint solver.
-pub fn check_i64_overflow_constraint(
-    result_idx: &IndexExpr,
-    constraints: &[Constraint],
-) -> bool {
+pub fn check_i64_overflow_constraint(result_idx: &IndexExpr, constraints: &[Constraint]) -> bool {
     // INT_MIN <= result
     let lower = Constraint::Ge(result_idx.clone(), IndexExpr::Const(i64::MIN as i128));
     // result <= INT_MAX
@@ -935,7 +939,8 @@ fn verify_type_annotation(
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
         let is_prologue_refinement =
-            matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64) && matches!(reg, Reg::Physical(_));
+            matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
+                && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
             && !is_prologue_refinement
@@ -961,8 +966,7 @@ fn verify_type_annotation(
     } = ty
     {
         let reg_name = format!("{}", reg);
-        let subs =
-            std::collections::HashMap::from([(var.clone(), reg_name)]);
+        let subs = std::collections::HashMap::from([(var.clone(), reg_name)]);
         let projected = substitute_var_names_in_constraint(constraint, &subs);
         state.constraints.push(projected);
     }

@@ -1051,7 +1051,11 @@ pub fn check_function<'src>(
         //   len >= 0  (arrays cannot have negative length)
         //   len <= INT_MAX  (array length fits in a machine word)
         // These are load-bearing for proving i64 loop counter arithmetic.
-        if let IType::Array { size: IValue::Symbolic(size_var), .. } = ty {
+        if let IType::Array {
+            size: IValue::Symbolic(size_var),
+            ..
+        } = ty
+        {
             func_ctx = add_array_length_axioms(func_ctx, size_var);
         }
     }
@@ -1444,10 +1448,7 @@ fn ast_type_to_itype<'src>(ty: &Spanned<AstType<'src>>) -> Result<IType<'src>, T
 /// that the value is representable as a 64-bit signed integer so that
 /// arithmetic overflow obligations like `INT_MIN <= x + y <= INT_MAX` can
 /// be discharged.
-fn add_i64_range_props<'src>(
-    ctx: TypingContext<'src>,
-    var_name: &'src str,
-) -> TypingContext<'src> {
+fn add_i64_range_props<'src>(ctx: TypingContext<'src>, var_name: &'src str) -> TypingContext<'src> {
     use crate::common::ast::{BinOp, Expr, Literal};
     use chumsky::prelude::SimpleSpan;
 
@@ -1476,17 +1477,15 @@ fn add_i64_range_props<'src>(
         predicate: Arc::new((upper, dummy)),
     };
 
-    ctx.with_proposition(lower_prop).with_proposition(upper_prop)
+    ctx.with_proposition(lower_prop)
+        .with_proposition(upper_prop)
 }
 
 /// Add implicit `[0, U64_MAX]` range propositions for a u64 binding.
 ///
 /// Same idea as `add_i64_range_props` but for unsigned 64-bit integers:
 /// the value is in `[0, 18446744073709551615]`.
-fn add_u64_range_props<'src>(
-    ctx: TypingContext<'src>,
-    var_name: &'src str,
-) -> TypingContext<'src> {
+fn add_u64_range_props<'src>(ctx: TypingContext<'src>, var_name: &'src str) -> TypingContext<'src> {
     use crate::common::ast::{BinOp, Expr, Literal};
     use chumsky::prelude::SimpleSpan;
 
@@ -1515,7 +1514,8 @@ fn add_u64_range_props<'src>(
         predicate: Arc::new((upper, dummy)),
     };
 
-    ctx.with_proposition(lower_prop).with_proposition(upper_prop)
+    ctx.with_proposition(lower_prop)
+        .with_proposition(upper_prop)
 }
 
 /// Add implicit axioms for symbolic array lengths:
@@ -1523,10 +1523,7 @@ fn add_u64_range_props<'src>(
 ///   len <= INT_MAX (array length is representable as a machine integer)
 ///
 /// These are load-bearing for proving loop counter arithmetic on i64 indices.
-fn add_array_length_axioms<'src>(
-    ctx: TypingContext<'src>,
-    size_var: &str,
-) -> TypingContext<'src> {
+fn add_array_length_axioms<'src>(ctx: TypingContext<'src>, size_var: &str) -> TypingContext<'src> {
     use crate::common::ast::{BinOp, Expr, Literal};
     use chumsky::prelude::SimpleSpan;
 

@@ -424,8 +424,14 @@ fn lower_array_init<'src>(
             index: idx_reg,
             value: init_val_reg,
             bounds_constraint: Constraint::And(
-                Box::new(Constraint::Ge(IndexExpr::Const(i as i128), IndexExpr::Const(0))),
-                Box::new(Constraint::Lt(IndexExpr::Const(i as i128), IndexExpr::Const(size as i128))),
+                Box::new(Constraint::Ge(
+                    IndexExpr::Const(i as i128),
+                    IndexExpr::Const(0),
+                )),
+                Box::new(Constraint::Lt(
+                    IndexExpr::Const(i as i128),
+                    IndexExpr::Const(size as i128),
+                )),
             ),
         });
     }

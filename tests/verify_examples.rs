@@ -179,16 +179,10 @@ expect_compile_error!(
     "division_by_zero_symbolic.veri"
 );
 expect_compile_error!(e2e_err_i64_overflow, "i64_overflow.veri");
-expect_compile_error!(
-    e2e_err_i64_midpoint_overflow,
-    "i64_midpoint_overflow.veri"
-);
+expect_compile_error!(e2e_err_i64_midpoint_overflow, "i64_midpoint_overflow.veri");
 expect_compile_error!(
     e2e_err_i64_shift_out_of_range,
     "i64_shift_out_of_range.veri"
 );
-expect_compile_error!(
-    e2e_err_i64_negation_overflow,
-    "i64_negation_overflow.veri"
-);
+expect_compile_error!(e2e_err_i64_negation_overflow, "i64_negation_overflow.veri");
 expect_compile_error!(e2e_err_u64_underflow, "u64_underflow.veri");
