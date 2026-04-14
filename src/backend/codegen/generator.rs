@@ -403,6 +403,7 @@ fn find_original_comparison(
             | DtalInstr::ShlImm { dst, .. }
             | DtalInstr::ShrImm { dst, .. }
             | DtalInstr::Load { dst, .. }
+            | DtalInstr::LoadOp { dst, .. }
             | DtalInstr::Not { dst, .. }
             | DtalInstr::Neg { dst, .. }
             | DtalInstr::Pop { dst, .. }

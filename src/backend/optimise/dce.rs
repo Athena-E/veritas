@@ -138,6 +138,7 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
         | DtalInstr::Load { dst, .. }
+        | DtalInstr::LoadOp { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
         | DtalInstr::ShlImm { dst, .. }

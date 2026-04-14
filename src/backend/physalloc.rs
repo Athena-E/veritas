@@ -545,6 +545,7 @@ fn allocate_instruction(
         | DtalInstr::ShlImm { dst, .. }
         | DtalInstr::ShrImm { dst, .. }
         | DtalInstr::Load { dst, .. }
+        | DtalInstr::LoadOp { dst, .. }
         | DtalInstr::SetCC { dst, .. }
         | DtalInstr::Not { dst, .. }
         | DtalInstr::Neg { dst, .. }
@@ -809,6 +810,40 @@ fn allocate_instruction(
                 ty: ty.clone(),
             });
             emit_store_from(instrs, RAX, &dst_loc, ty.clone());
+        }
+
+        DtalInstr::LoadOp { op, dst, base, offset, other, ty } => {
+            let base_loc = resolve_reg(*base, alloc);
+            let offset_loc = resolve_reg(*offset, alloc);
+            let other_loc = resolve_reg(*other, alloc);
+            let dst_loc = resolve_reg(*dst, alloc);
+            // Load other into a safe third register (RDX) first.
+            let other_reg = match &other_loc {
+                PhysLoc::Reg(r) if *r != RAX && *r != R11 => *r,
+                _ => {
+                    emit_load_to(instrs, &other_loc, RDX, ty.clone());
+                    RDX
+                }
+            };
+            // Load base and offset without clobbering each other.
+            let offset_in_rax = matches!(&offset_loc, PhysLoc::Reg(r) if *r == RAX);
+            let base_in_r11 = matches!(&base_loc, PhysLoc::Reg(r) if *r == R11);
+            if offset_in_rax || base_in_r11 {
+                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
+            } else {
+                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
+                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            }
+            instrs.push(DtalInstr::LoadOp {
+                op: *op,
+                dst: other_reg,
+                base: RAX,
+                offset: R11,
+                other: other_reg,
+                ty: ty.clone(),
+            });
+            emit_store_from(instrs, other_reg, &dst_loc, ty.clone());
         }
 
         DtalInstr::Store { base, offset, src } => {

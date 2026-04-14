@@ -87,6 +87,11 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
             changed |= try_replace_virtual(base, copy_map);
             changed |= try_replace_virtual(offset, copy_map);
         }
+        DtalInstr::LoadOp { base, offset, other, .. } => {
+            changed |= try_replace_virtual(base, copy_map);
+            changed |= try_replace_virtual(offset, copy_map);
+            changed |= try_replace_virtual(other, copy_map);
+        }
         DtalInstr::Store { base, offset, src } => {
             changed |= try_replace_virtual(base, copy_map);
             changed |= try_replace_virtual(offset, copy_map);
@@ -157,6 +162,7 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
         | DtalInstr::Load { dst, .. }
+        | DtalInstr::LoadOp { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
         | DtalInstr::ShlImm { dst, .. }

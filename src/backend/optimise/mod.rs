@@ -12,6 +12,7 @@ pub mod const_fold;
 pub mod copy_prop;
 pub mod dce;
 pub mod licm;
+pub mod load_fusion;
 pub mod peephole;
 
 use crate::backend::dtal::instr::DtalProgram;
@@ -29,6 +30,8 @@ pub struct OptConfig {
     pub dead_code_elimination: bool,
     /// Enable loop-invariant code motion pass
     pub licm: bool,
+    /// Enable load-op fusion pass
+    pub load_fusion: bool,
     /// Maximum number of iterations for the optimization loop (None = unlimited)
     pub max_iterations: Option<usize>,
 }
@@ -42,6 +45,7 @@ impl OptConfig {
             copy_propagation: true,
             dead_code_elimination: true,
             licm: true,
+            load_fusion: true,
             max_iterations: Some(10),
         }
     }
@@ -58,6 +62,7 @@ impl OptConfig {
             || self.copy_propagation
             || self.dead_code_elimination
             || self.licm
+            || self.load_fusion
     }
 }
 
@@ -73,6 +78,7 @@ impl OptConfig {
 /// 3. Copy propagation (exposes dead copies)
 /// 4. Dead code elimination (removes useless copies and folded-away MovImms)
 /// 5. LICM (hoists loop-invariant computations to before the loop)
+/// 6. Load-op fusion (fuses Load + BinOp Add/Sub into LoadOp)
 pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     if !config.any_enabled() {
         return;
@@ -115,6 +121,13 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
         if config.licm {
             for func in &mut program.functions {
                 changed |= licm::licm_function(func);
+            }
+        }
+
+        // Run load-op fusion (after LICM so any hoisted loads can be fused)
+        if config.load_fusion {
+            for func in &mut program.functions {
+                changed |= load_fusion::fuse_loads_function(func);
             }
         }
 

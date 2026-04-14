@@ -208,6 +208,7 @@ impl LivenessAnalysis {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
             DtalInstr::MovReg { dst, .. } => Some(*dst),
             DtalInstr::Load { dst, .. } => Some(*dst),
+            DtalInstr::LoadOp { dst, .. } => Some(*dst),
             DtalInstr::BinOp { dst, .. } => Some(*dst),
             DtalInstr::AddImm { dst, .. } => Some(*dst),
             DtalInstr::ShlImm { dst, .. } | DtalInstr::ShrImm { dst, .. } => Some(*dst),
@@ -230,6 +231,7 @@ impl LivenessAnalysis {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
             DtalInstr::Load { base, offset, .. } => vec![*base, *offset],
+            DtalInstr::LoadOp { base, offset, other, .. } => vec![*base, *offset, *other],
             DtalInstr::Store { base, offset, src } => vec![*base, *offset, *src],
             DtalInstr::BinOp { lhs, rhs, .. } => vec![*lhs, *rhs],
             DtalInstr::AddImm { src, .. } => vec![*src],

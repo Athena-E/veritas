@@ -328,6 +328,10 @@ impl<'a> FunctionLowerer<'a> {
                 self.lower_load(*dst, *base, *offset);
             }
 
+            DtalInstr::LoadOp { op, dst, base, offset, other, .. } => {
+                self.lower_load_op(*op, *dst, *base, *offset, *other);
+            }
+
             DtalInstr::Store { base, offset, src } => {
                 self.lower_store(*base, *offset, *src);
             }
@@ -794,6 +798,45 @@ impl<'a> FunctionLowerer<'a> {
                 dst: dst_mem,
                 src: result_reg,
             });
+        }
+    }
+
+    /// Lower fused load+binop instruction: dst = *[base + offset*8] op other
+    fn lower_load_op(
+        &mut self,
+        op: crate::backend::dtal::instr::BinaryOp,
+        dst: Reg,
+        base: Reg,
+        offset: Reg,
+        other: Reg,
+    ) {
+        use crate::backend::dtal::instr::BinaryOp;
+        let base_loc = self.get_reg_location(base);
+        let offset_loc = self.get_reg_location(offset);
+        let other_loc = self.get_reg_location(other);
+        let dst_loc = self.get_vreg_location(dst);
+
+        let base_reg = self.load_to_reg(base_loc, X86Reg::Rax);
+        let offset_scratch = Self::pick_scratch(&[base_reg]);
+        let offset_reg = self.load_to_reg(offset_loc, offset_scratch);
+        let other_scratch = Self::pick_scratch(&[base_reg, offset_reg]);
+        let other_reg = self.load_to_reg(other_loc, other_scratch);
+
+        let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
+        let instr = match op {
+            BinaryOp::Add => X86Instr::AddRM { dst: other_reg, src: mem },
+            BinaryOp::Sub => X86Instr::SubRM { dst: other_reg, src: mem },
+            _ => panic!("LoadOp only supports Add/Sub, got {:?}", op),
+        };
+        self.instructions.push(instr);
+
+        if let Location::Stack(off) = dst_loc {
+            let dst_mem = MemOperand::base_disp(X86Reg::Rbp, off);
+            self.instructions.push(X86Instr::MovMR { dst: dst_mem, src: other_reg });
+        } else if let Location::Reg(r) = dst_loc {
+            if r != other_reg {
+                self.instructions.push(X86Instr::MovRR { dst: r, src: other_reg });
+            }
         }
     }
 

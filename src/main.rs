@@ -136,6 +136,7 @@ fn main() {
     let copy_prop = args.iter().any(|a| a == "--copy-prop");
     let dce = args.iter().any(|a| a == "--dce");
     let licm = args.iter().any(|a| a == "--licm");
+    let load_fusion = args.iter().any(|a| a == "--load-fusion");
 
     // Build optimization config
     let opt_config = if optimize_all {
@@ -147,6 +148,7 @@ fn main() {
             copy_propagation: copy_prop,
             dead_code_elimination: dce,
             licm,
+            load_fusion,
             max_iterations: Some(10),
         }
     };
