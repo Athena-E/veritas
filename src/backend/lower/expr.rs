@@ -370,9 +370,7 @@ fn flat_element_count(ty: &IType<'_>) -> i64 {
 
 /// Descend into nested `ArrayInit` expressions to find the innermost scalar
 /// initializer and the total flat element count.
-fn extract_flat_init<'a, 'src>(
-    expr: &'a Spanned<TExpr<'src>>,
-) -> (&'a Spanned<TExpr<'src>>, i64) {
+fn extract_flat_init<'a, 'src>(expr: &'a Spanned<TExpr<'src>>) -> (&'a Spanned<TExpr<'src>>, i64) {
     if let TExpr::ArrayInit { value, length, .. } = &expr.0 {
         let len = match &length.0 {
             TExpr::Literal {
