@@ -1,0 +1,18 @@
+// Multi-dimensional array test: 2D matrix populated via loops and summed.
+fn main() -> int {
+    let mut m: [[int; 3]; 2] = [[0; 3]; 2];
+    for i in 0..2 {
+        for j in 0..3 {
+            m[i][j] = i * 10 + j;
+        }
+    }
+    let mut sum: int = 0;
+    for i in 0..2 {
+        for j in 0..3 {
+            sum = sum + m[i][j];
+        }
+    }
+    print_int(sum);
+    print_char(10);
+    sum
+}
