@@ -1,4 +1,5 @@
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
+use crate::common::span::Spanned;
 use crate::common::types::{IProposition, IType, IValue};
 use crate::frontend::typechecker::context::TypingContext;
 use crate::frontend::typechecker::helpers::{rename_expr_var, substitute_expr_for_var};
@@ -75,16 +76,45 @@ impl SmtOracle {
                 UnaryOp::Not => None,
             },
 
-            Expr::Index { base, index } => {
-                // Encode array indexing using Z3 array theory: arr[i] -> select(arr, i)
-                if let Expr::Variable(name) = &base.0 {
-                    let int_sort = Sort::int();
-                    let arr = Z3Array::new_const(name.to_string(), &int_sort, &int_sort);
-                    let idx = Self::translate_expr(&index.0)?;
-                    Some(arr.select(&idx).as_int().unwrap())
-                } else {
-                    None
+            Expr::Index { .. } => {
+                // Encode (possibly nested) array indexing using Z3 array theory.
+                // For a chain `m[i0][i1]...[ik]` rooted in variable `m`, encode
+                // as `select(... select(select(m, i0), i1) ..., ik)` against an
+                // array sort of matching nesting depth: `Array(int, Array(int, ... int))`.
+                let mut indices_outer_to_inner: Vec<&Spanned<Expr>> = Vec::new();
+                let mut cur = expr;
+                let name = loop {
+                    match cur {
+                        Expr::Index { base, index } => {
+                            indices_outer_to_inner.push(index);
+                            cur = &base.0;
+                        }
+                        Expr::Variable(name) => break *name,
+                        _ => return None,
+                    }
+                };
+                indices_outer_to_inner.reverse();
+
+                let int_sort = Sort::int();
+                // Range sort for the array constant: nested for depth > 1.
+                let mut inner_sort = int_sort.clone();
+                for _ in 0..indices_outer_to_inner.len().saturating_sub(1) {
+                    inner_sort = Sort::array(&int_sort, &inner_sort);
                 }
+                let arr = Z3Array::new_const(name.to_string(), &int_sort, &inner_sort);
+
+                // Apply selects outer-to-inner.
+                let mut current_arr = arr;
+                let last_idx = indices_outer_to_inner.len() - 1;
+                for (i, idx_expr) in indices_outer_to_inner.iter().enumerate() {
+                    let idx = Self::translate_expr(&idx_expr.0)?;
+                    let selected = current_arr.select(&idx);
+                    if i == last_idx {
+                        return selected.as_int();
+                    }
+                    current_arr = selected.as_array()?;
+                }
+                None
             }
 
             Expr::Error
