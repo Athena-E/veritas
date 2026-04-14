@@ -135,6 +135,7 @@ fn main() {
     let peephole = args.iter().any(|a| a == "--peephole");
     let copy_prop = args.iter().any(|a| a == "--copy-prop");
     let dce = args.iter().any(|a| a == "--dce");
+    let licm = args.iter().any(|a| a == "--licm");
 
     // Build optimization config
     let opt_config = if optimize_all {
@@ -145,6 +146,7 @@ fn main() {
             peephole,
             copy_propagation: copy_prop,
             dead_code_elimination: dce,
+            licm,
             max_iterations: Some(10),
         }
     };

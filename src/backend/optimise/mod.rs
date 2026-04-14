@@ -11,6 +11,7 @@
 pub mod const_fold;
 pub mod copy_prop;
 pub mod dce;
+pub mod licm;
 pub mod peephole;
 
 use crate::backend::dtal::instr::DtalProgram;
@@ -26,6 +27,8 @@ pub struct OptConfig {
     pub copy_propagation: bool,
     /// Enable dead code elimination pass
     pub dead_code_elimination: bool,
+    /// Enable loop-invariant code motion pass
+    pub licm: bool,
     /// Maximum number of iterations for the optimization loop (None = unlimited)
     pub max_iterations: Option<usize>,
 }
@@ -38,6 +41,7 @@ impl OptConfig {
             peephole: true,
             copy_propagation: true,
             dead_code_elimination: true,
+            licm: true,
             max_iterations: Some(10),
         }
     }
@@ -53,6 +57,7 @@ impl OptConfig {
             || self.peephole
             || self.copy_propagation
             || self.dead_code_elimination
+            || self.licm
     }
 }
 
@@ -67,6 +72,7 @@ impl OptConfig {
 /// 2. Peephole (structural rewrites: algebraic identities, degenerate immediates)
 /// 3. Copy propagation (exposes dead copies)
 /// 4. Dead code elimination (removes useless copies and folded-away MovImms)
+/// 5. LICM (hoists loop-invariant computations to before the loop)
 pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     if !config.any_enabled() {
         return;
@@ -102,6 +108,13 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
         if config.dead_code_elimination {
             for func in &mut program.functions {
                 changed |= dce::eliminate_dead_code(func);
+            }
+        }
+
+        // Run loop-invariant code motion
+        if config.licm {
+            for func in &mut program.functions {
+                changed |= licm::licm_function(func);
             }
         }
 

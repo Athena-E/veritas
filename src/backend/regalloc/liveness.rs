@@ -108,7 +108,7 @@ impl LivenessAnalysis {
     }
 
     /// Build control flow graph from function
-    fn build_cfg(
+    pub(crate) fn build_cfg(
         func: &DtalFunction,
     ) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
         let mut successors: HashMap<String, Vec<String>> = HashMap::new();
@@ -139,7 +139,7 @@ impl LivenessAnalysis {
     ///
     /// Scans all instructions since annotation instructions (e.g. ConstraintAssume)
     /// may appear between branch/jump instructions.
-    fn get_block_successors(
+    pub(crate) fn get_block_successors(
         block: &DtalBlock,
         func: &DtalFunction,
         block_idx: usize,
