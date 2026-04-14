@@ -562,11 +562,20 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             };
             state.register_types.insert(*dst, derived_ty);
         }
+        DtalInstr::LoadOp { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
         DtalInstr::SetCC { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Bool);
         }
         DtalInstr::Not { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Bool);
+        }
+        DtalInstr::Neg { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
+        }
+        DtalInstr::ShlImm { dst, ty, .. } | DtalInstr::ShrImm { dst, ty, .. } => {
+            state.register_types.insert(*dst, ty.clone());
         }
         DtalInstr::TypeAnnotation { reg, ty } => {
             state.register_types.insert(*reg, ty.clone());

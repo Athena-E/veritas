@@ -108,7 +108,7 @@ impl LivenessAnalysis {
     }
 
     /// Build control flow graph from function
-    fn build_cfg(
+    pub(crate) fn build_cfg(
         func: &DtalFunction,
     ) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
         let mut successors: HashMap<String, Vec<String>> = HashMap::new();
@@ -139,7 +139,7 @@ impl LivenessAnalysis {
     ///
     /// Scans all instructions since annotation instructions (e.g. ConstraintAssume)
     /// may appear between branch/jump instructions.
-    fn get_block_successors(
+    pub(crate) fn get_block_successors(
         block: &DtalBlock,
         func: &DtalFunction,
         block_idx: usize,
@@ -208,9 +208,11 @@ impl LivenessAnalysis {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
             DtalInstr::MovReg { dst, .. } => Some(*dst),
             DtalInstr::Load { dst, .. } => Some(*dst),
+            DtalInstr::LoadOp { dst, .. } => Some(*dst),
             DtalInstr::BinOp { dst, .. } => Some(*dst),
             DtalInstr::AddImm { dst, .. } => Some(*dst),
-            DtalInstr::Not { dst, .. } => Some(*dst),
+            DtalInstr::ShlImm { dst, .. } | DtalInstr::ShrImm { dst, .. } => Some(*dst),
+            DtalInstr::Not { dst, .. } | DtalInstr::Neg { dst, .. } => Some(*dst),
             DtalInstr::Pop { dst, .. } => Some(*dst),
             DtalInstr::Alloca { dst, .. } => Some(*dst),
             DtalInstr::SetCC { dst, .. } => Some(*dst),
@@ -229,12 +231,19 @@ impl LivenessAnalysis {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
             DtalInstr::Load { base, offset, .. } => vec![*base, *offset],
+            DtalInstr::LoadOp {
+                base,
+                offset,
+                other,
+                ..
+            } => vec![*base, *offset, *other],
             DtalInstr::Store { base, offset, src } => vec![*base, *offset, *src],
             DtalInstr::BinOp { lhs, rhs, .. } => vec![*lhs, *rhs],
             DtalInstr::AddImm { src, .. } => vec![*src],
+            DtalInstr::ShlImm { src, .. } | DtalInstr::ShrImm { src, .. } => vec![*src],
             DtalInstr::Cmp { lhs, rhs } => vec![*lhs, *rhs],
             DtalInstr::CmpImm { lhs, .. } => vec![*lhs],
-            DtalInstr::Not { src, .. } => vec![*src],
+            DtalInstr::Not { src, .. } | DtalInstr::Neg { src, .. } => vec![*src],
             DtalInstr::Push { src, .. } => vec![*src],
             _ => vec![],
         };

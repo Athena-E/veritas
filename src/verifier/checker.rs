@@ -49,6 +49,17 @@ pub fn verify_instruction(
             verify_load(*dst, *base, *offset, ty, state, block_label)?;
         }
 
+        DtalInstr::LoadOp {
+            dst,
+            base,
+            offset,
+            other,
+            ty,
+            ..
+        } => {
+            verify_load_op(*dst, *base, *offset, *other, ty, state, block_label)?;
+        }
+
         DtalInstr::Store { base, offset, src } => {
             verify_store(*base, *offset, *src, state, block_label)?;
         }
@@ -68,6 +79,14 @@ pub fn verify_instruction(
 
         DtalInstr::Not { dst, src, ty } => {
             verify_not(*dst, *src, ty, state, block_label)?;
+        }
+
+        DtalInstr::Neg { dst, src, ty } => {
+            verify_neg(*dst, *src, ty, state, block_label)?;
+        }
+
+        DtalInstr::ShlImm { dst, src, ty, .. } | DtalInstr::ShrImm { dst, src, ty, .. } => {
+            verify_shift_imm(*dst, *src, ty, state, block_label)?;
         }
 
         DtalInstr::TypeAnnotation { reg, ty } => {
@@ -729,6 +748,22 @@ fn verify_add_imm(
 /// Derives the result type from the array's element type, not the annotation.
 /// If the base register doesn't have an array type, falls back to the annotation
 /// (e.g., raw pointer loads where no array type information is available).
+fn verify_load_op(
+    dst: Reg,
+    base: Reg,
+    offset: Reg,
+    other: Reg,
+    ty: &DtalType,
+    state: &mut TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    check_register_defined(base, state, block_label)?;
+    check_register_defined(offset, state, block_label)?;
+    check_register_defined(other, state, block_label)?;
+    state.register_types.insert(dst, ty.clone());
+    Ok(())
+}
+
 fn verify_load(
     dst: Reg,
     base: Reg,
@@ -911,6 +946,30 @@ fn verify_not(
 ) -> Result<(), VerifyError> {
     check_register_defined(src, state, block_label)?;
     state.register_types.insert(dst, DtalType::Bool);
+    Ok(())
+}
+
+fn verify_neg(
+    dst: Reg,
+    src: Reg,
+    ty: &DtalType,
+    state: &mut TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    check_register_defined(src, state, block_label)?;
+    state.register_types.insert(dst, ty.clone());
+    Ok(())
+}
+
+fn verify_shift_imm(
+    dst: Reg,
+    src: Reg,
+    ty: &DtalType,
+    state: &mut TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    check_register_defined(src, state, block_label)?;
+    state.register_types.insert(dst, ty.clone());
     Ok(())
 }
 

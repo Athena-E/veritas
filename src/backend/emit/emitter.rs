@@ -139,6 +139,27 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::LoadOp {
+            op,
+            dst,
+            base,
+            offset,
+            other,
+            ty,
+        } => {
+            writeln!(
+                output,
+                "    loadop.{} {}, [{} + {}*8], {}    : {}",
+                emit_binop(op),
+                emit_reg(dst),
+                emit_reg(base),
+                emit_reg(offset),
+                emit_reg(other),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
         DtalInstr::Store { base, offset, src } => {
             writeln!(
                 output,
@@ -199,6 +220,40 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
                 "    not {}, {}    : {}",
                 emit_reg(dst),
                 emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::Neg { dst, src, ty } => {
+            writeln!(
+                output,
+                "    neg {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::ShlImm { dst, src, imm, ty } => {
+            writeln!(
+                output,
+                "    shli {}, {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                imm,
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+        DtalInstr::ShrImm { dst, src, imm, ty } => {
+            writeln!(
+                output,
+                "    shri {}, {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                imm,
                 emit_type(ty)
             )
             .unwrap();

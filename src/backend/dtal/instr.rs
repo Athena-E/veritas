@@ -172,6 +172,16 @@ pub enum DtalInstr {
     },
     /// store [base + offset], src
     Store { base: Reg, offset: Reg, src: Reg },
+    /// Fused load + binop: dst = *[base + offset*8] op other
+    /// op ∈ {Add, Sub}. Maps to x86 AddRM / SubRM.
+    LoadOp {
+        op: BinaryOp,
+        dst: Reg,
+        base: Reg,
+        offset: Reg,
+        other: Reg,
+        ty: DtalType,
+    },
 
     // Arithmetic
     /// rd = lhs op rhs
@@ -189,6 +199,20 @@ pub enum DtalInstr {
         imm: i128,
         ty: DtalType,
     },
+    /// rd = rs << imm (left shift by immediate)
+    ShlImm {
+        dst: Reg,
+        src: Reg,
+        imm: u8,
+        ty: DtalType,
+    },
+    /// rd = rs >> imm (logical right shift by immediate)
+    ShrImm {
+        dst: Reg,
+        src: Reg,
+        imm: u8,
+        ty: DtalType,
+    },
 
     // Comparison
     /// cmp lhs, rhs
@@ -198,9 +222,11 @@ pub enum DtalInstr {
     /// Set dst to 1 if condition is true (based on flags), else 0
     SetCC { dst: Reg, cond: CmpOp },
 
-    // Logical
+    // Logical / Unary
     /// not rd, rs
     Not { dst: Reg, src: Reg, ty: DtalType },
+    /// neg rd, rs (rd = 0 - rs)
+    Neg { dst: Reg, src: Reg, ty: DtalType },
 
     // Control flow
     /// jmp label

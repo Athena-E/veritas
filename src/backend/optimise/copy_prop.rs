@@ -87,6 +87,16 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
             changed |= try_replace_virtual(base, copy_map);
             changed |= try_replace_virtual(offset, copy_map);
         }
+        DtalInstr::LoadOp {
+            base,
+            offset,
+            other,
+            ..
+        } => {
+            changed |= try_replace_virtual(base, copy_map);
+            changed |= try_replace_virtual(offset, copy_map);
+            changed |= try_replace_virtual(other, copy_map);
+        }
         DtalInstr::Store { base, offset, src } => {
             changed |= try_replace_virtual(base, copy_map);
             changed |= try_replace_virtual(offset, copy_map);
@@ -96,7 +106,9 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
             changed |= try_replace_virtual(lhs, copy_map);
             changed |= try_replace_virtual(rhs, copy_map);
         }
-        DtalInstr::AddImm { src, .. } => {
+        DtalInstr::AddImm { src, .. }
+        | DtalInstr::ShlImm { src, .. }
+        | DtalInstr::ShrImm { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
         DtalInstr::Cmp { lhs, rhs } => {
@@ -106,7 +118,7 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
         DtalInstr::CmpImm { lhs, .. } => {
             changed |= try_replace_virtual(lhs, copy_map);
         }
-        DtalInstr::Not { src, .. } => {
+        DtalInstr::Not { src, .. } | DtalInstr::Neg { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
         DtalInstr::Push { src, .. } => {
@@ -157,9 +169,13 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
         | DtalInstr::Load { dst, .. }
+        | DtalInstr::LoadOp { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
+        | DtalInstr::ShlImm { dst, .. }
+        | DtalInstr::ShrImm { dst, .. }
         | DtalInstr::Not { dst, .. }
+        | DtalInstr::Neg { dst, .. }
         | DtalInstr::Pop { dst, .. }
         | DtalInstr::Alloca { dst, .. }
         | DtalInstr::SetCC { dst, .. } => Some(*dst),

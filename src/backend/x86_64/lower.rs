@@ -328,6 +328,17 @@ impl<'a> FunctionLowerer<'a> {
                 self.lower_load(*dst, *base, *offset);
             }
 
+            DtalInstr::LoadOp {
+                op,
+                dst,
+                base,
+                offset,
+                other,
+                ..
+            } => {
+                self.lower_load_op(*op, *dst, *base, *offset, *other);
+            }
+
             DtalInstr::Store { base, offset, src } => {
                 self.lower_store(*base, *offset, *src);
             }
@@ -368,6 +379,17 @@ impl<'a> FunctionLowerer<'a> {
 
             DtalInstr::Not { dst, src, .. } => {
                 self.lower_not(*dst, *src);
+            }
+
+            DtalInstr::Neg { dst, src, .. } => {
+                self.lower_neg(*dst, *src);
+            }
+
+            DtalInstr::ShlImm { dst, src, imm, .. } => {
+                self.lower_shl_imm(*dst, *src, *imm);
+            }
+            DtalInstr::ShrImm { dst, src, imm, .. } => {
+                self.lower_shr_imm(*dst, *src, *imm);
             }
 
             DtalInstr::Jmp { target } => {
@@ -786,6 +808,57 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    /// Lower fused load+binop instruction: dst = *[base + offset*8] op other
+    fn lower_load_op(
+        &mut self,
+        op: crate::backend::dtal::instr::BinaryOp,
+        dst: Reg,
+        base: Reg,
+        offset: Reg,
+        other: Reg,
+    ) {
+        use crate::backend::dtal::instr::BinaryOp;
+        let base_loc = self.get_reg_location(base);
+        let offset_loc = self.get_reg_location(offset);
+        let other_loc = self.get_reg_location(other);
+        let dst_loc = self.get_vreg_location(dst);
+
+        let base_reg = self.load_to_reg(base_loc, X86Reg::Rax);
+        let offset_scratch = Self::pick_scratch(&[base_reg]);
+        let offset_reg = self.load_to_reg(offset_loc, offset_scratch);
+        let other_scratch = Self::pick_scratch(&[base_reg, offset_reg]);
+        let other_reg = self.load_to_reg(other_loc, other_scratch);
+
+        let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
+        let instr = match op {
+            BinaryOp::Add => X86Instr::AddRM {
+                dst: other_reg,
+                src: mem,
+            },
+            BinaryOp::Sub => X86Instr::SubRM {
+                dst: other_reg,
+                src: mem,
+            },
+            _ => panic!("LoadOp only supports Add/Sub, got {:?}", op),
+        };
+        self.instructions.push(instr);
+
+        if let Location::Stack(off) = dst_loc {
+            let dst_mem = MemOperand::base_disp(X86Reg::Rbp, off);
+            self.instructions.push(X86Instr::MovMR {
+                dst: dst_mem,
+                src: other_reg,
+            });
+        } else if let Location::Reg(r) = dst_loc
+            && r != other_reg
+        {
+            self.instructions.push(X86Instr::MovRR {
+                dst: r,
+                src: other_reg,
+            });
+        }
+    }
+
     /// Lower store instruction
     fn lower_store(&mut self, base: Reg, offset: Reg, src: Reg) {
         let base_loc = self.get_reg_location(base);
@@ -860,6 +933,37 @@ impl<'a> FunctionLowerer<'a> {
 
         self.load_to_fixed_reg(src_loc, X86Reg::Rax);
         self.instructions.push(X86Instr::Not { dst: X86Reg::Rax });
+        self.store_from_reg(X86Reg::Rax, dst_loc);
+    }
+
+    fn lower_neg(&mut self, dst: Reg, src: Reg) {
+        let src_loc = self.get_reg_location(src);
+        let dst_loc = self.get_vreg_location(dst);
+
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
+        self.instructions.push(X86Instr::Neg { dst: X86Reg::Rax });
+        self.store_from_reg(X86Reg::Rax, dst_loc);
+    }
+
+    fn lower_shl_imm(&mut self, dst: Reg, src: Reg, imm: u8) {
+        let src_loc = self.get_reg_location(src);
+        let dst_loc = self.get_vreg_location(dst);
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
+        self.instructions.push(X86Instr::ShlRI {
+            dst: X86Reg::Rax,
+            imm,
+        });
+        self.store_from_reg(X86Reg::Rax, dst_loc);
+    }
+
+    fn lower_shr_imm(&mut self, dst: Reg, src: Reg, imm: u8) {
+        let src_loc = self.get_reg_location(src);
+        let dst_loc = self.get_vreg_location(dst);
+        self.load_to_fixed_reg(src_loc, X86Reg::Rax);
+        self.instructions.push(X86Instr::ShrRI {
+            dst: X86Reg::Rax,
+            imm,
+        });
         self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 

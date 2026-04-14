@@ -194,6 +194,7 @@ impl Encoder {
 
             X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
             X86Instr::ShlCl { .. } | X86Instr::ShrCl { .. } => 3, // REX.W + D3 + ModR/M
+            X86Instr::ShlRI { .. } | X86Instr::ShrRI { .. } => 4, // REX.W + C1 + ModR/M + imm8
 
             X86Instr::SetCC { dst, .. } => {
                 // setcc r8 (3-4 bytes) + movzx r32, r8 (3-4 bytes)
@@ -530,6 +531,18 @@ impl Encoder {
             X86Instr::ShrCl { dst } => {
                 // REX.W + D3 /5 (SHR r/m64, CL)
                 self.encode_unary(0xD3, 5, *dst);
+            }
+
+            X86Instr::ShlRI { dst, imm } => {
+                // REX.W + C1 /4 imm8 (SHL r/m64, imm8)
+                self.encode_unary(0xC1, 4, *dst);
+                self.emit_byte(*imm);
+            }
+
+            X86Instr::ShrRI { dst, imm } => {
+                // REX.W + C1 /5 imm8 (SHR r/m64, imm8)
+                self.encode_unary(0xC1, 5, *dst);
+                self.emit_byte(*imm);
             }
 
             X86Instr::InAlDx => {
