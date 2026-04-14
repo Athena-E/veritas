@@ -353,7 +353,46 @@ fn lower_call<'src>(
     }
 }
 
-/// Lower an array index expression (array access)
+/// Flattened element count of a (possibly nested) array type.
+/// Scalars are 1; `[[T; M]; N]` is `N * flat_element_count(T) * M` via recursion.
+fn flat_element_count(ty: &IType<'_>) -> i64 {
+    match ty {
+        IType::Array { element_type, size } => {
+            let n = match size {
+                IValue::Int(n) => i64::try_from(*n).expect("array size exceeds i64 range"),
+                _ => panic!("Non-constant array size in flat_element_count"),
+            };
+            n * flat_element_count(element_type)
+        }
+        _ => 1,
+    }
+}
+
+/// Descend into nested `ArrayInit` expressions to find the innermost scalar
+/// initializer and the total flat element count.
+fn extract_flat_init<'a, 'src>(
+    expr: &'a Spanned<TExpr<'src>>,
+) -> (&'a Spanned<TExpr<'src>>, i64) {
+    if let TExpr::ArrayInit { value, length, .. } = &expr.0 {
+        let len = match &length.0 {
+            TExpr::Literal {
+                value: Literal::Int(n),
+                ..
+            } => i64::try_from(*n).expect("array size exceeds i64 range"),
+            _ => panic!("Array size must be a constant integer"),
+        };
+        let (inner, inner_len) = extract_flat_init(value);
+        (inner, len * inner_len)
+    } else {
+        (expr, 1)
+    }
+}
+
+/// Lower an array index expression (array access).
+///
+/// If the result type is itself an array (row extraction from a nested array),
+/// produce a sub-array pointer via `base + index * stride_bytes` instead of a
+/// scalar load. That pointer can then be indexed again to reach the scalar.
 fn lower_index<'src>(
     ctx: &mut LoweringContext<'src>,
     base: &Spanned<TExpr<'src>>,
@@ -362,8 +401,36 @@ fn lower_index<'src>(
 ) -> VirtualReg {
     let base_reg = lower_expr(ctx, base);
     let index_reg = lower_expr(ctx, index);
-    let dst = ctx.fresh_reg();
 
+    if matches!(ty, IType::Array { .. }) {
+        // Sub-array pointer: new_base = base + index * (flat_elements(ty) * 8)
+        let stride_bytes = flat_element_count(ty) * 8;
+        let stride_reg = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst: stride_reg,
+            value: stride_bytes,
+            ty: IType::Int,
+        });
+        let byte_off_reg = ctx.fresh_reg();
+        ctx.emit(TirInstr::BinOp {
+            dst: byte_off_reg,
+            op: BinaryOp::Mul,
+            lhs: index_reg,
+            rhs: stride_reg,
+            ty: IType::Int,
+        });
+        let dst = ctx.fresh_reg();
+        ctx.emit(TirInstr::BinOp {
+            dst,
+            op: BinaryOp::Add,
+            lhs: base_reg,
+            rhs: byte_off_reg,
+            ty: IType::Int,
+        });
+        return dst;
+    }
+
+    let dst = ctx.fresh_reg();
     ctx.emit(TirInstr::ArrayLoad {
         dst,
         base: base_reg,
@@ -371,19 +438,21 @@ fn lower_index<'src>(
         element_ty: ty.clone(),
         bounds_constraint: Constraint::True,
     });
-
     dst
 }
 
-/// Lower an array initialization expression
+/// Lower an array initialization expression.
+///
+/// Nested initializers like `[[0; 3]; 2]` are flattened into a single
+/// allocation of `outer * inner` scalar slots, initialized in row-major
+/// order. Outer array slots hold scalar values, not inner pointers.
 fn lower_array_init<'src>(
     ctx: &mut LoweringContext<'src>,
     value: &Spanned<TExpr<'src>>,
     length: &Spanned<TExpr<'src>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    // Get the array size (must be a constant for now)
-    let size = match &length.0 {
+    let outer_size = match &length.0 {
         TExpr::Literal {
             value: Literal::Int(n),
             ..
@@ -391,27 +460,24 @@ fn lower_array_init<'src>(
         _ => panic!("Array size must be a constant integer"),
     };
 
-    // Get element type from the array type
-    let element_ty = match ty {
-        IType::Array { element_type, .. } => (**element_type).clone(),
-        _ => panic!("Expected array type for ArrayInit"),
-    };
+    // Walk into nested ArrayInits to get the scalar init and total flat count.
+    let (scalar_expr, inner_flat) = extract_flat_init(value);
+    let total_flat = outer_size * inner_flat;
 
-    // Allocate the array
+    let scalar_ty = scalar_expr.0.get_type().clone();
+
+    // Allocate total_flat slots. element_ty records the scalar type; codegen
+    // treats each slot as 8 bytes regardless.
     let arr_reg = ctx.fresh_reg();
     ctx.emit(TirInstr::AllocArray {
         dst: arr_reg,
-        element_ty: element_ty.clone(),
-        size,
+        element_ty: scalar_ty,
+        size: total_flat,
     });
 
-    // Lower the initialization value
-    let init_val_reg = lower_expr(ctx, value);
+    let init_val_reg = lower_expr(ctx, scalar_expr);
 
-    // Initialize each element with a loop
-    // For now, we unroll for small arrays or use a simple loop
-    // This is a simplified version - just store to each index
-    for i in 0..size {
+    for i in 0..total_flat {
         let idx_reg = ctx.fresh_reg();
         ctx.emit(TirInstr::LoadImm {
             dst: idx_reg,
@@ -430,12 +496,13 @@ fn lower_array_init<'src>(
                 )),
                 Box::new(Constraint::Lt(
                     IndexExpr::Const(i as i128),
-                    IndexExpr::Const(size as i128),
+                    IndexExpr::Const(total_flat as i128),
                 )),
             ),
         });
     }
 
+    let _ = ty; // outer array type; all needed info derived from length & value
     arr_reg
 }
 
