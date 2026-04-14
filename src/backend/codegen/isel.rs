@@ -14,7 +14,13 @@ use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp}
 /// Lower a TIR instruction to DTAL instructions
 ///
 /// May emit multiple DTAL instructions for a single TIR instruction.
-pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr<'src>) {
+/// `bare_metal` selects between heap allocation (hosted, via `__rt_alloc`)
+/// and stack allocation (bare-metal, via `Alloca`) for arrays.
+pub fn lower_instruction<'src>(
+    instrs: &mut Vec<DtalInstr>,
+    tir_instr: &TirInstr<'src>,
+    bare_metal: bool,
+) {
     match tir_instr {
         TirInstr::LoadImm { dst, value, ty } => {
             instrs.push(DtalInstr::MovImm {
@@ -99,10 +105,11 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
             element_ty,
             size,
         } => {
+            use crate::backend::dtal::regs::PhysicalReg;
             use std::sync::Arc;
 
             // Calculate total size in bytes (assuming 8 bytes per element)
-            let element_size = 8u32; // Simplified: all elements are 8 bytes
+            let element_size = 8u32;
             let total_size = element_size * (*size as u32);
 
             // Create array type — widen element type to base (Int/Bool)
@@ -113,11 +120,32 @@ pub fn lower_instruction<'src>(instrs: &mut Vec<DtalInstr>, tir_instr: &TirInstr
                 size: IndexExpr::Const(*size as i128),
             };
 
-            instrs.push(DtalInstr::Alloca {
-                dst: Reg::Virtual(*dst),
-                size: total_size,
-                ty: array_ty,
-            });
+            if bare_metal {
+                // Bare-metal: stack alloc (no kernel mmap available).
+                // A bump allocator for unikernels is planned separately.
+                instrs.push(DtalInstr::Alloca {
+                    dst: Reg::Virtual(*dst),
+                    size: total_size,
+                    ty: array_ty,
+                });
+            } else {
+                // Hosted Linux: heap-allocate via the `__rt_alloc` runtime
+                // helper (mmap-backed). Pass size in r0; result returns in r0.
+                instrs.push(DtalInstr::MovImm {
+                    dst: Reg::Physical(PhysicalReg::R0),
+                    imm: total_size as i128,
+                    ty: DtalType::Int,
+                });
+                instrs.push(DtalInstr::Call {
+                    target: crate::backend::runtime::RT_ALLOC.to_string(),
+                    return_ty: DtalType::Int,
+                });
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Virtual(*dst),
+                    src: Reg::Physical(PhysicalReg::R0),
+                    ty: array_ty,
+                });
+            }
         }
 
         // AssumeConstraint: the verifier derives constraints independently

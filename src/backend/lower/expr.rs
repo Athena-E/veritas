@@ -473,6 +473,21 @@ fn lower_array_init<'src>(
         size: total_flat,
     });
 
+    // Zero-init fast path: hosted `__rt_alloc` (mmap) returns zero-filled
+    // pages, so literal-zero initializers need no explicit stores. This makes
+    // `[[0; N]; N]` viable for large N (polybench-scale matrices) — otherwise
+    // the unrolled stores blow up TIR size.
+    let is_zero_literal = matches!(
+        &scalar_expr.0,
+        TExpr::Literal {
+            value: Literal::Int(0),
+            ..
+        }
+    );
+    if is_zero_literal {
+        return arr_reg;
+    }
+
     let init_val_reg = lower_expr(ctx, scalar_expr);
 
     for i in 0..total_flat {
