@@ -177,9 +177,7 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                 }
 
                 // Strength reduction: Mul by power of 2 → ShlImm (commutative)
-                (Some(imm), None)
-                    if *op == BinaryOp::Mul && is_power_of_two(imm) =>
-                {
+                (Some(imm), None) if *op == BinaryOp::Mul && is_power_of_two(imm) => {
                     *instr = DtalInstr::ShlImm {
                         dst: *dst,
                         src: *rhs,
@@ -188,9 +186,7 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     };
                     true
                 }
-                (None, Some(imm))
-                    if *op == BinaryOp::Mul && is_power_of_two(imm) =>
-                {
+                (None, Some(imm)) if *op == BinaryOp::Mul && is_power_of_two(imm) => {
                     *instr = DtalInstr::ShlImm {
                         dst: *dst,
                         src: *lhs,
@@ -202,9 +198,7 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
 
                 // Strength reduction: unsigned Div by power of 2 → ShrImm
                 (None, Some(imm))
-                    if *op == BinaryOp::Div
-                        && is_unsigned(ty)
-                        && is_power_of_two(imm) =>
+                    if *op == BinaryOp::Div && is_unsigned(ty) && is_power_of_two(imm) =>
                 {
                     *instr = DtalInstr::ShrImm {
                         dst: *dst,
@@ -223,10 +217,7 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
         DtalInstr::Cmp { lhs, rhs } => {
             if let Some(imm) = lookup(rhs, const_map) {
                 let lhs_reg = *lhs;
-                *instr = DtalInstr::CmpImm {
-                    lhs: lhs_reg,
-                    imm,
-                };
+                *instr = DtalInstr::CmpImm { lhs: lhs_reg, imm };
                 true
             } else {
                 false
@@ -463,7 +454,10 @@ mod tests {
         // Should still be a BinOp
         assert!(matches!(
             &func.blocks[0].instructions[2],
-            DtalInstr::BinOp { op: BinaryOp::Div, .. }
+            DtalInstr::BinOp {
+                op: BinaryOp::Div,
+                ..
+            }
         ));
     }
 
@@ -560,10 +554,7 @@ mod tests {
             assert_eq!(*lhs, vreg(0));
             assert_eq!(*imm, 10);
         } else {
-            panic!(
-                "Expected CmpImm, got {:?}",
-                &func.blocks[0].instructions[1]
-            );
+            panic!("Expected CmpImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
 

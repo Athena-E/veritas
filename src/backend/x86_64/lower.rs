@@ -328,7 +328,14 @@ impl<'a> FunctionLowerer<'a> {
                 self.lower_load(*dst, *base, *offset);
             }
 
-            DtalInstr::LoadOp { op, dst, base, offset, other, .. } => {
+            DtalInstr::LoadOp {
+                op,
+                dst,
+                base,
+                offset,
+                other,
+                ..
+            } => {
                 self.lower_load_op(*op, *dst, *base, *offset, *other);
             }
 
@@ -824,19 +831,31 @@ impl<'a> FunctionLowerer<'a> {
 
         let mem = MemOperand::base_index_disp(base_reg, offset_reg, 8, 0);
         let instr = match op {
-            BinaryOp::Add => X86Instr::AddRM { dst: other_reg, src: mem },
-            BinaryOp::Sub => X86Instr::SubRM { dst: other_reg, src: mem },
+            BinaryOp::Add => X86Instr::AddRM {
+                dst: other_reg,
+                src: mem,
+            },
+            BinaryOp::Sub => X86Instr::SubRM {
+                dst: other_reg,
+                src: mem,
+            },
             _ => panic!("LoadOp only supports Add/Sub, got {:?}", op),
         };
         self.instructions.push(instr);
 
         if let Location::Stack(off) = dst_loc {
             let dst_mem = MemOperand::base_disp(X86Reg::Rbp, off);
-            self.instructions.push(X86Instr::MovMR { dst: dst_mem, src: other_reg });
-        } else if let Location::Reg(r) = dst_loc {
-            if r != other_reg {
-                self.instructions.push(X86Instr::MovRR { dst: r, src: other_reg });
-            }
+            self.instructions.push(X86Instr::MovMR {
+                dst: dst_mem,
+                src: other_reg,
+            });
+        } else if let Location::Reg(r) = dst_loc
+            && r != other_reg
+        {
+            self.instructions.push(X86Instr::MovRR {
+                dst: r,
+                src: other_reg,
+            });
         }
     }
 
@@ -930,7 +949,10 @@ impl<'a> FunctionLowerer<'a> {
         let src_loc = self.get_reg_location(src);
         let dst_loc = self.get_vreg_location(dst);
         self.load_to_fixed_reg(src_loc, X86Reg::Rax);
-        self.instructions.push(X86Instr::ShlRI { dst: X86Reg::Rax, imm });
+        self.instructions.push(X86Instr::ShlRI {
+            dst: X86Reg::Rax,
+            imm,
+        });
         self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 
@@ -938,7 +960,10 @@ impl<'a> FunctionLowerer<'a> {
         let src_loc = self.get_reg_location(src);
         let dst_loc = self.get_vreg_location(dst);
         self.load_to_fixed_reg(src_loc, X86Reg::Rax);
-        self.instructions.push(X86Instr::ShrRI { dst: X86Reg::Rax, imm });
+        self.instructions.push(X86Instr::ShrRI {
+            dst: X86Reg::Rax,
+            imm,
+        });
         self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 

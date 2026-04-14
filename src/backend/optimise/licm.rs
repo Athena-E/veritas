@@ -136,7 +136,7 @@ fn find_loops(
             for succ in succs {
                 let is_back_edge = dominators
                     .get(label)
-                    .map_or(false, |dom_set| dom_set.contains(succ));
+                    .is_some_and(|dom_set| dom_set.contains(succ));
 
                 if is_back_edge {
                     // Found back-edge: label → succ
@@ -219,10 +219,10 @@ fn hoist_loop(
     // Compute registers defined outside the loop
     let mut external_defs: HashSet<VirtualReg> = HashSet::new();
     for block in &func.blocks {
-        if !lp.blocks.contains(&block.label) {
-            if let Some(defs) = block_defs.get(&block.label) {
-                external_defs.extend(defs);
-            }
+        if !lp.blocks.contains(&block.label)
+            && let Some(defs) = block_defs.get(&block.label)
+        {
+            external_defs.extend(defs);
         }
     }
 
@@ -256,10 +256,10 @@ fn hoist_loop(
 
             for (i, instr) in block.instructions.iter().enumerate() {
                 // Skip if already identified as hoistable
-                if let Some(def) = instruction_def(instr) {
-                    if hoistable_defs.contains(&def) {
-                        continue;
-                    }
+                if let Some(def) = instruction_def(instr)
+                    && hoistable_defs.contains(&def)
+                {
+                    continue;
                 }
 
                 if !is_hoistable_kind(instr) {
@@ -293,7 +293,11 @@ fn hoist_loop(
     // Collect hoisted instructions (in order)
     let mut hoisted: Vec<DtalInstr> = Vec::new();
     for (block_label, instr_idx) in &hoistable_instrs {
-        let block = func.blocks.iter().find(|b| b.label == *block_label).unwrap();
+        let block = func
+            .blocks
+            .iter()
+            .find(|b| b.label == *block_label)
+            .unwrap();
         hoisted.push(block.instructions[*instr_idx].clone());
     }
 
@@ -542,30 +546,33 @@ mod tests {
         // The hoisted instructions go before the phi moves
 
         // Check that v3=7, v4=3, v5=v3*v4 are in the entry block
-        let has_v3 = entry.instructions.iter().any(|i| {
-            matches!(i, DtalInstr::MovImm { dst, imm: 7, .. } if *dst == vreg(3))
-        });
-        let has_v4 = entry.instructions.iter().any(|i| {
-            matches!(i, DtalInstr::MovImm { dst, imm: 3, .. } if *dst == vreg(4))
-        });
-        let has_v5 = entry.instructions.iter().any(|i| {
-            matches!(i, DtalInstr::BinOp { op: BinaryOp::Mul, dst, .. } if *dst == vreg(5))
-        });
+        let has_v3 = entry
+            .instructions
+            .iter()
+            .any(|i| matches!(i, DtalInstr::MovImm { dst, imm: 7, .. } if *dst == vreg(3)));
+        let has_v4 = entry
+            .instructions
+            .iter()
+            .any(|i| matches!(i, DtalInstr::MovImm { dst, imm: 3, .. } if *dst == vreg(4)));
+        let has_v5 = entry.instructions.iter().any(
+            |i| matches!(i, DtalInstr::BinOp { op: BinaryOp::Mul, dst, .. } if *dst == vreg(5)),
+        );
         assert!(has_v3, "v3 = 7 should be hoisted to entry");
         assert!(has_v4, "v4 = 3 should be hoisted to entry");
         assert!(has_v5, "v5 = v3 * v4 should be hoisted to entry");
 
         // Body should NOT have v3, v4, v5 definitions anymore
         let body = &func.blocks[2];
-        let body_has_v3 = body.instructions.iter().any(|i| {
-            matches!(i, DtalInstr::MovImm { dst, imm: 7, .. } if *dst == vreg(3))
-        });
+        let body_has_v3 = body
+            .instructions
+            .iter()
+            .any(|i| matches!(i, DtalInstr::MovImm { dst, imm: 7, .. } if *dst == vreg(3)));
         assert!(!body_has_v3, "v3 should be removed from body");
 
         // Body should still have v6 (depends on loop var v0)
-        let body_has_v6 = body.instructions.iter().any(|i| {
-            matches!(i, DtalInstr::BinOp { op: BinaryOp::Add, dst, .. } if *dst == vreg(6))
-        });
+        let body_has_v6 = body.instructions.iter().any(
+            |i| matches!(i, DtalInstr::BinOp { op: BinaryOp::Add, dst, .. } if *dst == vreg(6)),
+        );
         assert!(body_has_v6, "v6 should remain in body (uses loop var)");
     }
 

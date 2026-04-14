@@ -771,14 +771,24 @@ fn allocate_instruction(
             let src_loc = resolve_reg(*src, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
             emit_load_to(instrs, &src_loc, RAX, ty.clone());
-            instrs.push(DtalInstr::ShlImm { dst: RAX, src: RAX, imm: *imm, ty: ty.clone() });
+            instrs.push(DtalInstr::ShlImm {
+                dst: RAX,
+                src: RAX,
+                imm: *imm,
+                ty: ty.clone(),
+            });
             emit_store_from(instrs, RAX, &dst_loc, ty.clone());
         }
         DtalInstr::ShrImm { dst, src, imm, ty } => {
             let src_loc = resolve_reg(*src, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
             emit_load_to(instrs, &src_loc, RAX, ty.clone());
-            instrs.push(DtalInstr::ShrImm { dst: RAX, src: RAX, imm: *imm, ty: ty.clone() });
+            instrs.push(DtalInstr::ShrImm {
+                dst: RAX,
+                src: RAX,
+                imm: *imm,
+                ty: ty.clone(),
+            });
             emit_store_from(instrs, RAX, &dst_loc, ty.clone());
         }
 
@@ -812,7 +822,14 @@ fn allocate_instruction(
             emit_store_from(instrs, RAX, &dst_loc, ty.clone());
         }
 
-        DtalInstr::LoadOp { op, dst, base, offset, other, ty } => {
+        DtalInstr::LoadOp {
+            op,
+            dst,
+            base,
+            offset,
+            other,
+            ty,
+        } => {
             let base_loc = resolve_reg(*base, alloc);
             let offset_loc = resolve_reg(*offset, alloc);
             let other_loc = resolve_reg(*other, alloc);

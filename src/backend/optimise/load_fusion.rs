@@ -179,44 +179,43 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                 }
             };
 
-            if safe_to_fuse {
-                if let Some(fused) = fused_instr {
-                    // Also check: no intervening instruction redefines `rhs`
-                    if let DtalInstr::LoadOp { other, .. } = &fused {
-                        let other_reg = *other;
-                        let mut other_redefined = false;
-                        for k in (i + 1)..j {
-                            if let Some(def) = instruction_def(&block.instructions[k]) {
-                                if Reg::Virtual(def) == other_reg {
-                                    other_redefined = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if other_redefined {
-                            i += 1;
-                            continue;
-                        }
-                    }
-
-                    // Perform fusion: replace Load with LoadOp, mark BinOp and
-                    // any TypeAnnotation for load_dst for removal
-                    block.instructions[i] = fused;
-                    remove[j] = true;
-
-                    // Mark any TypeAnnotation for load_dst between i+1 and j for removal
+            if safe_to_fuse && let Some(fused) = fused_instr {
+                // Also check: no intervening instruction redefines `rhs`
+                if let DtalInstr::LoadOp { other, .. } = &fused {
+                    let other_reg = *other;
+                    let mut other_redefined = false;
                     for k in (i + 1)..j {
-                        if let DtalInstr::TypeAnnotation { reg, .. } = &block.instructions[k] {
-                            if *reg == load_dst {
-                                remove[k] = true;
-                            }
+                        if let Some(def) = instruction_def(&block.instructions[k])
+                            && Reg::Virtual(def) == other_reg
+                        {
+                            other_redefined = true;
+                            break;
                         }
                     }
-
-                    changed = true;
-                    i = j + 1;
-                    continue;
+                    if other_redefined {
+                        i += 1;
+                        continue;
+                    }
                 }
+
+                // Perform fusion: replace Load with LoadOp, mark BinOp and
+                // any TypeAnnotation for load_dst for removal
+                block.instructions[i] = fused;
+                remove[j] = true;
+
+                // Mark any TypeAnnotation for load_dst between i+1 and j for removal
+                #[allow(clippy::needless_range_loop)]
+                for k in (i + 1)..j {
+                    if let DtalInstr::TypeAnnotation { reg, .. } = &block.instructions[k]
+                        && *reg == load_dst
+                    {
+                        remove[k] = true;
+                    }
+                }
+
+                changed = true;
+                i = j + 1;
+                continue;
             }
 
             // Ignore the _ = safe_to_fuse to silence warnings
@@ -267,7 +266,10 @@ fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         DtalInstr::MovReg { src, .. } => vec![*src],
         DtalInstr::Load { base, offset, .. } => vec![*base, *offset],
         DtalInstr::LoadOp {
-            base, offset, other, ..
+            base,
+            offset,
+            other,
+            ..
         } => vec![*base, *offset, *other],
         DtalInstr::Store { base, offset, src } => vec![*base, *offset, *src],
         DtalInstr::BinOp { lhs, rhs, .. } => vec![*lhs, *rhs],
@@ -366,10 +368,7 @@ mod tests {
             assert_eq!(*offset, vreg(2));
             assert_eq!(*other, vreg(5));
         } else {
-            panic!(
-                "Expected LoadOp, got {:?}",
-                &func.blocks[0].instructions[0]
-            );
+            panic!("Expected LoadOp, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
 
@@ -401,7 +400,10 @@ mod tests {
 
         assert!(matches!(
             &func.blocks[0].instructions[0],
-            DtalInstr::LoadOp { op: BinaryOp::Sub, .. }
+            DtalInstr::LoadOp {
+                op: BinaryOp::Sub,
+                ..
+            }
         ));
     }
 

@@ -40,6 +40,7 @@ fn peephole_block(block: &mut DtalBlock) -> bool {
     if len >= 2 {
         // We need split borrows, so use index-based access with unsafe-free
         // pattern: check pair, mutate second, mark first for removal.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..len - 1 {
             if let Some(replacement) =
                 try_peephole_pair(&block.instructions[i], &block.instructions[i + 1])
@@ -74,7 +75,9 @@ fn peephole_block(block: &mut DtalBlock) -> bool {
 fn try_peephole_pair(first: &DtalInstr, second: &DtalInstr) -> Option<DtalInstr> {
     // Negation: MovImm dst, 0; BinOp Sub dst, dst, operand  →  Neg dst, operand
     if let (
-        DtalInstr::MovImm { dst: d1, imm: 0, .. },
+        DtalInstr::MovImm {
+            dst: d1, imm: 0, ..
+        },
         DtalInstr::BinOp {
             op: BinaryOp::Sub,
             dst: d2,
@@ -83,14 +86,14 @@ fn try_peephole_pair(first: &DtalInstr, second: &DtalInstr) -> Option<DtalInstr>
             ty,
         },
     ) = (first, second)
+        && d1 == d2
+        && d2 == d3
     {
-        if d1 == d2 && d2 == d3 {
-            return Some(DtalInstr::Neg {
-                dst: *d2,
-                src: *operand,
-                ty: ty.clone(),
-            });
-        }
+        return Some(DtalInstr::Neg {
+            dst: *d2,
+            src: *operand,
+            ty: ty.clone(),
+        });
     }
 
     None
@@ -102,7 +105,18 @@ fn try_peephole_pair(first: &DtalInstr, second: &DtalInstr) -> Option<DtalInstr>
 fn try_peephole(instr: &mut DtalInstr) -> bool {
     match instr {
         // Shift by 0 → MovReg (identity)
-        DtalInstr::ShlImm { dst, src, imm: 0, ty } | DtalInstr::ShrImm { dst, src, imm: 0, ty } => {
+        DtalInstr::ShlImm {
+            dst,
+            src,
+            imm: 0,
+            ty,
+        }
+        | DtalInstr::ShrImm {
+            dst,
+            src,
+            imm: 0,
+            ty,
+        } => {
             *instr = DtalInstr::MovReg {
                 dst: *dst,
                 src: *src,
@@ -123,7 +137,11 @@ fn try_peephole(instr: &mut DtalInstr) -> bool {
 
         // Same-register BinOp patterns
         DtalInstr::BinOp {
-            op, dst, lhs, rhs, ty,
+            op,
+            dst,
+            lhs,
+            rhs,
+            ty,
         } if lhs == rhs => {
             match op {
                 // x - x = 0, x ^ x = 0
@@ -202,10 +220,7 @@ mod tests {
             assert_eq!(*dst, vreg(1));
             assert_eq!(*src, vreg(0));
         } else {
-            panic!(
-                "Expected MovReg, got {:?}",
-                &func.blocks[0].instructions[0]
-            );
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
 
@@ -305,10 +320,7 @@ mod tests {
             assert_eq!(*dst, vreg(1));
             assert_eq!(*src, vreg(0));
         } else {
-            panic!(
-                "Expected MovReg, got {:?}",
-                &func.blocks[0].instructions[0]
-            );
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
 
@@ -336,10 +348,7 @@ mod tests {
             assert_eq!(*dst, vreg(1));
             assert_eq!(*src, vreg(0));
         } else {
-            panic!(
-                "Expected MovReg, got {:?}",
-                &func.blocks[0].instructions[0]
-            );
+            panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
 
@@ -487,10 +496,7 @@ mod tests {
             assert_eq!(*dst, vreg(1));
             assert_eq!(*src, vreg(0));
         } else {
-            panic!(
-                "Expected Neg, got {:?}",
-                &func.blocks[0].instructions[0]
-            );
+            panic!("Expected Neg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
 

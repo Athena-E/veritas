@@ -49,7 +49,14 @@ pub fn verify_instruction(
             verify_load(*dst, *base, *offset, ty, state, block_label)?;
         }
 
-        DtalInstr::LoadOp { dst, base, offset, other, ty, .. } => {
+        DtalInstr::LoadOp {
+            dst,
+            base,
+            offset,
+            other,
+            ty,
+            ..
+        } => {
             verify_load_op(*dst, *base, *offset, *other, ty, state, block_label)?;
         }
 

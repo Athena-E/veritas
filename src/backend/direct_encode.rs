@@ -169,10 +169,16 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::ShlImm { dst, imm, .. } => {
-            out.push(X86Instr::ShlRI { dst: reg_to_x86(dst), imm: *imm });
+            out.push(X86Instr::ShlRI {
+                dst: reg_to_x86(dst),
+                imm: *imm,
+            });
         }
         DtalInstr::ShrImm { dst, imm, .. } => {
-            out.push(X86Instr::ShrRI { dst: reg_to_x86(dst), imm: *imm });
+            out.push(X86Instr::ShrRI {
+                dst: reg_to_x86(dst),
+                imm: *imm,
+            });
         }
 
         DtalInstr::Load {
@@ -184,19 +190,35 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             });
         }
 
-        DtalInstr::LoadOp { op, dst, base, offset, other, .. } => {
+        DtalInstr::LoadOp {
+            op,
+            dst,
+            base,
+            offset,
+            other,
+            ..
+        } => {
             use crate::backend::dtal::instr::BinaryOp;
             let other_x86 = reg_to_x86(other);
             let mem = MemOperand::base_index_disp(reg_to_x86(base), reg_to_x86(offset), 8, 0);
             let instr = match op {
-                BinaryOp::Add => X86Instr::AddRM { dst: other_x86, src: mem },
-                BinaryOp::Sub => X86Instr::SubRM { dst: other_x86, src: mem },
+                BinaryOp::Add => X86Instr::AddRM {
+                    dst: other_x86,
+                    src: mem,
+                },
+                BinaryOp::Sub => X86Instr::SubRM {
+                    dst: other_x86,
+                    src: mem,
+                },
                 _ => panic!("LoadOp only supports Add/Sub"),
             };
             out.push(instr);
             let dst_x86 = reg_to_x86(dst);
             if dst_x86 != other_x86 {
-                out.push(X86Instr::MovRR { dst: dst_x86, src: other_x86 });
+                out.push(X86Instr::MovRR {
+                    dst: dst_x86,
+                    src: other_x86,
+                });
             }
         }
 

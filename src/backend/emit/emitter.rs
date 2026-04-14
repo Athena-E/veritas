@@ -139,7 +139,14 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
-        DtalInstr::LoadOp { op, dst, base, offset, other, ty } => {
+        DtalInstr::LoadOp {
+            op,
+            dst,
+            base,
+            offset,
+            other,
+            ty,
+        } => {
             writeln!(
                 output,
                 "    loadop.{} {}, [{} + {}*8], {}    : {}",
@@ -230,10 +237,26 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         }
 
         DtalInstr::ShlImm { dst, src, imm, ty } => {
-            writeln!(output, "    shli {}, {}, {}    : {}", emit_reg(dst), emit_reg(src), imm, emit_type(ty)).unwrap();
+            writeln!(
+                output,
+                "    shli {}, {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                imm,
+                emit_type(ty)
+            )
+            .unwrap();
         }
         DtalInstr::ShrImm { dst, src, imm, ty } => {
-            writeln!(output, "    shri {}, {}, {}    : {}", emit_reg(dst), emit_reg(src), imm, emit_type(ty)).unwrap();
+            writeln!(
+                output,
+                "    shri {}, {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                imm,
+                emit_type(ty)
+            )
+            .unwrap();
         }
 
         DtalInstr::Jmp { target } => {
