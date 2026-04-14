@@ -389,10 +389,12 @@ pub fn check_stmt<'src>(
                         rhs: trhs,
                     };
 
-                    // Add pointwise proposition: arr[index] == rhs
+                    // Add pointwise proposition: arr[i]...[k] == rhs.
+                    // Supports nested index chains (2D+) by extracting the root
+                    // array name and the full index tuple.
                     let mut new_ctx = ctx.clone();
 
-                    if let crate::common::ast::Expr::Variable(arr_name) = &base.0 {
+                    if let Some((arr_name, indices)) = extract_array_access(&lhs.0) {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
 
                         // Snapshot array reads in the RHS so the proposition
@@ -405,17 +407,17 @@ pub fn check_stmt<'src>(
                             rhs.0.clone()
                         };
 
-                        // Build: arr[index] == snapshot_rhs
-                        let arr_index_expr = crate::common::ast::Expr::Index {
-                            base: Box::new((
-                                crate::common::ast::Expr::Variable(arr_name),
-                                dummy_span,
-                            )),
-                            index: Box::new((index.0.clone(), dummy_span)),
-                        };
+                        // Rebuild the nested Index chain: arr[i0][i1]...[ik]
+                        let mut lhs_access = crate::common::ast::Expr::Variable(arr_name);
+                        for idx in &indices {
+                            lhs_access = crate::common::ast::Expr::Index {
+                                base: Box::new((lhs_access, dummy_span)),
+                                index: Box::new((idx.clone(), dummy_span)),
+                            };
+                        }
                         let eq_expr = crate::common::ast::Expr::BinOp {
                             op: crate::common::ast::BinOp::Eq,
-                            lhs: Box::new((arr_index_expr, dummy_span)),
+                            lhs: Box::new((lhs_access, dummy_span)),
                             rhs: Box::new((snapshot_rhs, dummy_span)),
                         };
                         let prop = IProposition {
@@ -423,28 +425,8 @@ pub fn check_stmt<'src>(
                             predicate: Arc::new((eq_expr, dummy_span)),
                         };
 
-                        // Resolve the index to a concrete value if possible:
-                        // either a literal int, or a variable with singleton type
-                        let resolved_idx = match &index.0 {
-                            crate::common::ast::Expr::Literal(
-                                crate::common::ast::Literal::Int(n),
-                            ) => Some(*n),
-                            _ => match &index_ty {
-                                IType::SingletonInt(IValue::Int(n)) => Some(*n),
-                                _ => None,
-                            },
-                        };
-
-                        if let Some(idx_val) = resolved_idx {
-                            // Known index: remove stale prop for this index, add new one
-                            new_ctx = new_ctx.without_array_element_prop(arr_name, idx_val);
-                        } else {
-                            // Symbolic index: selectively invalidate propositions.
-                            // Keep pointwise props where SMT can prove the indices differ.
-                            new_ctx =
-                                invalidate_array_props_selectively(&new_ctx, arr_name, &index.0);
-                        }
-                        // Always add the new proposition (arr[idx] == rhs)
+                        new_ctx =
+                            invalidate_array_props_selectively(&new_ctx, arr_name, &indices);
                         new_ctx = new_ctx.with_proposition(prop);
                     }
 
@@ -642,35 +624,30 @@ pub fn check_stmt<'src>(
                 // Use selective invalidation: only remove propositions for
                 // indices that might overlap with the assigned indices.
                 let modifications = collect_array_modifications(&body.statements);
-                for (arr_name, idx_expr) in &modifications {
-                    if let Some(idx_val) = post.resolve_expr_to_int(idx_expr) {
-                        // Concrete index: only invalidate that specific element
-                        post = post.without_array_element_prop(arr_name, idx_val);
-                    } else {
-                        // Symbolic index (e.g., loop variable): selectively invalidate
-                        // using SMT to check which existing propositions survive.
-                        // Add loop variable bounds to post context for SMT queries.
-                        let mut smt_ctx = post.clone();
-                        let lower_bound = crate::common::ast::Expr::BinOp {
-                            op: crate::common::ast::BinOp::Gte,
-                            lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
-                            rhs: Box::new((*start.clone()).clone()),
-                        };
-                        smt_ctx = smt_ctx.with_proposition(IProposition {
-                            var: var.to_string(),
-                            predicate: Arc::new((lower_bound, dummy_span)),
-                        });
-                        let upper_bound = crate::common::ast::Expr::BinOp {
-                            op: crate::common::ast::BinOp::Lt,
-                            lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
-                            rhs: Box::new((*end.clone()).clone()),
-                        };
-                        smt_ctx = smt_ctx.with_proposition(IProposition {
-                            var: var.to_string(),
-                            predicate: Arc::new((upper_bound, dummy_span)),
-                        });
-                        post = invalidate_array_props_selectively(&smt_ctx, arr_name, idx_expr);
-                    }
+                for (arr_name, indices) in &modifications {
+                    // Add loop variable bounds to the SMT context so the
+                    // selective-invalidation prover can use them when checking
+                    // whether each pointwise prop's indices collide.
+                    let mut smt_ctx = post.clone();
+                    let lower_bound = crate::common::ast::Expr::BinOp {
+                        op: crate::common::ast::BinOp::Gte,
+                        lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                        rhs: Box::new((*start.clone()).clone()),
+                    };
+                    smt_ctx = smt_ctx.with_proposition(IProposition {
+                        var: var.to_string(),
+                        predicate: Arc::new((lower_bound, dummy_span)),
+                    });
+                    let upper_bound = crate::common::ast::Expr::BinOp {
+                        op: crate::common::ast::BinOp::Lt,
+                        lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                        rhs: Box::new((*end.clone()).clone()),
+                    };
+                    smt_ctx = smt_ctx.with_proposition(IProposition {
+                        var: var.to_string(),
+                        predicate: Arc::new((upper_bound, dummy_span)),
+                    });
+                    post = invalidate_array_props_selectively(&smt_ctx, arr_name, indices);
                 }
 
                 // Substitute end for var in invariant
@@ -777,14 +754,15 @@ pub fn check_stmt<'src>(
             // After the loop: invariant still holds (if present), condition is false
             let mut post_ctx = ctx.clone();
 
-            // Invalidate array propositions modified in the loop body
+            // Invalidate array propositions modified in the loop body.
+            // While loops don't have a simple index bound, so fall back to the
+            // component-wise selective invalidation without added loop bounds;
+            // if any component is symbolic and SMT can't prove distinctness,
+            // the prop is dropped.
             let modifications = collect_array_modifications(&body.statements);
-            for (arr_name, idx_expr) in &modifications {
-                if let Some(idx_val) = post_ctx.resolve_expr_to_int(idx_expr) {
-                    post_ctx = post_ctx.without_array_element_prop(arr_name, idx_val);
-                } else {
-                    post_ctx = post_ctx.without_all_array_element_props(arr_name);
-                }
+            for (arr_name, indices) in &modifications {
+                post_ctx =
+                    invalidate_array_props_selectively(&post_ctx, arr_name, indices);
             }
 
             // Add invariant to post-loop context (it was preserved)
@@ -833,7 +811,9 @@ pub fn check_stmt<'src>(
 
 /// Collect (array_name, index_expr) pairs for arrays modified by index
 /// assignment in a statement list. Recurses into if-blocks and nested for-loops.
-fn collect_array_modifications<'src>(stmts: &[Spanned<Stmt<'src>>]) -> Vec<(String, Expr<'src>)> {
+fn collect_array_modifications<'src>(
+    stmts: &[Spanned<Stmt<'src>>],
+) -> Vec<(String, Vec<Expr<'src>>)> {
     let mut modifications = Vec::new();
     collect_array_modifications_inner(stmts, &mut modifications);
     modifications
@@ -841,15 +821,13 @@ fn collect_array_modifications<'src>(stmts: &[Spanned<Stmt<'src>>]) -> Vec<(Stri
 
 fn collect_array_modifications_inner<'src>(
     stmts: &[Spanned<Stmt<'src>>],
-    modifications: &mut Vec<(String, Expr<'src>)>,
+    modifications: &mut Vec<(String, Vec<Expr<'src>>)>,
 ) {
     for stmt in stmts {
         match &stmt.0 {
             Stmt::Assignment { lhs, .. } => {
-                if let Expr::Index { base, index } = &lhs.0
-                    && let Expr::Variable(name) = &base.0
-                {
-                    modifications.push((name.to_string(), index.0.clone()));
+                if let Some((name, indices)) = extract_array_access(&lhs.0) {
+                    modifications.push((name.to_string(), indices));
                 }
             }
             Stmt::Expr(expr) => {
@@ -1853,16 +1831,36 @@ fn check_expr_satisfies_refined<'src>(
 /// is symbolic. For each pointwise proposition `arr[k] == v`, use SMT to check
 /// whether `assigned_index != k` is provable. If so, the proposition is safe to
 /// keep. Quantified propositions over the array are always removed.
+/// Walk a nested `Index` chain to extract (root_array_name, indices_outer_to_inner).
+/// Returns None if the chain doesn't bottom out in a plain `Variable`.
+fn extract_array_access<'src>(expr: &Expr<'src>) -> Option<(&'src str, Vec<Expr<'src>>)> {
+    let mut indices: Vec<Expr<'src>> = Vec::new();
+    let mut cur = expr;
+    loop {
+        match cur {
+            Expr::Index { base, index } => {
+                indices.push(index.0.clone());
+                cur = &base.0;
+            }
+            Expr::Variable(name) => {
+                indices.reverse();
+                return Some((name, indices));
+            }
+            _ => return None,
+        }
+    }
+}
+
 fn invalidate_array_props_selectively<'src>(
     ctx: &TypingContext<'src>,
     arr_name: &str,
-    assigned_index: &Expr<'src>,
+    assigned_indices: &[Expr<'src>],
 ) -> TypingContext<'src> {
     use crate::common::ast::BinOp;
 
     let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
     let arr_name_owned = arr_name.to_string();
-    let assigned_index = assigned_index.clone();
+    let assigned_indices: Vec<Expr<'src>> = assigned_indices.to_vec();
 
     ctx.retain_propositions(|prop| {
         if prop.var != arr_name_owned {
@@ -1871,36 +1869,59 @@ fn invalidate_array_props_selectively<'src>(
         match &prop.predicate.0 {
             // Quantified propositions are always invalidated
             Expr::Forall { .. } | Expr::Exists { .. } => false,
-            // Pointwise: keep if we can prove indices differ
+            // Pointwise: keep if we can prove the slots don't collide
             Expr::BinOp {
                 op: BinOp::Eq,
                 lhs,
                 ..
-            } => match &lhs.0 {
-                Expr::Index { base, index }
-                    if matches!(&base.0, Expr::Variable(n) if *n == arr_name_owned.as_str()) =>
+            } => {
+                let Some((root, prop_indices)) = extract_array_access(&lhs.0) else {
+                    return true;
+                };
+                if root != arr_name_owned.as_str()
+                    || prop_indices.len() != assigned_indices.len()
                 {
-                    // Try concrete comparison first (fast path)
-                    if let Some(prop_idx) = ctx.resolve_expr_to_int(&index.0)
-                        && let Some(assign_idx) = ctx.resolve_expr_to_int(&assigned_index)
-                    {
-                        return prop_idx != assign_idx;
-                    }
-
-                    // Build goal: assigned_index != prop_index
-                    let neq_expr = Expr::BinOp {
-                        op: BinOp::NotEq,
-                        lhs: Box::new((assigned_index.clone(), dummy_span)),
-                        rhs: Box::new((index.0.clone(), dummy_span)),
-                    };
-                    let goal = IProposition {
-                        var: arr_name_owned.clone(),
-                        predicate: Arc::new((neq_expr, dummy_span)),
-                    };
-                    crate::frontend::typechecker::smt::check_provable(ctx, &goal)
+                    return true;
                 }
-                _ => true,
-            },
+
+                // Concrete fast path: all concretely-known components equal → same slot (drop);
+                // any concretely-known component differs → distinct slot (keep).
+                let mut all_concrete_equal = true;
+                for (p, a) in prop_indices.iter().zip(assigned_indices.iter()) {
+                    match (ctx.resolve_expr_to_int(p), ctx.resolve_expr_to_int(a)) {
+                        (Some(pi), Some(ai)) if pi != ai => return true,
+                        (Some(_), Some(_)) => {}
+                        _ => all_concrete_equal = false,
+                    }
+                }
+                if all_concrete_equal {
+                    return false;
+                }
+
+                // SMT goal: disjunction of component inequalities. If provable,
+                // the slots are guaranteed distinct and the proposition survives.
+                let mut goal_expr: Option<Expr<'src>> = None;
+                for (p, a) in prop_indices.iter().zip(assigned_indices.iter()) {
+                    let ne = Expr::BinOp {
+                        op: BinOp::NotEq,
+                        lhs: Box::new((a.clone(), dummy_span)),
+                        rhs: Box::new((p.clone(), dummy_span)),
+                    };
+                    goal_expr = Some(match goal_expr.take() {
+                        None => ne,
+                        Some(acc) => Expr::BinOp {
+                            op: BinOp::Or,
+                            lhs: Box::new((acc, dummy_span)),
+                            rhs: Box::new((ne, dummy_span)),
+                        },
+                    });
+                }
+                let goal = IProposition {
+                    var: arr_name_owned.clone(),
+                    predicate: Arc::new((goal_expr.unwrap(), dummy_span)),
+                };
+                crate::frontend::typechecker::smt::check_provable(ctx, &goal)
+            }
             _ => true,
         }
     })
