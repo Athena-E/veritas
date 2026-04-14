@@ -425,8 +425,7 @@ pub fn check_stmt<'src>(
                             predicate: Arc::new((eq_expr, dummy_span)),
                         };
 
-                        new_ctx =
-                            invalidate_array_props_selectively(&new_ctx, arr_name, &indices);
+                        new_ctx = invalidate_array_props_selectively(&new_ctx, arr_name, &indices);
                         new_ctx = new_ctx.with_proposition(prop);
                     }
 
@@ -761,8 +760,7 @@ pub fn check_stmt<'src>(
             // the prop is dropped.
             let modifications = collect_array_modifications(&body.statements);
             for (arr_name, indices) in &modifications {
-                post_ctx =
-                    invalidate_array_props_selectively(&post_ctx, arr_name, indices);
+                post_ctx = invalidate_array_props_selectively(&post_ctx, arr_name, indices);
             }
 
             // Add invariant to post-loop context (it was preserved)
@@ -1871,16 +1869,12 @@ fn invalidate_array_props_selectively<'src>(
             Expr::Forall { .. } | Expr::Exists { .. } => false,
             // Pointwise: keep if we can prove the slots don't collide
             Expr::BinOp {
-                op: BinOp::Eq,
-                lhs,
-                ..
+                op: BinOp::Eq, lhs, ..
             } => {
                 let Some((root, prop_indices)) = extract_array_access(&lhs.0) else {
                     return true;
                 };
-                if root != arr_name_owned.as_str()
-                    || prop_indices.len() != assigned_indices.len()
-                {
+                if root != arr_name_owned.as_str() || prop_indices.len() != assigned_indices.len() {
                     return true;
                 }
 
