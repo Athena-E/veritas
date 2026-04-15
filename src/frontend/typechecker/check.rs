@@ -1011,6 +1011,21 @@ pub fn check_function<'src>(
     let mut func_ctx = global_ctx.clone();
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
+
+        // Reject nested arrays with a symbolic inner dimension. The backend
+        // needs a concrete stride to flatten multi-dim access, so only the
+        // outermost dimension may be symbolic (e.g. `[[int; 5]; n]` is OK,
+        // but `[[int; n]; 5]` is not).
+        if has_symbolic_inner_dim(ty) {
+            return Err(TypeError::UnsupportedFeature {
+                feature: format!(
+                    "symbolic inner array dimension in parameter `{}` (only the outermost dimension of a nested array may be symbolic)",
+                    param.name
+                ),
+                span: spanned_param.1,
+            });
+        }
+
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
 
         // For i64-typed parameters, add implicit range bounds [INT_MIN, INT_MAX].
@@ -1579,8 +1594,27 @@ fn substitute_result_in_postcond<'src>(
     }
 }
 
+/// Check whether an array type has a symbolic size in any inner (non-outermost)
+/// dimension. Symbolic sizes are only supported in the outermost dimension
+/// because the backend needs a concrete stride to flatten nested access.
+fn has_symbolic_inner_dim<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { element_type, .. } => inner_has_symbolic(element_type),
+        _ => false,
+    }
+}
+
+fn inner_has_symbolic<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { element_type, size } => {
+            matches!(size, IValue::Symbolic(_)) || inner_has_symbolic(element_type)
+        }
+        _ => false,
+    }
+}
+
 /// Substitute a variable with a literal integer in an expression
-fn substitute_var_with_literal<'src>(
+pub(super) fn substitute_var_with_literal<'src>(
     expr: &crate::common::ast::Expr<'src>,
     var_name: &str,
     value: i128,

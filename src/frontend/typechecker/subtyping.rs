@@ -73,8 +73,13 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
             check_provable(&ctx_with_p, &renamed_q)
         }
 
-        // Array subtyping: [T1; n] <: [T2; m] if T1 <: T2 and n = m
-        // allow covariance for immutable arrays since elements are read-only
+        // Array subtyping: [T1; n] <: [T2; m] if T1 <: T2 and sizes compatible.
+        // Size compatibility:
+        //   - concrete == concrete: equal values
+        //   - anything <: symbolic: unifies at call site (sup is a parameter type)
+        //   - otherwise: not compatible
+        // Element type is covariant since arrays are read-only from the
+        // typechecker's perspective (writes use element-type checks separately).
         (
             IType::Array {
                 element_type: elem1,
@@ -85,8 +90,8 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
                 size: size2,
             },
         ) => {
-            // Sizes must match, element type is covariant for immutable arrays
-            size1 == size2 && is_subtype(ctx, elem1, elem2)
+            let sizes_ok = matches!(size2, IValue::Symbolic(_)) || size1 == size2;
+            sizes_ok && is_subtype(ctx, elem1, elem2)
         }
 
         // Reference subtyping: &T1 <: &T2 if T1 = T2 (invariant for shared refs)

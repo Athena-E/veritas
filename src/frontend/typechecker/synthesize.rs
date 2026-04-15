@@ -396,6 +396,13 @@ pub fn synth_expr<'src>(
                 let substituted_precond =
                     substitute_args_in_prop(precond, &sig.parameters, &arg_types, &arg_exprs);
 
+                // Substitute symbolic array sizes.
+                // For each parameter `arr: [T; n]` where n is symbolic, bind
+                // n → concrete_size from the actual argument's type, so the
+                // precondition can reason about the concrete length.
+                let substituted_precond =
+                    substitute_symbolic_sizes(&substituted_precond, &sig.parameters, &arg_types);
+
                 if !crate::frontend::typechecker::check_provable(ctx, &substituted_precond) {
                     return Err(TypeError::PreconditionViolation {
                         function: func_name.to_string(),
@@ -633,6 +640,45 @@ fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<
 
 /// Substitute argument types/values into a proposition (precondition or postcondition).
 /// This replaces parameter names with their actual argument values when possible.
+/// Substitute symbolic array-size variables in a proposition using the
+/// concrete sizes of the actual arguments.
+///
+/// For each parameter typed `[T; n]` with `n: Symbolic`, the argument must
+/// have a concrete `Int(k)` size (enforced by subtyping); we then rewrite
+/// every `Expr::Variable(n)` in the proposition to `Literal::Int(k)`.
+pub(super) fn substitute_symbolic_sizes<'src>(
+    prop: &crate::common::types::IProposition<'src>,
+    params: &[(String, IType<'src>)],
+    arg_types: &[IType<'src>],
+) -> crate::common::types::IProposition<'src> {
+    use crate::common::types::IProposition;
+    use chumsky::span::SimpleSpan;
+
+    let mut expr = prop.predicate.0.clone();
+    for ((_, param_ty), arg_ty) in params.iter().zip(arg_types.iter()) {
+        if let (
+            IType::Array {
+                size: IValue::Symbolic(name),
+                ..
+            },
+            IType::Array {
+                size: IValue::Int(k),
+                ..
+            },
+        ) = (param_ty, arg_ty)
+        {
+            expr = crate::frontend::typechecker::check::substitute_var_with_literal(
+                &expr, name, *k,
+            );
+        }
+    }
+
+    IProposition {
+        var: prop.var.clone(),
+        predicate: Arc::new((expr, SimpleSpan::new(0, 0))),
+    }
+}
+
 pub(super) fn substitute_args_in_prop<'src>(
     precond: &crate::common::types::IProposition<'src>,
     params: &[(String, IType<'src>)],
