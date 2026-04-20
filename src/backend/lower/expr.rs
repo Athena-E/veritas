@@ -423,7 +423,7 @@ fn lower_index<'src>(
             op: BinaryOp::Add,
             lhs: base_reg,
             rhs: byte_off_reg,
-            ty: IType::Int,
+            ty: ty.clone(),
         });
         return dst;
     }

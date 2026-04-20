@@ -564,6 +564,19 @@ pub fn extract_index(ty: &DtalType, reg: &Reg) -> IndexExpr {
     }
 }
 
+pub(crate) fn pointer_arithmetic_result_type(
+    base_ty: &DtalType,
+    annotated_ty: &DtalType,
+) -> Option<DtalType> {
+    if let DtalType::Array { element_type, .. } = base_ty {
+        return Some(match annotated_ty {
+            DtalType::Array { .. } => annotated_ty.clone(),
+            _ => element_type.as_ref().clone(),
+        });
+    }
+    None
+}
+
 /// Verify binary operation
 ///
 /// Xi & Harper's derivation rules:
@@ -583,6 +596,21 @@ fn verify_binop(
 ) -> Result<(), VerifyError> {
     let lhs_ty = get_register_type(lhs, state, block_label)?;
     let rhs_ty = get_register_type(rhs, state, block_label)?;
+
+    if op == BinaryOp::Add {
+        if is_numeric_type(&rhs_ty)
+            && let Some(derived_ty) = pointer_arithmetic_result_type(&lhs_ty, ty)
+        {
+            state.register_types.insert(dst, derived_ty);
+            return Ok(());
+        }
+        if is_numeric_type(&lhs_ty)
+            && let Some(derived_ty) = pointer_arithmetic_result_type(&rhs_ty, ty)
+        {
+            state.register_types.insert(dst, derived_ty);
+            return Ok(());
+        }
+    }
 
     let derived_ty = match op {
         // Logical operations require boolean operands, produce Bool
@@ -719,11 +747,16 @@ fn verify_add_imm(
     dst: Reg,
     src: Reg,
     imm: i128,
-    _ty: &DtalType,
+    ty: &DtalType,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
     let src_ty = get_register_type(src, state, block_label)?;
+
+    if let Some(derived_ty) = pointer_arithmetic_result_type(&src_ty, ty) {
+        state.register_types.insert(dst, derived_ty);
+        return Ok(());
+    }
 
     if !is_numeric_type(&src_ty) {
         return Err(VerifyError::BinOpTypeMismatch {
@@ -1092,7 +1125,7 @@ fn check_register_defined(
     }
 }
 
-fn is_numeric_type(ty: &DtalType) -> bool {
+pub(crate) fn is_numeric_type(ty: &DtalType) -> bool {
     matches!(
         ty,
         DtalType::Int
