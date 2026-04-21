@@ -8,9 +8,7 @@ use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use crate::verifier::checker::{
-    self, constraint_from_cmp_op, extract_index, negate_cmp_op,
-};
+use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
 use std::collections::HashMap;
 
@@ -505,7 +503,11 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.register_types.insert(*dst, ty);
         }
         DtalInstr::BinOp {
-            op, dst, lhs, rhs, ty
+            op,
+            dst,
+            lhs,
+            rhs,
+            ty,
         } => {
             let lhs_ty = state
                 .register_types
@@ -520,13 +522,11 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
 
             let derived_ty = if *op == BinaryOp::Add {
                 if checker::is_numeric_type(&rhs_ty)
-                    && let Some(derived_ty) =
-                        checker::pointer_arithmetic_result_type(&lhs_ty, ty)
+                    && let Some(derived_ty) = checker::pointer_arithmetic_result_type(&lhs_ty, ty)
                 {
                     derived_ty
                 } else if checker::is_numeric_type(&lhs_ty)
-                    && let Some(derived_ty) =
-                        checker::pointer_arithmetic_result_type(&rhs_ty, ty)
+                    && let Some(derived_ty) = checker::pointer_arithmetic_result_type(&rhs_ty, ty)
                 {
                     derived_ty
                 } else {
@@ -568,22 +568,26 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 }
             } else {
                 match op {
-                BinaryOp::And | BinaryOp::Or => DtalType::Bool,
-                BinaryOp::BitAnd
-                | BinaryOp::BitOr
-                | BinaryOp::BitXor
-                | BinaryOp::Shl
-                | BinaryOp::Shr => DtalType::Int,
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    let lhs_idx = extract_index(&lhs_ty, lhs);
-                    let rhs_idx = extract_index(&rhs_ty, rhs);
-                    let result_idx = match op {
-                        BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
-                        BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
-                        BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
-                        BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
-                        BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
-                        _ => unreachable!(),
+                    BinaryOp::And | BinaryOp::Or => DtalType::Bool,
+                    BinaryOp::BitAnd
+                    | BinaryOp::BitOr
+                    | BinaryOp::BitXor
+                    | BinaryOp::Shl
+                    | BinaryOp::Shr => DtalType::Int,
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Mod => {
+                        let lhs_idx = extract_index(&lhs_ty, lhs);
+                        let rhs_idx = extract_index(&rhs_ty, rhs);
+                        let result_idx = match op {
+                            BinaryOp::Add => IndexExpr::Add(Box::new(lhs_idx), Box::new(rhs_idx)),
+                            BinaryOp::Sub => IndexExpr::Sub(Box::new(lhs_idx), Box::new(rhs_idx)),
+                            BinaryOp::Mul => IndexExpr::Mul(Box::new(lhs_idx), Box::new(rhs_idx)),
+                            BinaryOp::Div => IndexExpr::Div(Box::new(lhs_idx), Box::new(rhs_idx)),
+                            BinaryOp::Mod => IndexExpr::Mod(Box::new(lhs_idx), Box::new(rhs_idx)),
+                            _ => unreachable!(),
                         };
                         DtalType::SingletonInt(result_idx)
                     }

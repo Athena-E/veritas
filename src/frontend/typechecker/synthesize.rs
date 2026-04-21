@@ -667,9 +667,8 @@ pub(super) fn substitute_symbolic_sizes<'src>(
             },
         ) = (param_ty, arg_ty)
         {
-            expr = crate::frontend::typechecker::check::substitute_var_with_literal(
-                &expr, name, *k,
-            );
+            expr =
+                crate::frontend::typechecker::check::substitute_var_with_literal(&expr, name, *k);
         }
     }
 
