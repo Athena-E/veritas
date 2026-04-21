@@ -1,0 +1,36 @@
+// Integer Jacobi-2D benchmark in Veritas.
+fn main() -> int {
+    let mut a: [[int; 64]; 64] = [[0; 64]; 64];
+    let mut b: [[int; 64]; 64] = [[0; 64]; 64];
+
+    for i in 0..64 {
+        for j in 0..64 {
+            a[i][j] = (i * (j + 2) + 2) / 64;
+            b[i][j] = (i * (j + 3) + 3) / 64;
+        }
+    }
+
+    for t in 0..20 {
+        for i in 1..63 {
+            for j in 1..63 {
+                b[i][j] = (a[i][j] + a[i][j - 1] + a[i][j + 1] + a[i + 1][j] + a[i - 1][j]) / 5;
+            }
+        }
+        for i in 1..63 {
+            for j in 1..63 {
+                a[i][j] = b[i][j];
+            }
+        }
+    }
+
+    let mut sum: int = 0;
+    for i in 0..64 {
+        for j in 0..64 {
+            sum = sum + a[i][j];
+        }
+    }
+
+    print_int(sum);
+    print_char(10);
+    sum
+}

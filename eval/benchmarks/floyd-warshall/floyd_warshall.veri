@@ -1,0 +1,38 @@
+// Floyd-Warshall benchmark in Veritas.
+//
+// The benchmark size is fixed to 64x64 so it fits Veritas's current
+// fixed-size nested array model while still being large enough to show
+// meaningful runtime beyond pure process startup overhead.
+fn main() -> int {
+    let mut path: [[int; 64]; 64] = [[0; 64]; 64];
+
+    for i in 0..64 {
+        for j in 0..64 {
+            path[i][j] = (i + 1) * (j + 1) / 64;
+        }
+    }
+
+    for k in 0..64 {
+        for i in 0..64 {
+            for j in 0..64 {
+                let via: int = path[i][k] + path[k][j];
+                if via < path[i][j] {
+                    path[i][j] = via;
+                } else {
+                    let skip: int = 0;
+                }
+            }
+        }
+    }
+
+    let mut sum: int = 0;
+    for i in 0..64 {
+        for j in 0..64 {
+            sum = sum + path[i][j];
+        }
+    }
+
+    print_int(sum);
+    print_char(10);
+    sum
+}

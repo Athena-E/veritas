@@ -14,15 +14,17 @@
 //!
 //! # Behavior
 //!
-//! - Tracks copies from both physical and virtual registers to virtual registers
+//! - Tracks copies only when both the source and destination are virtual
 //! - Only replaces virtual register uses (physical registers are not replaced)
+//! - Leaves ABI physical-register moves in place so later backend stages still
+//!   see explicit materialisation of params/returns into virtual temporaries
 //! - Conservative at block boundaries (clears map at each block entry)
 
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
 use crate::backend::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashMap;
 
-/// Type alias for copy map: virtual destination → any source register
+/// Type alias for copy map: virtual destination → virtual source register
 type CopyMap = HashMap<VirtualReg, Reg>;
 
 /// Apply copy propagation to a function
@@ -194,18 +196,16 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         copy_map.retain(|_, src| *src != def);
     }
 
-    // If this is a MovReg where dst is virtual, record the copy
+    // If this is a pure virtual-to-virtual move, record the copy.
+    // Do not propagate physical-register sources: later backend passes rely on
+    // these explicit materialisation moves to reason about ABI values.
     if let DtalInstr::MovReg {
         dst: Reg::Virtual(dst_vreg),
-        src,
+        src: Reg::Virtual(src_vreg),
         ..
     } = instr
     {
-        // Resolve the source through existing copies (if source is virtual)
-        let resolved_src = match src {
-            Reg::Virtual(src_vreg) => resolve(*src_vreg, copy_map),
-            Reg::Physical(_) => *src, // Physical registers are already resolved
-        };
+        let resolved_src = resolve(*src_vreg, copy_map);
         copy_map.insert(*dst_vreg, resolved_src);
     }
 }
@@ -366,11 +366,12 @@ mod tests {
     }
 
     #[test]
-    fn test_propagation_from_physical_regs() {
+    fn test_does_not_propagate_from_physical_regs() {
         use crate::backend::dtal::regs::PhysicalReg;
 
         // v0 = r0  (copy from physical)
-        // v1 = v0 + v0  (should become r0 + r0)
+        // v1 = v0 + v0  (must stay v0 + v0 so later backend stages still see
+        // the explicit ABI materialisation move)
         let r0 = Reg::Physical(PhysicalReg::R0);
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
@@ -395,13 +396,11 @@ mod tests {
         };
 
         let changed = copy_propagate_block(&mut block);
-        // v0 should be replaced with r0
-        assert!(changed);
+        assert!(!changed);
 
-        // Check that the BinOp now uses r0 instead of v0
         if let DtalInstr::BinOp { lhs, rhs, .. } = &block.instructions[1] {
-            assert_eq!(*lhs, r0);
-            assert_eq!(*rhs, r0);
+            assert_eq!(*lhs, v0);
+            assert_eq!(*rhs, v0);
         } else {
             panic!("Expected BinOp instruction");
         }

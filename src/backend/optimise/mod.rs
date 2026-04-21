@@ -37,15 +37,25 @@ pub struct OptConfig {
 }
 
 impl OptConfig {
-    /// Create config with all optimizations enabled
+    /// Create config with all stable optimizations enabled by default.
+    ///
+    /// LICM is disabled: it produces incorrect code on non-trivial programs
+    /// (constants hoisted from loop bodies interact badly with register
+    /// allocation across multiple call sites).
+    ///
+    /// Load-fusion is disabled: it triggers non-deterministic compilation
+    /// failures on larger programs (intermittent SIGSEGV in output binary
+    /// even when the generated DTAL looks correct).
+    ///
+    /// Both can be re-enabled via `--licm` / `--load-fusion` flags.
     pub fn all() -> Self {
         Self {
             constant_folding: true,
             peephole: true,
             copy_propagation: true,
             dead_code_elimination: true,
-            licm: true,
-            load_fusion: true,
+            licm: false,
+            load_fusion: false,
             max_iterations: Some(10),
         }
     }

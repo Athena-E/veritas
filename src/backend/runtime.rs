@@ -22,6 +22,9 @@ pub const RT_PRINT_CHAR: &str = "print_char";
 pub const RT_READ_INT: &str = "read_int";
 pub const RT_PORT_IN: &str = "port_in";
 pub const RT_PORT_OUT: &str = "port_out";
+/// Internal heap allocator. Not callable from user code; emitted by
+/// codegen for `AllocArray` on the hosted Linux target.
+pub const RT_ALLOC: &str = "__rt_alloc";
 
 /// Offsets of each function within the runtime blob
 const PRINT_INT_OFFSET: usize = 0x00;
@@ -29,6 +32,7 @@ const PRINT_CHAR_OFFSET: usize = 0x65;
 const READ_INT_OFFSET: usize = 0x7e;
 const PORT_IN_OFFSET: usize = 0xD3; // after read_int (0x7e + 85 = 0xD3)
 const PORT_OUT_OFFSET: usize = 0xDC; // after port_in (0xD3 + 9 = 0xDC)
+const ALLOC_OFFSET: usize = 0xE4; // after port_out (0xDC + 8 = 0xE4)
 
 /// Check whether a function name is a runtime intrinsic
 pub fn is_runtime_function(name: &str) -> bool {
@@ -81,6 +85,23 @@ pub fn runtime_code() -> Vec<u8> {
         0x40, 0x88, 0xf0, // mov al, sil
         0xee, // out dx, al
         0xc3, // ret
+        // __rt_alloc (offset 0xE4, 45 bytes)
+        // Input:  rdi = size in bytes
+        // Output: rax = pointer (or trap on failure via ud2)
+        // Calls: mmap(NULL, size, PROT_READ|PROT_WRITE,
+        //             MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+        0x48, 0x89, 0xfe, // mov  rsi, rdi          ; len = size
+        0x48, 0x31, 0xff, // xor  rdi, rdi          ; addr = NULL
+        0xba, 0x03, 0x00, 0x00, 0x00, // mov  edx, 3            ; PROT_READ|WRITE
+        0x41, 0xba, 0x22, 0x00, 0x00, 0x00, // mov  r10d, 0x22 ; MAP_PRIVATE|ANON
+        0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, // mov  r8, -1     ; fd
+        0x4d, 0x31, 0xc9, // xor  r9, r9            ; offset = 0
+        0xb8, 0x09, 0x00, 0x00, 0x00, // mov  eax, 9            ; SYS_mmap
+        0x0f, 0x05, // syscall
+        0x48, 0x3d, 0x00, 0xf0, 0xff, 0xff, // cmp  rax, -4096
+        0x77, 0x01, // ja   .err              ; rax > -4096 (unsigned) → error
+        0xc3, // ret
+        0x0f, 0x0b, // ud2                    ; .err: trap
     ]
 }
 
@@ -95,5 +116,6 @@ pub fn runtime_symbols() -> HashMap<String, usize> {
     symbols.insert(RT_READ_INT.to_string(), READ_INT_OFFSET);
     symbols.insert(RT_PORT_IN.to_string(), PORT_IN_OFFSET);
     symbols.insert(RT_PORT_OUT.to_string(), PORT_OUT_OFFSET);
+    symbols.insert(RT_ALLOC.to_string(), ALLOC_OFFSET);
     symbols
 }

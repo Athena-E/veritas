@@ -502,19 +502,37 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            // Add loop variable to context (immutable)
-            let mut loop_ctx = ctx.with_immutable(var.to_string(), IType::Int);
-
-            // Add propositions about loop variable bounds: var >= start && var < end
-            // This allows the SMT solver to prove array bounds within the loop
             let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
-
-            // Create proposition: var >= start
             let lower_bound_expr = crate::common::ast::Expr::BinOp {
                 op: crate::common::ast::BinOp::Gte,
                 lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
                 rhs: Box::new((*start.clone()).clone()),
             };
+            let upper_bound_expr = crate::common::ast::Expr::BinOp {
+                op: crate::common::ast::BinOp::Lt,
+                lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
+                rhs: Box::new((*end.clone()).clone()),
+            };
+            let loop_bounds_expr = crate::common::ast::Expr::BinOp {
+                op: crate::common::ast::BinOp::And,
+                lhs: Box::new((lower_bound_expr.clone(), dummy_span)),
+                rhs: Box::new((upper_bound_expr.clone(), dummy_span)),
+            };
+            let loop_var_ty = IType::RefinedInt {
+                base: Arc::new(IType::Int),
+                prop: IProposition {
+                    var: var.to_string(),
+                    predicate: Arc::new((loop_bounds_expr, dummy_span)),
+                },
+            };
+
+            // Add loop variable to context (immutable)
+            let mut loop_ctx = ctx.with_immutable(var.to_string(), loop_var_ty.clone());
+
+            // Add propositions about loop variable bounds: var >= start && var < end
+            // This allows the SMT solver to prove array bounds within the loop
+
+            // Create proposition: var >= start
             let lower_bound_prop = crate::common::types::IProposition {
                 var: var.to_string(),
                 predicate: Arc::new((lower_bound_expr, dummy_span)),
@@ -522,11 +540,6 @@ pub fn check_stmt<'src>(
             loop_ctx = loop_ctx.with_proposition(lower_bound_prop);
 
             // Create proposition: var < end
-            let upper_bound_expr = crate::common::ast::Expr::BinOp {
-                op: crate::common::ast::BinOp::Lt,
-                lhs: Box::new((crate::common::ast::Expr::Variable(var), dummy_span)),
-                rhs: Box::new((*end.clone()).clone()),
-            };
             let upper_bound_prop = crate::common::types::IProposition {
                 var: var.to_string(),
                 predicate: Arc::new((upper_bound_expr, dummy_span)),
@@ -604,7 +617,7 @@ pub fn check_stmt<'src>(
 
             let tstmt = TStmt::For {
                 var: var.to_string(),
-                var_ty: IType::Int,
+                var_ty: loop_var_ty,
                 start: Box::new(tstart),
                 end: Box::new(tend),
                 invariant: tinvariant,
@@ -1011,6 +1024,21 @@ pub fn check_function<'src>(
     let mut func_ctx = global_ctx.clone();
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
+
+        // Reject nested arrays with a symbolic inner dimension. The backend
+        // needs a concrete stride to flatten multi-dim access, so only the
+        // outermost dimension may be symbolic (e.g. `[[int; 5]; n]` is OK,
+        // but `[[int; n]; 5]` is not).
+        if has_symbolic_inner_dim(ty) {
+            return Err(TypeError::UnsupportedFeature {
+                feature: format!(
+                    "symbolic inner array dimension in parameter `{}` (only the outermost dimension of a nested array may be symbolic)",
+                    param.name
+                ),
+                span: spanned_param.1,
+            });
+        }
+
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
 
         // For i64-typed parameters, add implicit range bounds [INT_MIN, INT_MAX].
@@ -1579,8 +1607,27 @@ fn substitute_result_in_postcond<'src>(
     }
 }
 
+/// Check whether an array type has a symbolic size in any inner (non-outermost)
+/// dimension. Symbolic sizes are only supported in the outermost dimension
+/// because the backend needs a concrete stride to flatten nested access.
+fn has_symbolic_inner_dim<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { element_type, .. } => inner_has_symbolic(element_type),
+        _ => false,
+    }
+}
+
+fn inner_has_symbolic<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { element_type, size } => {
+            matches!(size, IValue::Symbolic(_)) || inner_has_symbolic(element_type)
+        }
+        _ => false,
+    }
+}
+
 /// Substitute a variable with a literal integer in an expression
-fn substitute_var_with_literal<'src>(
+pub(super) fn substitute_var_with_literal<'src>(
     expr: &crate::common::ast::Expr<'src>,
     var_name: &str,
     value: i128,

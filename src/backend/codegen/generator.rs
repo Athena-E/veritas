@@ -31,6 +31,9 @@ pub struct CodegenContext {
     func_name: String,
     /// Variable name → register name substitutions for constraints
     pub var_subs: Vec<(String, String)>,
+    /// Whether we're targeting bare metal (no Linux syscalls available).
+    /// Controls whether `AllocArray` lowers to a heap call or a stack alloca.
+    pub bare_metal: bool,
 }
 
 impl CodegenContext {
@@ -40,6 +43,7 @@ impl CodegenContext {
             block_labels: HashMap::new(),
             func_name: func_name.to_string(),
             var_subs: Vec::new(),
+            bare_metal: false,
         }
     }
 
@@ -64,12 +68,23 @@ impl CodegenContext {
     }
 }
 
-/// Generate DTAL code for a TIR program
+/// Generate DTAL code for a TIR program (default: hosted Linux target).
 pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram {
+    codegen_program_with_target(program, false)
+}
+
+/// Generate DTAL code, choosing host vs bare-metal target.
+///
+/// Bare-metal currently keeps `AllocArray` on the stack; hosted routes it
+/// through the `__rt_alloc` runtime helper (mmap-backed heap).
+pub fn codegen_program_with_target<'src>(
+    program: &TirProgram<'src>,
+    bare_metal: bool,
+) -> DtalProgram {
     let mut functions: Vec<DtalFunction> = program
         .functions
         .iter()
-        .map(|f| codegen_function(f))
+        .map(|f| codegen_function_with_target(f, bare_metal))
         .collect();
 
     // Inject runtime function stubs so the verifier can check call-site
@@ -132,12 +147,26 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
             postcondition: None,
             blocks: vec![],
         },
+        // Heap allocator: emitted by codegen for `AllocArray` on hosted target.
+        // Takes a byte size, returns a pointer; traps on allocation failure.
+        DtalFunction {
+            name: crate::backend::runtime::RT_ALLOC.to_string(),
+            params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
     ]
 }
 
-/// Generate DTAL code for a TIR function
-pub fn codegen_function<'src>(func: &TirFunction<'src>) -> DtalFunction {
+/// Generate DTAL code for a TIR function with target selection.
+pub fn codegen_function_with_target<'src>(
+    func: &TirFunction<'src>,
+    bare_metal: bool,
+) -> DtalFunction {
     let mut ctx = CodegenContext::new(&func.name);
+    ctx.bare_metal = bare_metal;
 
     // Build param name → register name substitution map
     ctx.var_subs = func
@@ -245,7 +274,7 @@ fn codegen_block<'src>(
 
     // 2. Lower each TIR instruction to DTAL
     for instr in &block.instructions {
-        isel::lower_instruction(&mut instructions, instr);
+        isel::lower_instruction(&mut instructions, instr, ctx.bare_metal);
     }
 
     // 3. Lower the terminator (including phi moves for successors)

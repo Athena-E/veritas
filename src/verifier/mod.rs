@@ -1727,6 +1727,77 @@ mod tests {
     }
 
     #[test]
+    fn test_pointer_arithmetic_over_nested_array_derives_row_type() {
+        let row_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let matrix_ty = DtalType::Array {
+            element_type: Arc::new(row_ty.clone()),
+            size: IndexExpr::Const(4),
+        };
+
+        let mut func = make_func(
+            "row_store",
+            vec![
+                (v(0), matrix_ty),
+                (v(1), DtalType::Int),
+                (v(2), DtalType::Int),
+                (v(3), DtalType::Int),
+            ],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::MovImm {
+                        dst: v(4),
+                        imm: 32,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(32)),
+                    },
+                    DtalInstr::BinOp {
+                        op: crate::backend::dtal::instr::BinaryOp::Mul,
+                        dst: v(5),
+                        lhs: v(1),
+                        rhs: v(4),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::BinOp {
+                        op: crate::backend::dtal::instr::BinaryOp::Add,
+                        dst: v(6),
+                        lhs: v(0),
+                        rhs: v(5),
+                        ty: row_ty,
+                    },
+                    DtalInstr::Store {
+                        base: v(6),
+                        offset: v(2),
+                        src: v(3),
+                    },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(3),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        );
+        func.precondition = Some(Constraint::And(
+            Box::new(Constraint::Ge(
+                IndexExpr::Var("v2".to_string()),
+                IndexExpr::Const(0),
+            )),
+            Box::new(Constraint::Lt(
+                IndexExpr::Var("v2".to_string()),
+                IndexExpr::Const(4),
+            )),
+        ));
+
+        let program = make_program(vec![func]);
+        assert!(verify_dtal(&program).is_ok());
+    }
+
+    #[test]
     fn test_call_derives_return_type_from_signature() {
         // Call derives return type from callee's declared signature, not annotation
         let callee = make_func(

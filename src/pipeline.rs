@@ -350,7 +350,8 @@ pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, Com
         })?;
     let tast = check_program_bare_metal(&ast).map_err(CompileError::TypeError)?;
     let tir = lower_program(&tast);
-    let dtal_program = codegen_program(&tir);
+    let dtal_program =
+        crate::backend::codegen::codegen_program_with_target(&tir, true);
     let dtal = emit_program(&dtal_program);
     Ok(VerboseOutput {
         tokens: token_strings,

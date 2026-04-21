@@ -19,4 +19,4 @@ pub mod isel;
 #[cfg(test)]
 mod tests;
 
-pub use generator::{CodegenContext, codegen_program};
+pub use generator::{CodegenContext, codegen_program, codegen_program_with_target};

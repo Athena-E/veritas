@@ -195,6 +195,21 @@ fn collect_natural_loop(
     loop_blocks
 }
 
+/// Count the number of definitions per virtual register across all blocks.
+/// A register with multiple definitions is loop-carried or non-SSA; hoisting
+/// one of its writes would break the update flow.
+fn count_all_defs(func: &DtalFunction) -> HashMap<VirtualReg, usize> {
+    let mut counts: HashMap<VirtualReg, usize> = HashMap::new();
+    for block in &func.blocks {
+        for instr in &block.instructions {
+            if let Some(vreg) = instruction_def(instr) {
+                *counts.entry(vreg).or_insert(0) += 1;
+            }
+        }
+    }
+    counts
+}
+
 /// Collect the set of virtual registers defined in each block
 fn collect_block_defs(func: &DtalFunction) -> HashMap<String, HashSet<VirtualReg>> {
     let mut result = HashMap::new();
@@ -237,10 +252,20 @@ fn hoist_loop(
         }
     }
 
+    // Count total definitions per register across the entire function.
+    // DTAL isn't strict SSA: loop-carried virtuals (e.g. the induction
+    // variable) are written in both the pre-header and the loop body. Hoisting
+    // a second write of such a register into the pre-header destroys the
+    // loop's update step. Only registers with exactly one definition in the
+    // whole function are safe to relocate.
+    let def_counts = count_all_defs(func);
+
     // Find hoistable instructions using fixed-point iteration
     // An instruction is hoistable if:
     // 1. It is a pure computation (is_hoistable_kind)
-    // 2. All its operand registers are either external or defined by
+    // 2. Its destination register has only one definition in the function
+    //    (otherwise we would break a loop-carried update)
+    // 3. All its operand registers are either external or defined by
     //    another hoistable instruction
     let mut hoistable_defs: HashSet<VirtualReg> = HashSet::new();
     let mut hoistable_instrs: Vec<(String, usize)> = Vec::new(); // (block_label, instr_index)
@@ -263,6 +288,15 @@ fn hoist_loop(
                 }
 
                 if !is_hoistable_kind(instr) {
+                    continue;
+                }
+
+                // Refuse to hoist a definition of a register written anywhere
+                // else in the function — that signals a loop-carried variable
+                // whose update must stay in place.
+                if let Some(def) = instruction_def(instr)
+                    && def_counts.get(&def).copied().unwrap_or(0) > 1
+                {
                     continue;
                 }
 
