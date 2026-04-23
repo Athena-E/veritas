@@ -46,8 +46,8 @@ fn test_pipeline_identity_function() {
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
-    // 1 user function + 6 runtime stubs (including __rt_alloc)
-    assert_eq!(dtal.functions.len(), 7);
+    // 1 user function + 8 runtime stubs (including hosted region helpers)
+    assert_eq!(dtal.functions.len(), 9);
     assert_eq!(dtal.functions[0].name, "id");
 
     // Emit text

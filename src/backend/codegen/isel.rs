@@ -14,8 +14,8 @@ use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp}
 /// Lower a TIR instruction to DTAL instructions
 ///
 /// May emit multiple DTAL instructions for a single TIR instruction.
-/// `bare_metal` selects between heap allocation (hosted, via `__rt_alloc`)
-/// and stack allocation (bare-metal, via `Alloca`) for arrays.
+/// `bare_metal` selects between hosted function-local region allocation and
+/// stack allocation (bare-metal, via `Alloca`) for arrays.
 pub fn lower_instruction<'src>(
     instrs: &mut Vec<DtalInstr>,
     tir_instr: &TirInstr<'src>,
@@ -129,15 +129,20 @@ pub fn lower_instruction<'src>(
                     ty: array_ty,
                 });
             } else {
-                // Hosted Linux: heap-allocate via the `__rt_alloc` runtime
-                // helper (mmap-backed). Pass size in r0; result returns in r0.
+                // Hosted Linux: allocate from the current function-local region.
+                // Pass region in r0 and size in r1; result returns in r0.
                 instrs.push(DtalInstr::MovImm {
-                    dst: Reg::Physical(PhysicalReg::R0),
+                    dst: Reg::Physical(PhysicalReg::R1),
                     imm: total_size as i128,
                     ty: DtalType::Int,
                 });
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Physical(PhysicalReg::R0),
+                    src: Reg::Physical(PhysicalReg::R12),
+                    ty: DtalType::Int,
+                });
                 instrs.push(DtalInstr::Call {
-                    target: crate::backend::runtime::RT_ALLOC.to_string(),
+                    target: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
                     return_ty: DtalType::Int,
                 });
                 instrs.push(DtalInstr::MovReg {

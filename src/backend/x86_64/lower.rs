@@ -36,13 +36,20 @@ pub fn lower_program(program: &DtalProgram) -> X86Program {
 /// Lower a DTAL function to x86-64
 fn lower_function(func: &DtalFunction) -> X86Function {
     // Perform register allocation (graph coloring by default, VERITAS_LS=1 for linear scan).
-    let allocation = if std::env::var("VERITAS_LS").is_ok() {
+    let mut allocation = if std::env::var("VERITAS_LS").is_ok() {
         let mut ls_allocator = LinearScanAllocator::new();
         ls_allocator.allocate(func)
     } else {
         let gc_allocator = GraphColoringAllocator::new();
         gc_allocator.allocate(func)
     };
+
+    if function_uses_reserved_region_reg(func)
+        && !allocation.callee_saved_used.contains(&X86Reg::R15)
+    {
+        allocation.callee_saved_used.push(X86Reg::R15);
+        allocation.callee_saved_used.sort();
+    }
 
     // Debug allocation
     if std::env::var("VERITAS_DEBUG_ALLOC").is_ok() {
@@ -87,6 +94,78 @@ fn lower_function(func: &DtalFunction) -> X86Function {
 
     let lowerer = FunctionLowerer::new(func, &allocation);
     lowerer.lower()
+}
+
+fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
+    use crate::backend::dtal::regs::PhysicalReg;
+
+    func.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instr| match instr {
+            DtalInstr::BinOp { dst, lhs, rhs, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(lhs, Reg::Physical(PhysicalReg::R12))
+                    || matches!(rhs, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::AddImm { dst, src, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::MovReg { dst, src, .. }
+            | DtalInstr::Neg { dst, src, .. }
+            | DtalInstr::Not { dst, src, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::MovImm { dst, .. }
+            | DtalInstr::SetCC { dst, .. }
+            | DtalInstr::Pop { dst, .. }
+            | DtalInstr::Alloca { dst, .. }
+            | DtalInstr::PortIn { dst, .. } => matches!(dst, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::Push { src, .. } => matches!(src, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::Load { dst, base, offset, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::LoadOp {
+                dst,
+                base,
+                offset,
+                other,
+                ..
+            } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+                    || matches!(other, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Store { base, offset, src } => {
+                matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Cmp { lhs, rhs } => {
+                matches!(lhs, Reg::Physical(PhysicalReg::R12))
+                    || matches!(rhs, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::CmpImm { lhs, .. } => matches!(lhs, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::ShlImm { dst, src, .. } | DtalInstr::ShrImm { dst, src, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::PortOut { port, value } => {
+                matches!(port, Reg::Physical(PhysicalReg::R12))
+                    || matches!(value, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::TypeAnnotation { reg, .. } => matches!(reg, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::ConstraintAssert { .. }
+            | DtalInstr::Call { .. }
+            | DtalInstr::Jmp { .. }
+            | DtalInstr::Branch { .. }
+            | DtalInstr::Ret => false,
+            _ => false,
+        })
+    })
 }
 
 /// Function lowering context

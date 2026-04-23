@@ -1220,6 +1220,13 @@ fn check_program_with_options<'src>(
 
         // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
+        if !bare_metal && contains_array_type(&return_type) {
+            return Err(TypeError::UnsupportedFeature {
+                feature:
+                    "returning arrays on the hosted target is not yet supported with function-local region allocation".to_string(),
+                span: *func_span,
+            });
+        }
 
         // Convert precondition to IProposition
         let precondition = func.precondition.as_ref().map(|precond_expr| {
@@ -1622,6 +1629,14 @@ fn inner_has_symbolic<'src>(ty: &IType<'src>) -> bool {
         IType::Array { element_type, size } => {
             matches!(size, IValue::Symbolic(_)) || inner_has_symbolic(element_type)
         }
+        _ => false,
+    }
+}
+
+fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { .. } => true,
+        IType::RefinedInt { base, .. } => contains_array_type(base),
         _ => false,
     }
 }

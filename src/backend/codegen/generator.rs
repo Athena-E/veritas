@@ -16,6 +16,7 @@
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
+use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::{BasicBlock, BlockId, PhiNode, Terminator, TirFunction, TirProgram};
 use std::collections::HashMap;
 
@@ -34,6 +35,8 @@ pub struct CodegenContext {
     /// Whether we're targeting bare metal (no Linux syscalls available).
     /// Controls whether `AllocArray` lowers to a heap call or a stack alloca.
     pub bare_metal: bool,
+    /// Whether this function needs a hosted function-local region.
+    pub needs_hosted_region: bool,
 }
 
 impl CodegenContext {
@@ -44,6 +47,7 @@ impl CodegenContext {
             func_name: func_name.to_string(),
             var_subs: Vec::new(),
             bare_metal: false,
+            needs_hosted_region: false,
         }
     }
 
@@ -76,7 +80,7 @@ pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram {
 /// Generate DTAL code, choosing host vs bare-metal target.
 ///
 /// Bare-metal currently keeps `AllocArray` on the stack; hosted routes it
-/// through the `__rt_alloc` runtime helper (mmap-backed heap).
+/// through a function-local mmap-backed region allocator.
 pub fn codegen_program_with_target<'src>(
     program: &TirProgram<'src>,
     bare_metal: bool,
@@ -147,12 +151,30 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
             postcondition: None,
             blocks: vec![],
         },
-        // Heap allocator: emitted by codegen for `AllocArray` on hosted target.
-        // Takes a byte size, returns a pointer; traps on allocation failure.
+        // Hosted function-local region helpers.
         DtalFunction {
-            name: crate::backend::runtime::RT_ALLOC.to_string(),
-            params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            name: crate::backend::runtime::RT_REGION_ENTER.to_string(),
+            params: vec![],
             return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
+        DtalFunction {
+            name: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
+            params: vec![
+                (Reg::Physical(PhysicalReg::R0), DtalType::Int),
+                (Reg::Physical(PhysicalReg::R1), DtalType::Int),
+            ],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![],
+        },
+        DtalFunction {
+            name: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
+            params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
             blocks: vec![],
@@ -167,6 +189,7 @@ pub fn codegen_function_with_target<'src>(
 ) -> DtalFunction {
     let mut ctx = CodegenContext::new(&func.name);
     ctx.bare_metal = bare_metal;
+    ctx.needs_hosted_region = !bare_metal && function_uses_heap_alloc(func);
 
     // Build param name → register name substitution map
     ctx.var_subs = func
@@ -267,6 +290,10 @@ fn codegen_block<'src>(
     let label = ctx.label_for_block(block.id);
     let mut instructions: Vec<DtalInstr> = Vec::new();
 
+    if ctx.needs_hosted_region && block.id == func.entry_block {
+        emit_region_enter(&mut instructions);
+    }
+
     // 1. Lower phi nodes to mov instructions
     for phi in &block.phi_nodes {
         lower_phi_node(&mut instructions, phi, block, ctx);
@@ -294,6 +321,43 @@ fn codegen_block<'src>(
         entry_state: TypeState::new(),
         instructions,
     }
+}
+
+fn function_uses_heap_alloc<'src>(func: &TirFunction<'src>) -> bool {
+    func.blocks.values().any(|block| {
+        block
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::AllocArray { .. }))
+    })
+}
+
+fn emit_region_enter(instrs: &mut Vec<DtalInstr>) {
+    use crate::backend::dtal::regs::PhysicalReg;
+
+    instrs.push(DtalInstr::Call {
+        target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
+        return_ty: DtalType::Int,
+    });
+    instrs.push(DtalInstr::MovReg {
+        dst: Reg::Physical(PhysicalReg::R12),
+        src: Reg::Physical(PhysicalReg::R0),
+        ty: DtalType::Int,
+    });
+}
+
+fn emit_region_leave(instrs: &mut Vec<DtalInstr>) {
+    use crate::backend::dtal::regs::PhysicalReg;
+
+    instrs.push(DtalInstr::MovReg {
+        dst: Reg::Physical(PhysicalReg::R0),
+        src: Reg::Physical(PhysicalReg::R12),
+        ty: DtalType::Int,
+    });
+    instrs.push(DtalInstr::Call {
+        target: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
+        return_ty: DtalType::Unit,
+    });
 }
 
 /// Lower a phi node to mov instructions
@@ -384,18 +448,35 @@ fn lower_terminator<'src>(
         }
 
         Terminator::Return { value } => {
-            // Move return value to r0 (return register convention)
             if let Some(val_reg) = value {
-                instrs.push(DtalInstr::MovReg {
-                    dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
-                    src: Reg::Virtual(*val_reg),
-                    ty: DtalType::from_itype(&func.return_type),
-                });
+                let ret_ty = DtalType::from_itype(&func.return_type);
+                if ctx.needs_hosted_region {
+                    instrs.push(DtalInstr::Push {
+                        src: Reg::Virtual(*val_reg),
+                        ty: ret_ty.clone(),
+                    });
+                    emit_region_leave(instrs);
+                    instrs.push(DtalInstr::Pop {
+                        dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        ty: ret_ty,
+                    });
+                } else {
+                    instrs.push(DtalInstr::MovReg {
+                        dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        src: Reg::Virtual(*val_reg),
+                        ty: ret_ty,
+                    });
+                }
+            } else if ctx.needs_hosted_region {
+                emit_region_leave(instrs);
             }
             instrs.push(DtalInstr::Ret);
         }
 
         Terminator::Unreachable => {
+            if ctx.needs_hosted_region {
+                emit_region_leave(instrs);
+            }
             instrs.push(DtalInstr::Ret);
         }
     }

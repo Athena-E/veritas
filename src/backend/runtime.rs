@@ -22,9 +22,11 @@ pub const RT_PRINT_CHAR: &str = "print_char";
 pub const RT_READ_INT: &str = "read_int";
 pub const RT_PORT_IN: &str = "port_in";
 pub const RT_PORT_OUT: &str = "port_out";
-/// Internal heap allocator. Not callable from user code; emitted by
-/// codegen for `AllocArray` on the hosted Linux target.
-pub const RT_ALLOC: &str = "__rt_alloc";
+/// Internal hosted region helpers. Not callable from user code; emitted by
+/// codegen for hosted `AllocArray`.
+pub const RT_REGION_ENTER: &str = "__rt_region_enter";
+pub const RT_REGION_ALLOC: &str = "__rt_region_alloc";
+pub const RT_REGION_LEAVE: &str = "__rt_region_leave";
 
 /// Offsets of each function within the runtime blob
 const PRINT_INT_OFFSET: usize = 0x00;
@@ -32,7 +34,9 @@ const PRINT_CHAR_OFFSET: usize = 0x65;
 const READ_INT_OFFSET: usize = 0x7e;
 const PORT_IN_OFFSET: usize = 0xD3; // after read_int (0x7e + 85 = 0xD3)
 const PORT_OUT_OFFSET: usize = 0xDC; // after port_in (0xD3 + 9 = 0xDC)
-const ALLOC_OFFSET: usize = 0xE4; // after port_out (0xDC + 8 = 0xE4)
+const REGION_ENTER_OFFSET: usize = 0xE4; // after port_out (0xDC + 8 = 0xE4)
+const REGION_ALLOC_OFFSET: usize = 0x119; // after region_enter (0xE4 + 0x35 = 0x119)
+const REGION_LEAVE_OFFSET: usize = 0x162; // after region_alloc (0x119 + 0x49 = 0x162)
 
 /// Check whether a function name is a runtime intrinsic
 pub fn is_runtime_function(name: &str) -> bool {
@@ -45,7 +49,7 @@ pub fn is_runtime_function(name: &str) -> bool {
 /// Get the raw x86-64 machine code for the runtime functions.
 ///
 /// Assembled from verified assembly source (see docs/io_extension_design.md).
-/// Total size: 211 bytes.
+/// Total size: 418 bytes.
 pub fn runtime_code() -> Vec<u8> {
     vec![
         // __rt_print_int (offset 0x00, 101 bytes)
@@ -85,23 +89,76 @@ pub fn runtime_code() -> Vec<u8> {
         0x40, 0x88, 0xf0, // mov al, sil
         0xee, // out dx, al
         0xc3, // ret
-        // __rt_alloc (offset 0xE4, 45 bytes)
-        // Input:  rdi = size in bytes
-        // Output: rax = pointer (or trap on failure via ud2)
-        // Calls: mmap(NULL, size, PROT_READ|PROT_WRITE,
+        // __rt_region_enter (offset 0xE4, 53 bytes)
+        // Input:  none
+        // Output: rax = region header pointer, with head = NULL
+        // Calls: mmap(NULL, 4096, PROT_READ|PROT_WRITE,
         //             MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
-        0x48, 0x89, 0xfe, // mov  rsi, rdi          ; len = size
-        0x48, 0x31, 0xff, // xor  rdi, rdi          ; addr = NULL
-        0xba, 0x03, 0x00, 0x00, 0x00, // mov  edx, 3            ; PROT_READ|WRITE
-        0x41, 0xba, 0x22, 0x00, 0x00, 0x00, // mov  r10d, 0x22 ; MAP_PRIVATE|ANON
-        0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, // mov  r8, -1     ; fd
-        0x4d, 0x31, 0xc9, // xor  r9, r9            ; offset = 0
-        0xb8, 0x09, 0x00, 0x00, 0x00, // mov  eax, 9            ; SYS_mmap
+        0xbe, 0x00, 0x10, 0x00, 0x00, // mov  esi, 4096
+        0x31, 0xff, // xor  edi, edi
+        0xba, 0x03, 0x00, 0x00, 0x00, // mov  edx, 3
+        0x41, 0xba, 0x22, 0x00, 0x00, 0x00, // mov  r10d, 0x22
+        0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, // mov  r8, -1
+        0x45, 0x31, 0xc9, // xor  r9d, r9d
+        0xb8, 0x09, 0x00, 0x00, 0x00, // mov  eax, 9
         0x0f, 0x05, // syscall
         0x48, 0x3d, 0x00, 0xf0, 0xff, 0xff, // cmp  rax, -4096
-        0x77, 0x01, // ja   .err              ; rax > -4096 (unsigned) → error
+        0x77, 0x08, // ja   .err
+        0x48, 0xc7, 0x00, 0x00, 0x00, 0x00, 0x00, // mov qword ptr [rax], 0
         0xc3, // ret
-        0x0f, 0x0b, // ud2                    ; .err: trap
+        0x0f, 0x0b, // ud2
+        // __rt_region_alloc (offset 0x119, 73 bytes)
+        // Input:  rdi = region header pointer, rsi = payload size in bytes
+        // Output: rax = payload pointer (or trap on failure)
+        // Layout of mapping: [next:8][len:8][payload...]
+        0x53, // push rbx
+        0x48, 0x89, 0xfb, // mov  rbx, rdi
+        0x48, 0x83, 0xc6, 0x10, // add  rsi, 16
+        0x48, 0xc7, 0xc7, 0x00, 0x00, 0x00, 0x00, // mov  rdi, 0
+        0xba, 0x03, 0x00, 0x00, 0x00, // mov  edx, 3
+        0x41, 0xba, 0x22, 0x00, 0x00, 0x00, // mov  r10d, 0x22
+        0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, // mov  r8, -1
+        0x45, 0x31, 0xc9, // xor  r9d, r9d
+        0xb8, 0x09, 0x00, 0x00, 0x00, // mov  eax, 9
+        0x0f, 0x05, // syscall
+        0x48, 0x3d, 0x00, 0xf0, 0xff, 0xff, // cmp  rax, -4096
+        0x77, 0x13, // ja   .err
+        0x48, 0x8b, 0x13, // mov  rdx, [rbx]
+        0x48, 0x89, 0x10, // mov  [rax], rdx
+        0x48, 0x89, 0x70, 0x08, // mov  [rax+8], rsi
+        0x48, 0x89, 0x03, // mov  [rbx], rax
+        0x48, 0x83, 0xc0, 0x10, // add  rax, 16
+        0x5b, // pop  rbx
+        0xc3, // ret
+        0x5b, // pop  rbx
+        0x0f, 0x0b, // ud2
+        // __rt_region_leave (offset 0x162, 64 bytes)
+        // Input:  rdi = region header pointer
+        // Output: none (or trap on failure)
+        0x53, // push rbx
+        0x57, // push rdi
+        0x48, 0x8b, 0x1f, // mov  rbx, [rdi]
+        0x48, 0x85, 0xdb, // test rbx, rbx
+        0x74, 0x1b, // je   .free_region
+        0x48, 0x89, 0xdf, // mov  rdi, rbx
+        0x48, 0x8b, 0x73, 0x08, // mov  rsi, [rbx+8]
+        0x48, 0x8b, 0x1b, // mov  rbx, [rbx]
+        0xb8, 0x0b, 0x00, 0x00, 0x00, // mov  eax, 11
+        0x0f, 0x05, // syscall
+        0x48, 0x3d, 0x00, 0xf0, 0xff, 0xff, // cmp  rax, -4096
+        0x77, 0x19, // ja   .leave_err
+        0xeb, 0xe0, // jmp  .loop
+        0x5f, // pop  rdi
+        0xbe, 0x00, 0x10, 0x00, 0x00, // mov  esi, 4096
+        0xb8, 0x0b, 0x00, 0x00, 0x00, // mov  eax, 11
+        0x0f, 0x05, // syscall
+        0x48, 0x3d, 0x00, 0xf0, 0xff, 0xff, // cmp  rax, -4096
+        0x77, 0x03, // ja   .leave_err_pop
+        0x5b, // pop  rbx
+        0xc3, // ret
+        0x5f, // pop  rdi
+        0x5b, // pop  rbx
+        0x0f, 0x0b, // ud2
     ]
 }
 
@@ -116,6 +173,8 @@ pub fn runtime_symbols() -> HashMap<String, usize> {
     symbols.insert(RT_READ_INT.to_string(), READ_INT_OFFSET);
     symbols.insert(RT_PORT_IN.to_string(), PORT_IN_OFFSET);
     symbols.insert(RT_PORT_OUT.to_string(), PORT_OUT_OFFSET);
-    symbols.insert(RT_ALLOC.to_string(), ALLOC_OFFSET);
+    symbols.insert(RT_REGION_ENTER.to_string(), REGION_ENTER_OFFSET);
+    symbols.insert(RT_REGION_ALLOC.to_string(), REGION_ALLOC_OFFSET);
+    symbols.insert(RT_REGION_LEAVE.to_string(), REGION_LEAVE_OFFSET);
     symbols
 }
