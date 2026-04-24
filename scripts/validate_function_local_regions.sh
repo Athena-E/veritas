@@ -112,10 +112,10 @@ run_expect_fail \
   "returning arrays on the hosted target" \
   "$TMP_DIR/hosted_return_array.veri"
 
-run_expect_fail \
-  "hosted-array-call-rejected" \
-  "passing arrays to function calls on the hosted target" \
-  "$TMP_DIR/hosted_array_call_escape.veri"
+run_ok \
+  "hosted-array-call-allowed" \
+  "$TMP_DIR/hosted_array_call_escape.veri" \
+  -o "$TMP_DIR/hosted_array_call_allowed"
 
 run_ok \
   "bare-metal-array-call-allowed" \

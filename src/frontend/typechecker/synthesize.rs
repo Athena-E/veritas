@@ -12,14 +12,6 @@ use crate::frontend::typechecker::{
 };
 use std::sync::Arc;
 
-fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
-    match ty {
-        IType::Array { .. } => true,
-        IType::RefinedInt { base, .. } => contains_array_type(base),
-        _ => false,
-    }
-}
-
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
@@ -384,15 +376,6 @@ pub fn synth_expr<'src>(
             let mut arg_types = Vec::new();
             for (arg, (_param_name, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
-
-                if !ctx.bare_metal && contains_array_type(&arg_ty) {
-                    return Err(TypeError::UnsupportedFeature {
-                        feature:
-                            "passing arrays to function calls on the hosted target is not yet supported with function-local region allocation"
-                                .to_string(),
-                        span: arg.1,
-                    });
-                }
 
                 if !is_subtype(ctx, &arg_ty, param_ty) {
                     return Err(TypeError::TypeMismatch {
