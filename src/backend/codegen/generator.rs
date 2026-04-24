@@ -189,7 +189,7 @@ pub fn codegen_function_with_target<'src>(
 ) -> DtalFunction {
     let mut ctx = CodegenContext::new(&func.name);
     ctx.bare_metal = bare_metal;
-    ctx.needs_hosted_region = !bare_metal && function_uses_heap_alloc(func);
+    ctx.needs_hosted_region = !bare_metal && function_uses_function_region(func);
 
     // Build param name → register name substitution map
     ctx.var_subs = func
@@ -323,12 +323,12 @@ fn codegen_block<'src>(
     }
 }
 
-fn function_uses_heap_alloc<'src>(func: &TirFunction<'src>) -> bool {
+fn function_uses_function_region<'src>(func: &TirFunction<'src>) -> bool {
     func.blocks.values().any(|block| {
         block
             .instructions
             .iter()
-            .any(|instr| matches!(instr, TirInstr::AllocArray { .. }))
+            .any(|instr| matches!(instr, TirInstr::AllocArray { region: None, .. }))
     })
 }
 

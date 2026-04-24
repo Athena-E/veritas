@@ -58,6 +58,10 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
         } => {
             lower_while_loop(ctx, condition, invariant.as_ref(), body);
         }
+
+        TStmt::Region { body } => {
+            lower_region(ctx, body);
+        }
     }
 }
 
@@ -520,4 +524,13 @@ fn lower_while_loop<'src>(
     for (name, phi_reg) in &loop_carried_vars {
         ctx.bind_var(name, *phi_reg);
     }
+}
+
+fn lower_region<'src>(ctx: &mut LoweringContext<'src>, body: &TBlock<'src>) {
+    let region_reg = ctx.fresh_reg();
+    ctx.emit(TirInstr::RegionEnter { dst: region_reg });
+    ctx.enter_region(region_reg);
+    lower_stmts(ctx, &body.statements);
+    ctx.exit_region();
+    ctx.emit(TirInstr::RegionLeave { region: region_reg });
 }

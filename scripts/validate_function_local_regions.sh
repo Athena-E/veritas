@@ -59,6 +59,36 @@ fn main() -> int {
 }
 EOF
 
+cat >"$TMP_DIR/nested_region_ok.veri" <<'EOF'
+fn main() -> int {
+    let mut sum: int = 0;
+    region {
+        let arr: [int; 4] = [7; 4];
+        sum = arr[0];
+    }
+    sum
+}
+EOF
+
+cat >"$TMP_DIR/nested_region_bad_return.veri" <<'EOF'
+fn main() -> int {
+    region {
+        return 1;
+    }
+    0
+}
+EOF
+
+cat >"$TMP_DIR/nested_region_bad_assign.veri" <<'EOF'
+fn main() -> int {
+    let mut arr: [int; 4] = [0; 4];
+    region {
+        arr = [1; 4];
+    }
+    arr[0]
+}
+EOF
+
 run_ok \
   "hosted-array-example-verifies" \
   src/examples/20_array_loop_invariant.veri \
@@ -81,4 +111,20 @@ run_ok \
   --target-bare-metal \
   -o "$TMP_DIR/bare_metal_array_call"
 
-echo "Stage 1 function-local region validation passed."
+run_ok \
+  "hosted-nested-region-verifies" \
+  "$TMP_DIR/nested_region_ok.veri" \
+  --verify \
+  -o "$TMP_DIR/nested_region_ok"
+
+run_expect_fail \
+  "hosted-region-return-rejected" \
+  "returning from inside a hosted region block" \
+  "$TMP_DIR/nested_region_bad_return.veri"
+
+run_expect_fail \
+  "hosted-region-array-assign-rejected" \
+  "assigning whole arrays inside a hosted region block" \
+  "$TMP_DIR/nested_region_bad_assign.veri"
+
+echo "Function-local and nested region validation passed."

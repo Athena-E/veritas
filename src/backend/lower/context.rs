@@ -29,6 +29,12 @@ pub struct LoweringContext<'src> {
     /// Stack of variable maps for nested scopes
     /// Used to restore variable bindings when exiting a scope
     scope_stack: Vec<BTreeMap<String, VirtualReg>>,
+
+    /// Current nested lexical region handle, if any.
+    current_region: Option<VirtualReg>,
+
+    /// Stack of outer region handles when entering nested regions.
+    region_stack: Vec<Option<VirtualReg>>,
 }
 
 impl<'src> LoweringContext<'src> {
@@ -39,6 +45,8 @@ impl<'src> LoweringContext<'src> {
             var_map: BTreeMap::new(),
             var_type_map: BTreeMap::new(),
             scope_stack: Vec::new(),
+            current_region: None,
+            region_stack: Vec::new(),
         }
     }
 
@@ -128,6 +136,19 @@ impl<'src> LoweringContext<'src> {
         if let Some(old_map) = self.scope_stack.pop() {
             self.var_map = old_map;
         }
+    }
+
+    pub fn current_region(&self) -> Option<VirtualReg> {
+        self.current_region
+    }
+
+    pub fn enter_region(&mut self, region: VirtualReg) {
+        self.region_stack.push(self.current_region);
+        self.current_region = Some(region);
+    }
+
+    pub fn exit_region(&mut self) {
+        self.current_region = self.region_stack.pop().unwrap_or(None);
     }
 
     // ========================================================================

@@ -70,6 +70,17 @@ pub enum TirInstr<'src> {
         dst: VirtualReg,
         element_ty: IType<'src>,
         size: i64,
+        region: Option<VirtualReg>,
+    },
+
+    /// Enter a nested lexical region, yielding a region handle.
+    RegionEnter {
+        dst: VirtualReg,
+    },
+
+    /// Leave a nested lexical region.
+    RegionLeave {
+        region: VirtualReg,
     },
 
     /// Assume a constraint (from branch or precondition)
@@ -91,6 +102,8 @@ impl<'src> TirInstr<'src> {
             TirInstr::ArrayStore { .. } => None,
             TirInstr::Call { dst, .. } => *dst,
             TirInstr::AllocArray { dst, .. } => Some(*dst),
+            TirInstr::RegionEnter { dst } => Some(*dst),
+            TirInstr::RegionLeave { .. } => None,
             TirInstr::AssumeConstraint { .. } => None,
             TirInstr::AssertConstraint { .. } => None,
         }
@@ -107,6 +120,8 @@ impl<'src> TirInstr<'src> {
             TirInstr::ArrayStore { .. } => None,
             TirInstr::Call { result_ty, .. } => Some(result_ty),
             TirInstr::AllocArray { element_ty, .. } => Some(element_ty),
+            TirInstr::RegionEnter { .. } => None,
+            TirInstr::RegionLeave { .. } => None,
             TirInstr::AssumeConstraint { .. } => None,
             TirInstr::AssertConstraint { .. } => None,
         }

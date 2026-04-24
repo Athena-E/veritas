@@ -6,7 +6,7 @@
 
 use crate::backend::dtal::constraints::IndexExpr;
 use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
-use crate::backend::dtal::regs::Reg;
+use crate::backend::dtal::regs::{PhysicalReg, Reg};
 use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
@@ -104,6 +104,7 @@ pub fn lower_instruction<'src>(
             dst,
             element_ty,
             size,
+            region,
         } => {
             use crate::backend::dtal::regs::PhysicalReg;
             use std::sync::Arc;
@@ -136,9 +137,12 @@ pub fn lower_instruction<'src>(
                     imm: total_size as i128,
                     ty: DtalType::Int,
                 });
+                let region_src = region
+                    .map(Reg::Virtual)
+                    .unwrap_or(Reg::Physical(PhysicalReg::R12));
                 instrs.push(DtalInstr::MovReg {
                     dst: Reg::Physical(PhysicalReg::R0),
-                    src: Reg::Physical(PhysicalReg::R12),
+                    src: region_src,
                     ty: DtalType::Int,
                 });
                 instrs.push(DtalInstr::Call {
@@ -148,7 +152,39 @@ pub fn lower_instruction<'src>(
                 instrs.push(DtalInstr::MovReg {
                     dst: Reg::Virtual(*dst),
                     src: Reg::Physical(PhysicalReg::R0),
+                    ty: array_ty.clone(),
+                });
+                instrs.push(DtalInstr::TypeAnnotation {
+                    reg: Reg::Virtual(*dst),
                     ty: array_ty,
+                });
+            }
+        }
+
+        TirInstr::RegionEnter { dst } => {
+            if !bare_metal {
+                instrs.push(DtalInstr::Call {
+                    target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
+                    return_ty: DtalType::Int,
+                });
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Virtual(*dst),
+                    src: Reg::Physical(PhysicalReg::R0),
+                    ty: DtalType::Int,
+                });
+            }
+        }
+
+        TirInstr::RegionLeave { region } => {
+            if !bare_metal {
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Physical(PhysicalReg::R0),
+                    src: Reg::Virtual(*region),
+                    ty: DtalType::Int,
+                });
+                instrs.push(DtalInstr::Call {
+                    target: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
+                    return_ty: DtalType::Unit,
                 });
             }
         }

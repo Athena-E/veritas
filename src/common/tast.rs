@@ -118,6 +118,10 @@ pub enum TStmt<'src> {
         invariant: Option<crate::backend::dtal::constraints::Constraint>,
         body: TBlock<'src>,
     },
+
+    Region {
+        body: TBlock<'src>,
+    },
 }
 
 #[derive(Clone, Debug)]

@@ -905,5 +905,18 @@ fn rename_stmt_var<'src>(
                     .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
             },
         },
+        Stmt::Region { body } => Stmt::Region {
+            body: Block {
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|s| (rename_stmt_var(&s.0, old, new), s.1))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+            },
+        },
     }
 }

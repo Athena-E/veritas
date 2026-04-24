@@ -271,6 +271,15 @@ pub fn check_stmt<'src>(
             // Synthesize type of RHS value
             let (trhs, rhs_ty) = synth_expr(ctx, rhs)?;
 
+            if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&rhs_ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "assigning whole arrays inside a hosted region block is not yet supported"
+                            .to_string(),
+                    span: rhs.1,
+                });
+            }
+
             // Check what kind of LHS we have
             match &lhs.0 {
                 // Variable assignment
@@ -442,6 +451,15 @@ pub fn check_stmt<'src>(
 
         // RETURN: Return statement
         Stmt::Return { expr } => {
+            if !ctx.bare_metal && ctx.in_region_scope() {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "returning from inside a hosted region block is not yet supported"
+                            .to_string(),
+                    span: expr.1,
+                });
+            }
+
             let (texpr, ret_ty) = synth_expr(ctx, expr)?;
 
             // Check return type matches expected return type
@@ -799,6 +817,13 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), post_ctx))
         }
 
+        Stmt::Region { body } => {
+            let region_ctx = ctx.enter_region_scope();
+            let (tbody, final_region_ctx) = check_block_as_stmt(&region_ctx, body)?;
+            let tstmt = TStmt::Region { body: tbody };
+            Ok(((tstmt, span), ctx.merge_region_exit(&final_region_ctx)))
+        }
+
         // EXPR-STMT: Expression statement
         // Special handling for if-expressions to support context joining
         Stmt::Expr(expr) => {
@@ -855,6 +880,9 @@ fn collect_array_modifications_inner<'src>(
                 }
             }
             Stmt::For { body, .. } => {
+                collect_array_modifications_inner(&body.statements, modifications);
+            }
+            Stmt::Region { body } => {
                 collect_array_modifications_inner(&body.statements, modifications);
             }
             _ => {}
@@ -1858,6 +1886,19 @@ fn substitute_var_in_stmt<'src>(
                     .map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
             },
         },
+        Stmt::Region { body } => Stmt::Region {
+            body: Block {
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
+            },
+        },
     }
 }
 
@@ -2139,6 +2180,14 @@ fn find_invalid_free_var_in_stmt<'src>(
             if let Some(v) = find_invalid_free_var(&condition.0, allowed) {
                 return Some(v);
             }
+            for (s, _) in &body.statements {
+                if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        Stmt::Region { body } => {
             for (s, _) in &body.statements {
                 if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
                     return Some(v);

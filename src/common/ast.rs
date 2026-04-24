@@ -24,6 +24,7 @@ pub enum Token<'src> {
     Forall,
     Exists,
     Const,
+    Region,
     // Type keywords
     Int,
     I64,
@@ -55,6 +56,7 @@ impl fmt::Display for Token<'_> {
             Token::Forall => write!(f, "forall"),
             Token::Exists => write!(f, "exists"),
             Token::Const => write!(f, "const"),
+            Token::Region => write!(f, "region"),
             Token::Int => write!(f, "int"),
             Token::I64 => write!(f, "i64"),
             Token::U64 => write!(f, "u64"),
@@ -240,6 +242,9 @@ pub enum Stmt<'src> {
     While {
         condition: Box<Spanned<Expr<'src>>>,
         invariant: Option<Spanned<Expr<'src>>>,
+        body: Block<'src>,
+    },
+    Region {
         body: Block<'src>,
     },
 }

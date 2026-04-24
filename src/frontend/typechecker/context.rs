@@ -65,6 +65,9 @@ pub struct TypingContext<'src> {
     // escape paths remain conservatively disallowed until ownership/regions are
     // tracked more precisely.
     pub bare_metal: bool,
+
+    // Number of nested explicit region scopes currently being checked.
+    pub region_depth: usize,
 }
 
 impl<'src> TypingContext<'src> {
@@ -80,6 +83,7 @@ impl<'src> TypingContext<'src> {
             allow_quantifiers: false,
             check_overflow: false,
             bare_metal: false,
+            region_depth: 0,
         }
     }
 
@@ -96,7 +100,33 @@ impl<'src> TypingContext<'src> {
             allow_quantifiers: false,
             check_overflow: false,
             bare_metal: false,
+            region_depth: 0,
         }
+    }
+
+    pub fn enter_region_scope(&self) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.region_depth += 1;
+        new_ctx
+    }
+
+    pub fn in_region_scope(&self) -> bool {
+        self.region_depth > 0
+    }
+
+    /// Merge the result of a region body back into the outer context.
+    ///
+    /// Stage 2 keeps region-local bindings local, but preserves updates to
+    /// pre-existing mutable variables. Newly derived propositions are dropped
+    /// conservatively because they may mention region-local names.
+    pub fn merge_region_exit(&self, region_ctx: &Self) -> Self {
+        let mut merged = self.clone();
+        for name in self.delta.keys() {
+            if let Some(updated_binding) = region_ctx.delta.get(name) {
+                merged.delta.insert(name.clone(), updated_binding.clone());
+            }
+        }
+        merged
     }
 
     // Set expected return type for current function

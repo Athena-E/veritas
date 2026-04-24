@@ -471,6 +471,7 @@ fn lower_array_init<'src>(
         dst: arr_reg,
         element_ty: scalar_ty,
         size: total_flat,
+        region: ctx.current_region(),
     });
 
     // Zero-init fast path: hosted `__rt_alloc` (mmap) returns zero-filled
