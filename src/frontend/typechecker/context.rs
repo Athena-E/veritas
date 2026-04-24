@@ -74,6 +74,12 @@ pub struct TypingContext<'src> {
     // region scopes. A binding is tracked here only if it depends on the
     // current nested region's storage and therefore must not escape it.
     region_local_arrays: Vec<HashSet<String>>,
+
+    // Array bindings introduced within the currently active nested region
+    // scopes, regardless of whether they currently depend on nested-region
+    // storage. These names are local to the region and therefore safe to
+    // retarget to region-local arrays without escaping.
+    region_scoped_arrays: Vec<HashSet<String>>,
 }
 
 impl<'src> TypingContext<'src> {
@@ -91,6 +97,7 @@ impl<'src> TypingContext<'src> {
             bare_metal: false,
             region_depth: 0,
             region_local_arrays: Vec::new(),
+            region_scoped_arrays: Vec::new(),
         }
     }
 
@@ -109,6 +116,7 @@ impl<'src> TypingContext<'src> {
             bare_metal: false,
             region_depth: 0,
             region_local_arrays: Vec::new(),
+            region_scoped_arrays: Vec::new(),
         }
     }
 
@@ -116,6 +124,7 @@ impl<'src> TypingContext<'src> {
         let mut new_ctx = self.clone();
         new_ctx.region_depth += 1;
         new_ctx.region_local_arrays.push(HashSet::new());
+        new_ctx.region_scoped_arrays.push(HashSet::new());
         new_ctx
     }
 
@@ -135,6 +144,9 @@ impl<'src> TypingContext<'src> {
                 merged.delta.insert(name.clone(), updated_binding.clone());
             }
         }
+
+        merged.region_local_arrays = self.region_local_arrays.clone();
+        merged.region_scoped_arrays = self.region_scoped_arrays.clone();
         merged
     }
 
@@ -146,8 +158,23 @@ impl<'src> TypingContext<'src> {
         new_ctx
     }
 
+    pub fn mark_region_scoped_array(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(scope) = new_ctx.region_scoped_arrays.last_mut() {
+            scope.insert(name.to_string());
+        }
+        new_ctx
+    }
+
     pub fn is_region_local_array(&self, name: &str) -> bool {
         self.region_local_arrays
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
+    pub fn is_region_scoped_array(&self, name: &str) -> bool {
+        self.region_scoped_arrays
             .iter()
             .rev()
             .any(|scope| scope.contains(name))
@@ -353,6 +380,27 @@ impl<'src> TypingContext<'src> {
 
         // Note: Variables only in ctx2 but not ctx1 shouldn't happen in well-scoped code
         // Both branches start from same context, so they should have same variables
+
+        // Conservatively preserve any region-local array dependency discovered
+        // in either branch. If one branch makes a binding region-local, the
+        // merged continuation must treat it as region-local too.
+        joined.region_local_arrays = ctx1.region_local_arrays.clone();
+        for (scope_idx, scope) in ctx2.region_local_arrays.iter().enumerate() {
+            if let Some(joined_scope) = joined.region_local_arrays.get_mut(scope_idx) {
+                joined_scope.extend(scope.iter().cloned());
+            } else {
+                joined.region_local_arrays.push(scope.clone());
+            }
+        }
+
+        joined.region_scoped_arrays = ctx1.region_scoped_arrays.clone();
+        for (scope_idx, scope) in ctx2.region_scoped_arrays.iter().enumerate() {
+            if let Some(joined_scope) = joined.region_scoped_arrays.get_mut(scope_idx) {
+                joined_scope.extend(scope.iter().cloned());
+            } else {
+                joined.region_scoped_arrays.push(scope.clone());
+            }
+        }
 
         joined
     }

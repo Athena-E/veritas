@@ -101,6 +101,19 @@ fn main() -> int {
 }
 EOF
 
+cat >"$TMP_DIR/nested_region_local_reassign_ok.veri" <<'EOF'
+fn main() -> int {
+    let mut out: int = 0;
+    region {
+        let mut a: [int; 4] = [1; 4];
+        let tmp: [int; 4] = [2; 4];
+        a = tmp;
+        out = a[0];
+    }
+    out
+}
+EOF
+
 run_ok \
   "hosted-array-example-verifies" \
   src/examples/20_array_loop_invariant.veri \
@@ -144,5 +157,11 @@ run_ok \
   "$TMP_DIR/nested_region_bad_assign.veri" \
   --verify \
   -o "$TMP_DIR/nested_region_outer_assign_ok"
+
+run_ok \
+  "hosted-region-local-array-reassign-allowed" \
+  "$TMP_DIR/nested_region_local_reassign_ok.veri" \
+  --verify \
+  -o "$TMP_DIR/nested_region_local_reassign_ok"
 
 echo "Function-local and nested region validation passed."

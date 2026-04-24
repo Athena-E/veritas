@@ -124,6 +124,9 @@ pub fn check_stmt<'src>(
 
             // Add to context with the synthesized type (more precise)
             let mut new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+            if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&value_ty) {
+                new_ctx = new_ctx.mark_region_scoped_array(name);
+            }
             if !ctx.bare_metal
                 && ctx.in_region_scope()
                 && contains_array_type(&value_ty)
@@ -197,6 +200,9 @@ pub fn check_stmt<'src>(
                 _ => value_ty.clone(),
             };
             let mut new_ctx = ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&current_ty) {
+                new_ctx = new_ctx.mark_region_scoped_array(name);
+            }
             if !ctx.bare_metal
                 && ctx.in_region_scope()
                 && contains_array_type(&current_ty)
@@ -285,23 +291,25 @@ pub fn check_stmt<'src>(
             // Synthesize type of RHS value
             let (trhs, rhs_ty) = synth_expr(ctx, rhs)?;
 
-            if !ctx.bare_metal
-                && ctx.in_region_scope()
-                && contains_array_type(&rhs_ty)
-                && expr_depends_on_region_local_array(ctx, &rhs.0)
-            {
-                return Err(TypeError::UnsupportedFeature {
-                    feature:
-                        "assigning whole arrays inside a hosted region block is not yet supported"
-                            .to_string(),
-                    span: rhs.1,
-                });
-            }
-
             // Check what kind of LHS we have
             match &lhs.0 {
                 // Variable assignment
                 crate::common::ast::Expr::Variable(var_name) => {
+                    if !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && contains_array_type(&rhs_ty)
+                        && expr_depends_on_region_local_array(ctx, &rhs.0)
+                        && !ctx.is_region_local_array(var_name)
+                        && !ctx.is_region_scoped_array(var_name)
+                    {
+                        return Err(TypeError::UnsupportedFeature {
+                            feature:
+                                "assigning whole arrays inside a hosted region block is not yet supported"
+                                    .to_string(),
+                            span: rhs.1,
+                        });
+                    }
+
                     // Look up mutable variable
                     let binding =
                         ctx.lookup_mutable(var_name)
@@ -332,6 +340,14 @@ pub fn check_stmt<'src>(
                                 reason: e,
                                 span,
                             })?;
+
+                    if !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && contains_array_type(&rhs_ty)
+                        && expr_depends_on_region_local_array(ctx, &rhs.0)
+                    {
+                        new_ctx = new_ctx.mark_region_local_array(var_name);
+                    }
 
                     // Resolve array reads in the RHS and snapshot their values
                     let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
