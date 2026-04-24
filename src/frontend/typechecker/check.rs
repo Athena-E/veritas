@@ -124,6 +124,13 @@ pub fn check_stmt<'src>(
 
             // Add to context with the synthesized type (more precise)
             let mut new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+            if !ctx.bare_metal
+                && ctx.in_region_scope()
+                && contains_array_type(&value_ty)
+                && expr_depends_on_region_local_array(ctx, &value.0)
+            {
+                new_ctx = new_ctx.mark_region_local_array(name);
+            }
 
             // Resolve array reads in the RHS expression and snapshot their values
             // so that subsequent mutations to the array don't drag this binding along.
@@ -190,6 +197,13 @@ pub fn check_stmt<'src>(
                 _ => value_ty.clone(),
             };
             let mut new_ctx = ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            if !ctx.bare_metal
+                && ctx.in_region_scope()
+                && contains_array_type(&current_ty)
+                && expr_depends_on_region_local_array(ctx, &value.0)
+            {
+                new_ctx = new_ctx.mark_region_local_array(name);
+            }
 
             // For mutable array init, add pointwise propositions for each index
             // rather than a single forall. This way, `arr[k] = v` only invalidates
@@ -271,7 +285,11 @@ pub fn check_stmt<'src>(
             // Synthesize type of RHS value
             let (trhs, rhs_ty) = synth_expr(ctx, rhs)?;
 
-            if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&rhs_ty) {
+            if !ctx.bare_metal
+                && ctx.in_region_scope()
+                && contains_array_type(&rhs_ty)
+                && expr_depends_on_region_local_array(ctx, &rhs.0)
+            {
                 return Err(TypeError::UnsupportedFeature {
                     feature:
                         "assigning whole arrays inside a hosted region block is not yet supported"
@@ -1667,6 +1685,112 @@ fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
         IType::Array { .. } => true,
         IType::RefinedInt { base, .. } => contains_array_type(base),
         _ => false,
+    }
+}
+
+fn expr_depends_on_region_local_array<'src>(
+    ctx: &TypingContext<'src>,
+    expr: &Expr<'src>,
+) -> bool {
+    match expr {
+        Expr::Variable(name) => ctx.is_region_local_array(name),
+        Expr::ArrayInit { .. } => ctx.in_region_scope() && !ctx.bare_metal,
+        Expr::BinOp { lhs, rhs, .. } => {
+            expr_depends_on_region_local_array(ctx, &lhs.0)
+                || expr_depends_on_region_local_array(ctx, &rhs.0)
+        }
+        Expr::UnaryOp { cond, .. } => expr_depends_on_region_local_array(ctx, &cond.0),
+        Expr::Call { args, .. } => args
+            .0
+            .iter()
+            .any(|arg| expr_depends_on_region_local_array(ctx, &arg.0)),
+        Expr::Index { base, index } => {
+            expr_depends_on_region_local_array(ctx, &base.0)
+                || expr_depends_on_region_local_array(ctx, &index.0)
+        }
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            expr_depends_on_region_local_array(ctx, &cond.0)
+                || then_block
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || then_block
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+                || else_block.as_ref().is_some_and(|block| {
+                    block.statements
+                        .iter()
+                        .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                        || block
+                            .trailing_expr
+                            .as_ref()
+                            .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+                })
+        }
+        Expr::Forall {
+            start, end, body, ..
+        }
+        | Expr::Exists {
+            start, end, body, ..
+        } => {
+            expr_depends_on_region_local_array(ctx, &start.0)
+                || expr_depends_on_region_local_array(ctx, &end.0)
+                || expr_depends_on_region_local_array(ctx, &body.0)
+        }
+        Expr::Literal(_) | Expr::Error => false,
+    }
+}
+
+fn stmt_depends_on_region_local_array<'src>(
+    ctx: &TypingContext<'src>,
+    stmt: &Stmt<'src>,
+) -> bool {
+    match stmt {
+        Stmt::Let { value, .. } => expr_depends_on_region_local_array(ctx, &value.0),
+        Stmt::Assignment { lhs, rhs } => {
+            expr_depends_on_region_local_array(ctx, &lhs.0)
+                || expr_depends_on_region_local_array(ctx, &rhs.0)
+        }
+        Stmt::Return { expr } => expr_depends_on_region_local_array(ctx, &expr.0),
+        Stmt::Expr(expr) => expr_depends_on_region_local_array(ctx, &expr.0),
+        Stmt::For {
+            start, end, body, ..
+        } => {
+            expr_depends_on_region_local_array(ctx, &start.0)
+                || expr_depends_on_region_local_array(ctx, &end.0)
+                || body
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+        }
+        Stmt::While { condition, body, .. } => {
+            expr_depends_on_region_local_array(ctx, &condition.0)
+                || body
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+        }
+        Stmt::Region { body } => body
+            .statements
+            .iter()
+            .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+            || body
+                .trailing_expr
+                .as_ref()
+                .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0)),
     }
 }
 

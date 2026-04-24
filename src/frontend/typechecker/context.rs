@@ -3,6 +3,7 @@ use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::helpers::rename_prop_var;
 use chumsky::prelude::SimpleSpan;
 use im::{HashMap, Vector};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 // phi: Refinement propositions known to be true
@@ -68,6 +69,11 @@ pub struct TypingContext<'src> {
 
     // Number of nested explicit region scopes currently being checked.
     pub region_depth: usize,
+
+    // Region-local array bindings created by the currently active nested
+    // region scopes. A binding is tracked here only if it depends on the
+    // current nested region's storage and therefore must not escape it.
+    region_local_arrays: Vec<HashSet<String>>,
 }
 
 impl<'src> TypingContext<'src> {
@@ -84,6 +90,7 @@ impl<'src> TypingContext<'src> {
             check_overflow: false,
             bare_metal: false,
             region_depth: 0,
+            region_local_arrays: Vec::new(),
         }
     }
 
@@ -101,12 +108,14 @@ impl<'src> TypingContext<'src> {
             check_overflow: false,
             bare_metal: false,
             region_depth: 0,
+            region_local_arrays: Vec::new(),
         }
     }
 
     pub fn enter_region_scope(&self) -> Self {
         let mut new_ctx = self.clone();
         new_ctx.region_depth += 1;
+        new_ctx.region_local_arrays.push(HashSet::new());
         new_ctx
     }
 
@@ -127,6 +136,21 @@ impl<'src> TypingContext<'src> {
             }
         }
         merged
+    }
+
+    pub fn mark_region_local_array(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(scope) = new_ctx.region_local_arrays.last_mut() {
+            scope.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn is_region_local_array(&self, name: &str) -> bool {
+        self.region_local_arrays
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
     }
 
     // Set expected return type for current function

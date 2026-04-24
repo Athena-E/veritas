@@ -82,8 +82,20 @@ EOF
 cat >"$TMP_DIR/nested_region_bad_assign.veri" <<'EOF'
 fn main() -> int {
     let mut arr: [int; 4] = [0; 4];
+    let arr2: [int; 4] = [5; 4];
     region {
-        arr = [1; 4];
+        arr = arr2;
+    }
+    arr[0]
+}
+EOF
+
+cat >"$TMP_DIR/nested_region_bad_escape_assign.veri" <<'EOF'
+fn main() -> int {
+    let mut arr: [int; 4] = [0; 4];
+    region {
+        let tmp: [int; 4] = [1; 4];
+        arr = tmp;
     }
     arr[0]
 }
@@ -125,6 +137,12 @@ run_expect_fail \
 run_expect_fail \
   "hosted-region-array-assign-rejected" \
   "assigning whole arrays inside a hosted region block" \
-  "$TMP_DIR/nested_region_bad_assign.veri"
+  "$TMP_DIR/nested_region_bad_escape_assign.veri"
+
+run_ok \
+  "hosted-region-outer-array-assign-allowed" \
+  "$TMP_DIR/nested_region_bad_assign.veri" \
+  --verify \
+  -o "$TMP_DIR/nested_region_outer_assign_ok"
 
 echo "Function-local and nested region validation passed."
