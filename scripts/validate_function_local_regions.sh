@@ -114,6 +114,38 @@ fn main() -> int {
 }
 EOF
 
+cat >"$TMP_DIR/nested_region_local_reset_ok.veri" <<'EOF'
+fn main() -> int {
+    let mut arr: [int; 4] = [0; 4];
+    let arr2: [int; 4] = [5; 4];
+    region {
+        let mut tmp: [int; 4] = [1; 4];
+        tmp = arr2;
+        arr = tmp;
+    }
+    arr[0]
+}
+EOF
+
+cat >"$TMP_DIR/nested_region_branch_local_reset_ok.veri" <<'EOF'
+fn main() -> int {
+    let mut arr: [int; 4] = [0; 4];
+    let arr2: [int; 4] = [6; 4];
+    let cond: bool = true;
+    region {
+        let mut tmp: [int; 4] = arr2;
+        if cond {
+            let fresh: [int; 4] = [1; 4];
+            tmp = fresh;
+        } else {
+        }
+        tmp = arr2;
+        arr = tmp;
+    }
+    arr[0]
+}
+EOF
+
 run_ok \
   "hosted-array-example-verifies" \
   src/examples/20_array_loop_invariant.veri \
@@ -163,5 +195,17 @@ run_ok \
   "$TMP_DIR/nested_region_local_reassign_ok.veri" \
   --verify \
   -o "$TMP_DIR/nested_region_local_reassign_ok"
+
+run_ok \
+  "hosted-region-local-reset-allowed" \
+  "$TMP_DIR/nested_region_local_reset_ok.veri" \
+  --verify \
+  -o "$TMP_DIR/nested_region_local_reset_ok"
+
+run_ok \
+  "hosted-region-branch-local-reset-allowed" \
+  "$TMP_DIR/nested_region_branch_local_reset_ok.veri" \
+  --verify \
+  -o "$TMP_DIR/nested_region_branch_local_reset_ok"
 
 echo "Function-local and nested region validation passed."

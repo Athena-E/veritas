@@ -13,6 +13,7 @@ use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
 use crate::common::types::IValue;
+use crate::frontend::typechecker::context::join_types as join_branch_types;
 
 /// Convert a typed expression to an IndexExpr for constraints.
 /// Returns None if the expression cannot be represented in the constraint domain.
@@ -576,6 +577,7 @@ pub fn lower_if_expr<'src>(
 
     // Snapshot variable state before then branch
     let vars_before_then = ctx.snapshot_var_map();
+    let var_types_before_then = ctx.snapshot_var_type_map();
 
     // Lower the then block and get its result
     let then_result = lower_block_with_result(ctx, then_block, ty);
@@ -583,6 +585,7 @@ pub fn lower_if_expr<'src>(
     // Record then block's end for phi
     let then_end_block = ctx.current_block().expect("Should be in then block");
     let vars_after_then = ctx.snapshot_var_map();
+    let var_types_after_then = ctx.snapshot_var_type_map();
 
     // Jump to merge
     ctx.finish_block(
@@ -599,6 +602,7 @@ pub fn lower_if_expr<'src>(
     // The else branch should see variables as they were BEFORE the then branch,
     // not after. This ensures proper phi node creation at the merge point.
     ctx.restore_var_map(vars_before_then.clone());
+    ctx.restore_var_type_map(var_types_before_then.clone());
 
     let else_result = if let Some(else_block_ref) = else_block {
         lower_block_with_result(ctx, else_block_ref, ty)
@@ -617,6 +621,7 @@ pub fn lower_if_expr<'src>(
 
     let else_end_block = ctx.current_block().expect("Should be in else block");
     let vars_after_else = ctx.snapshot_var_map();
+    let var_types_after_else = ctx.snapshot_var_type_map();
 
     // Jump to merge
     ctx.finish_block(
@@ -629,15 +634,6 @@ pub fn lower_if_expr<'src>(
     // 6. Create merge block with phi nodes
     ctx.start_block(merge_block);
 
-    // Create phi node for the result value.
-    // Widen the type for join points (e.g., Unit → Int when branches
-    // produce different value types).
-    let result_reg = ctx.fresh_reg();
-    let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
-    result_phi.add_incoming(then_end_block, then_result);
-    result_phi.add_incoming(else_end_block, else_result);
-    ctx.emit_phi(result_phi);
-
     // Create phi nodes for any variables modified in either branch
     // Compare vars_after_then and vars_after_else with vars_before_then
     create_phi_nodes_for_modified_vars(
@@ -645,11 +641,30 @@ pub fn lower_if_expr<'src>(
         &vars_before_then,
         &vars_after_then,
         &vars_after_else,
+        &var_types_before_then,
+        &var_types_after_then,
+        &var_types_after_else,
         then_end_block,
         else_end_block,
     );
 
-    result_reg
+    if matches!(ty, IType::Unit) {
+        let result_reg = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst: result_reg,
+            value: 0,
+            ty: IType::Unit,
+        });
+        result_reg
+    } else {
+        // Create phi node for the result value.
+        let result_reg = ctx.fresh_reg();
+        let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
+        result_phi.add_incoming(then_end_block, then_result);
+        result_phi.add_incoming(else_end_block, else_result);
+        ctx.emit_phi(result_phi);
+        result_reg
+    }
 }
 
 /// Lower a block and return the result register
@@ -701,6 +716,9 @@ fn create_phi_nodes_for_modified_vars<'src>(
     vars_before: &std::collections::BTreeMap<String, VirtualReg>,
     vars_after_then: &std::collections::BTreeMap<String, VirtualReg>,
     vars_after_else: &std::collections::BTreeMap<String, VirtualReg>,
+    var_types_before: &std::collections::BTreeMap<String, IType<'src>>,
+    var_types_after_then: &std::collections::BTreeMap<String, IType<'src>>,
+    var_types_after_else: &std::collections::BTreeMap<String, IType<'src>>,
     then_block: BlockId,
     else_block: BlockId,
 ) {
@@ -713,7 +731,19 @@ fn create_phi_nodes_for_modified_vars<'src>(
         if then_reg != else_reg {
             // Need a phi node
             let phi_dst = ctx.fresh_reg();
-            let var_ty = widen_itype(ctx.lookup_var_type(name));
+            let before_ty = var_types_before
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ctx.lookup_var_type(name));
+            let then_ty = var_types_after_then
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| before_ty.clone());
+            let else_ty = var_types_after_else
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| before_ty.clone());
+            let var_ty = widen_itype(join_branch_types(&then_ty, &else_ty));
             let mut phi = PhiNode::new(phi_dst, var_ty.clone());
             phi.add_incoming(then_block, then_reg);
             phi.add_incoming(else_block, else_reg);
@@ -723,7 +753,10 @@ fn create_phi_nodes_for_modified_vars<'src>(
             ctx.bind_var_typed(name, phi_dst, var_ty);
         } else if then_reg != before_reg {
             // Both branches modified it the same way - just update binding
-            let var_ty = ctx.lookup_var_type(name);
+            let var_ty = var_types_after_then
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ctx.lookup_var_type(name));
             ctx.bind_var_typed(name, then_reg, var_ty);
         }
     }

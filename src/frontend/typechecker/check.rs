@@ -295,10 +295,15 @@ pub fn check_stmt<'src>(
             match &lhs.0 {
                 // Variable assignment
                 crate::common::ast::Expr::Variable(var_name) => {
+                    let rhs_depends_on_region_local = !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && contains_array_type(&rhs_ty)
+                        && expr_depends_on_region_local_array(ctx, &rhs.0);
+
                     if !ctx.bare_metal
                         && ctx.in_region_scope()
                         && contains_array_type(&rhs_ty)
-                        && expr_depends_on_region_local_array(ctx, &rhs.0)
+                        && rhs_depends_on_region_local
                         && !ctx.is_region_local_array(var_name)
                         && !ctx.is_region_scoped_array(var_name)
                     {
@@ -341,12 +346,12 @@ pub fn check_stmt<'src>(
                                 span,
                             })?;
 
-                    if !ctx.bare_metal
-                        && ctx.in_region_scope()
-                        && contains_array_type(&rhs_ty)
-                        && expr_depends_on_region_local_array(ctx, &rhs.0)
-                    {
-                        new_ctx = new_ctx.mark_region_local_array(var_name);
+                    if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&rhs_ty) {
+                        if rhs_depends_on_region_local {
+                            new_ctx = new_ctx.mark_region_local_array(var_name);
+                        } else if ctx.is_region_scoped_array(var_name) {
+                            new_ctx = new_ctx.clear_region_local_array(var_name);
+                        }
                     }
 
                     // Resolve array reads in the RHS and snapshot their values

@@ -98,10 +98,20 @@ impl<'src> LoweringContext<'src> {
         self.var_map.clone()
     }
 
+    /// Get a snapshot of the current variable type map.
+    pub fn snapshot_var_type_map(&self) -> BTreeMap<String, IType<'src>> {
+        self.var_type_map.clone()
+    }
+
     /// Restore the variable map from a previous snapshot
     /// Used to reset state before lowering alternative control flow paths
     pub fn restore_var_map(&mut self, snapshot: BTreeMap<String, VirtualReg>) {
         self.var_map = snapshot;
+    }
+
+    /// Restore the variable type map from a previous snapshot.
+    pub fn restore_var_type_map(&mut self, snapshot: BTreeMap<String, IType<'src>>) {
+        self.var_type_map = snapshot;
     }
 
     /// Get all variables that differ between two snapshots

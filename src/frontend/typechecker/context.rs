@@ -158,6 +158,16 @@ impl<'src> TypingContext<'src> {
         new_ctx
     }
 
+    pub fn clear_region_local_array(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        for scope in new_ctx.region_local_arrays.iter_mut().rev() {
+            if scope.remove(name) {
+                break;
+            }
+        }
+        new_ctx
+    }
+
     pub fn mark_region_scoped_array(&self, name: &str) -> Self {
         let mut new_ctx = self.clone();
         if let Some(scope) = new_ctx.region_scoped_arrays.last_mut() {
@@ -545,7 +555,7 @@ fn expr_references_array_index(expr: &Expr, arr_name: &str) -> bool {
 
 /// Compute the join (least upper bound) of two types
 /// Used after if-else to merge mutable variable types from both branches
-fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
+pub(crate) fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
     match (t1, t2) {
         // Same types - keep as is
         (IType::Unit, IType::Unit) => IType::Unit,
