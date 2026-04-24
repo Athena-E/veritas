@@ -59,6 +59,12 @@ pub struct TypingContext<'src> {
     // Phase 1: plumbing only — helpers exist but are not yet called from synth_expr.
     // Phase 3 will gate `check_no_overflow` calls on this flag.
     pub check_overflow: bool,
+
+    // Whether the current compilation target is bare metal.
+    // Hosted mode uses function-local regions for array allocation, so some
+    // escape paths remain conservatively disallowed until ownership/regions are
+    // tracked more precisely.
+    pub bare_metal: bool,
 }
 
 impl<'src> TypingContext<'src> {
@@ -73,6 +79,7 @@ impl<'src> TypingContext<'src> {
             current_function: None,
             allow_quantifiers: false,
             check_overflow: false,
+            bare_metal: false,
         }
     }
 
@@ -88,6 +95,7 @@ impl<'src> TypingContext<'src> {
             current_function: None,
             allow_quantifiers: false,
             check_overflow: false,
+            bare_metal: false,
         }
     }
 

@@ -1348,6 +1348,7 @@ fn check_program_with_options<'src>(
 
     let mut global_ctx = TypingContext::with_functions(signatures);
     global_ctx.check_overflow = check_overflow;
+    global_ctx.bare_metal = bare_metal;
 
     // Process constant declarations — add as immutable singleton bindings
     for (constant, _span) in &program.constants {
