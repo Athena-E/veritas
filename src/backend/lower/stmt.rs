@@ -106,6 +106,9 @@ fn lower_let<'src>(
             src: value_reg,
             ty: ty.clone(),
         });
+        if let TExpr::Variable { name: rhs_name, .. } = &value.0 {
+            ctx.mark_var_moved(rhs_name);
+        }
         moved_reg
     } else {
         value_reg
@@ -152,6 +155,9 @@ fn lower_assignment<'src>(
                     src: rhs_reg,
                     ty: rhs.0.get_type().clone(),
                 });
+                if let TExpr::Variable { name: rhs_name, .. } = &rhs.0 {
+                    ctx.mark_var_moved(rhs_name);
+                }
             } else {
                 ctx.emit(TirInstr::Copy {
                     dst: new_reg,
@@ -593,7 +599,10 @@ fn lower_region<'src>(ctx: &mut LoweringContext<'src>, body: &TBlock<'src>) {
     let region_reg = ctx.fresh_reg();
     ctx.emit(TirInstr::RegionEnter { dst: region_reg });
     ctx.enter_region(region_reg);
+    ctx.enter_scope();
     lower_stmts(ctx, &body.statements);
+    ctx.emit_scope_exit_drops();
+    ctx.exit_scope();
     ctx.exit_region();
     ctx.emit(TirInstr::RegionLeave { region: region_reg });
 }

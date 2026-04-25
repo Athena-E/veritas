@@ -340,6 +340,9 @@ fn lower_call<'src>(
                     src: arg_reg,
                     ty: arg.0.get_type().clone(),
                 });
+                if let TExpr::Variable { name, .. } = &arg.0 {
+                    ctx.mark_var_moved(name);
+                }
                 moved_reg
             } else {
                 arg_reg
@@ -705,6 +708,8 @@ fn lower_block_with_result<'src>(
 ) -> VirtualReg {
     use crate::backend::lower::stmt::lower_stmt;
 
+    ctx.enter_scope();
+
     // Lower all statements
     for stmt in &block.statements {
         lower_stmt(ctx, stmt);
@@ -712,7 +717,10 @@ fn lower_block_with_result<'src>(
 
     // If there's a trailing expression, that's the block's value
     if let Some(trailing) = &block.trailing_expr {
-        return lower_expr(ctx, trailing);
+        let result = lower_expr(ctx, trailing);
+        ctx.emit_scope_exit_drops();
+        ctx.exit_scope();
+        return result;
     }
 
     // No trailing expression - check if last statement is an expression whose
@@ -723,7 +731,10 @@ fn lower_block_with_result<'src>(
         && let Some(last) = block.statements.last()
         && let TStmt::Expr(expr) = &last.0
     {
-        return lower_expr(ctx, expr);
+        let result = lower_expr(ctx, expr);
+        ctx.emit_scope_exit_drops();
+        ctx.exit_scope();
+        return result;
     }
 
     // No value - emit default
@@ -733,6 +744,8 @@ fn lower_block_with_result<'src>(
         value: 0,
         ty: ty.clone(),
     });
+    ctx.emit_scope_exit_drops();
+    ctx.exit_scope();
     dst
 }
 

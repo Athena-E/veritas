@@ -337,3 +337,31 @@ fn hosted_owned_reassignment_lowers_to_explicit_tir_drop() {
         .iter()
         .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
 }
+
+#[test]
+fn hosted_owned_locals_drop_at_function_exit() {
+    let src = r#"
+        fn main() -> int {
+            let arr: [int; 4] = [0; 4];
+            0
+        }
+    "#;
+
+    let program = parse_program(src);
+    let tast = check_program(&program).expect("hosted target should typecheck function-exit drop");
+    let tir = lower_program(&tast);
+    let main = tir
+        .functions
+        .iter()
+        .find(|func| func.name == "main")
+        .expect("lowered main should exist");
+    let entry = main
+        .blocks
+        .get(&main.entry_block)
+        .expect("main entry block should exist");
+
+    assert!(entry
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
+}

@@ -28,9 +28,12 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     for param in &func.parameters {
         let reg = ctx.fresh_reg();
         ctx.bind_var_typed(&param.name, reg, param.ty.clone());
+        ctx.mark_var_moved(&param.name);
         params.push((reg, param.ty.clone()));
         param_names.push(param.name.clone());
     }
+
+    ctx.enter_scope();
 
     // Lower the function body statements
     lower_stmts(&mut ctx, &func.body.statements);
@@ -49,11 +52,17 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
                     src: value_reg,
                     ty: func.return_type.clone(),
                 });
+                if let TExpr::Variable { name, .. } = &trailing_expr.0 {
+                    ctx.mark_var_moved(name);
+                }
                 moved_reg
             } else {
                 value_reg
             }
         });
+
+    ctx.emit_scope_exit_drops();
+    ctx.exit_scope();
 
     // Finish the entry block with a return terminator
     ctx.finish_block(
