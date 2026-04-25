@@ -546,6 +546,7 @@ mod tests {
         };
         state.register_types.insert(v(0), array_ty.clone());
         state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 0);
 
         let program = make_program(vec![]);
 
@@ -589,6 +590,7 @@ mod tests {
         let mut entry_state = TypeState::new();
         entry_state.register_types.insert(v(0), array_ty.clone());
         entry_state.owned_registers.insert(v(0));
+        entry_state.owned_object_ids.insert(v(0), 0);
 
         let program = make_program(vec![DtalFunction {
             name: "owned_ops".to_string(),
@@ -678,6 +680,7 @@ mod tests {
         let mut state = TypeState::new();
         state.register_types.insert(v(0), array_ty.clone());
         state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 0);
         let program = make_program(vec![]);
 
         verify_instruction(
@@ -717,6 +720,7 @@ mod tests {
         let mut state = TypeState::new();
         state.register_types.insert(v(0), array_ty.clone());
         state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 0);
         let program = make_program(vec![]);
 
         verify_instruction(
