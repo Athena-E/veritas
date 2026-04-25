@@ -13,6 +13,14 @@ use crate::frontend::typechecker::{
 };
 use std::sync::Arc;
 
+fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { .. } => true,
+        IType::RefinedInt { base, .. } => contains_array_type(base),
+        _ => false,
+    }
+}
+
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
@@ -379,6 +387,7 @@ pub fn synth_expr<'src>(
             // Synth and check each argument
             let mut typed_args = Vec::new();
             let mut arg_types = Vec::new();
+            let mut arg_ownerships = Vec::new();
             for (arg, (_param_name, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
@@ -392,6 +401,11 @@ pub fn synth_expr<'src>(
 
                 typed_args.push(targ);
                 arg_types.push(arg_ty);
+                arg_ownerships.push(if !ctx.bare_metal && contains_array_type(param_ty) {
+                    OwnershipMode::Owned
+                } else {
+                    OwnershipMode::Plain
+                });
             }
 
             // Check precondition if present
@@ -421,6 +435,7 @@ pub fn synth_expr<'src>(
             let texpr = TExpr::Call {
                 func_name: func_name.to_string(),
                 args: typed_args,
+                arg_ownerships,
                 ownership: if sig.returns_owned {
                     OwnershipMode::Owned
                 } else {

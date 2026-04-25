@@ -9,9 +9,9 @@ use crate::backend::dtal::convert::expr_to_constraint;
 use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::lower::stmt::lower_stmts;
-use crate::backend::tir::{Terminator, TirFunction};
+use crate::backend::tir::{Terminator, TirFunction, TirInstr};
 use crate::common::ownership::OwnershipMode;
-use crate::common::tast::TFunction;
+use crate::common::tast::{TExpr, TFunction};
 use crate::common::types::{IProposition, IType};
 
 /// Lower a typed function to TIR
@@ -40,7 +40,20 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         .body
         .trailing_expr
         .as_ref()
-        .map(|trailing_expr| lower_expr(&mut ctx, trailing_expr));
+        .map(|trailing_expr| {
+            let value_reg = lower_expr(&mut ctx, trailing_expr);
+            if func.returns_owned && matches!(&trailing_expr.0, TExpr::Variable { .. }) {
+                let moved_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::MoveOwned {
+                    dst: moved_reg,
+                    src: value_reg,
+                    ty: func.return_type.clone(),
+                });
+                moved_reg
+            } else {
+                value_reg
+            }
+        });
 
     // Finish the entry block with a return terminator
     ctx.finish_block(

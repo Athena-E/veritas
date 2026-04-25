@@ -8,6 +8,7 @@ use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
 use crate::backend::lower::widen_itype;
 use crate::backend::tir::{BinaryOp, PhiNode, Terminator, TirInstr};
+use crate::common::ownership::OwnershipMode;
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
@@ -23,12 +24,17 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
             declared_ty: _,
             value,
             checked_ty,
+            ownership,
         } => {
-            lower_let(ctx, name, value, checked_ty);
+            lower_let(ctx, name, value, checked_ty, *ownership);
         }
 
-        TStmt::Assignment { lhs, rhs } => {
-            lower_assignment(ctx, lhs, rhs);
+        TStmt::Assignment {
+            lhs,
+            rhs,
+            ownership,
+        } => {
+            lower_assignment(ctx, lhs, rhs, *ownership);
         }
 
         TStmt::Return { expr, ownership: _ } => {
@@ -78,12 +84,26 @@ fn lower_let<'src>(
     name: &str,
     value: &Spanned<TExpr<'src>>,
     ty: &IType<'src>,
+    ownership: OwnershipMode,
 ) {
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
+    let bound_reg = if ownership == OwnershipMode::Owned
+        && matches!(&value.0, TExpr::Variable { .. })
+    {
+        let moved_reg = ctx.fresh_reg();
+        ctx.emit(TirInstr::MoveOwned {
+            dst: moved_reg,
+            src: value_reg,
+            ty: ty.clone(),
+        });
+        moved_reg
+    } else {
+        value_reg
+    };
 
     // Bind the variable name to this register with its type
-    ctx.bind_var_typed(name, value_reg, ty.clone());
+    ctx.bind_var_typed(name, bound_reg, ty.clone());
 }
 
 /// Lower an assignment statement
@@ -91,6 +111,7 @@ fn lower_assignment<'src>(
     ctx: &mut LoweringContext<'src>,
     lhs: &Spanned<TExpr<'src>>,
     rhs: &Spanned<TExpr<'src>>,
+    ownership: OwnershipMode,
 ) {
     match &lhs.0 {
         TExpr::Variable { name, ty: _ } => {
@@ -101,11 +122,19 @@ fn lower_assignment<'src>(
             // Create a copy to a new register (SSA form)
             // Use the RHS type, not the LHS declared type (which may be a stale singleton)
             let new_reg = ctx.fresh_reg();
-            ctx.emit(TirInstr::Copy {
-                dst: new_reg,
-                src: rhs_reg,
-                ty: rhs.0.get_type().clone(),
-            });
+            if ownership == OwnershipMode::Owned && matches!(&rhs.0, TExpr::Variable { .. }) {
+                ctx.emit(TirInstr::MoveOwned {
+                    dst: new_reg,
+                    src: rhs_reg,
+                    ty: rhs.0.get_type().clone(),
+                });
+            } else {
+                ctx.emit(TirInstr::Copy {
+                    dst: new_reg,
+                    src: rhs_reg,
+                    ty: rhs.0.get_type().clone(),
+                });
+            }
 
             // Update the variable binding with the RHS type
             ctx.bind_var_typed(name, new_reg, rhs.0.get_type().clone());

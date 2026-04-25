@@ -192,9 +192,10 @@ pub fn lower_expr<'src>(
         TExpr::Call {
             func_name,
             args,
+            arg_ownerships,
             ownership,
             ty,
-        } => lower_call(ctx, func_name, args, *ownership, ty),
+        } => lower_call(ctx, func_name, args, arg_ownerships, *ownership, ty),
 
         TExpr::Index { base, index, ty } => lower_index(ctx, base, index, ty),
 
@@ -322,11 +323,29 @@ fn lower_call<'src>(
     ctx: &mut LoweringContext<'src>,
     func_name: &str,
     args: &[Spanned<TExpr<'src>>],
+    arg_ownerships: &[OwnershipMode],
     ownership: OwnershipMode,
     ty: &IType<'src>,
 ) -> VirtualReg {
     // Lower all arguments
-    let arg_regs: Vec<VirtualReg> = args.iter().map(|arg| lower_expr(ctx, arg)).collect();
+    let arg_regs: Vec<VirtualReg> = args
+        .iter()
+        .zip(arg_ownerships.iter())
+        .map(|(arg, arg_ownership)| {
+            let arg_reg = lower_expr(ctx, arg);
+            if *arg_ownership == OwnershipMode::Owned && matches!(&arg.0, TExpr::Variable { .. }) {
+                let moved_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::MoveOwned {
+                    dst: moved_reg,
+                    src: arg_reg,
+                    ty: arg.0.get_type().clone(),
+                });
+                moved_reg
+            } else {
+                arg_reg
+            }
+        })
+        .collect();
 
     // For unit-returning functions, don't try to capture the return value
     if matches!(ty, IType::Unit) {
@@ -334,6 +353,7 @@ fn lower_call<'src>(
             dst: None,
             func: func_name.to_string(),
             args: arg_regs,
+            arg_ownerships: arg_ownerships.to_vec(),
             ownership,
             result_ty: ty.clone(),
         });
@@ -352,6 +372,7 @@ fn lower_call<'src>(
             dst: Some(dst),
             func: func_name.to_string(),
             args: arg_regs,
+            arg_ownerships: arg_ownerships.to_vec(),
             ownership,
             result_ty: ty.clone(),
         });

@@ -166,7 +166,8 @@ pub fn check_stmt<'src>(
                 name: name.to_string(),
                 declared_ty: ann_ty,
                 value: tvalue,
-                checked_ty: value_ty,
+                checked_ty: value_ty.clone(),
+                ownership: explicit_transfer_ownership(ctx.bare_metal, &value.0, &value_ty),
             };
 
             Ok(((tstmt, span), new_ctx))
@@ -285,6 +286,7 @@ pub fn check_stmt<'src>(
                 declared_ty: ann_ty,
                 value: tvalue,
                 checked_ty: current_ty,
+                ownership: explicit_transfer_ownership(ctx.bare_metal, &value.0, &value_ty),
             };
 
             Ok(((tstmt, span), new_ctx))
@@ -393,6 +395,11 @@ pub fn check_stmt<'src>(
                     let tstmt = TStmt::Assignment {
                         lhs: (tlhs_expr, lhs.1),
                         rhs: trhs,
+                        ownership: if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name) {
+                            OwnershipMode::Plain
+                        } else {
+                            explicit_transfer_ownership(ctx.bare_metal, &rhs.0, &rhs_ty)
+                        },
                     };
 
                     Ok(((tstmt, span), new_ctx))
@@ -449,6 +456,7 @@ pub fn check_stmt<'src>(
                     let tstmt = TStmt::Assignment {
                         lhs: (tlhs_expr, lhs.1),
                         rhs: trhs,
+                        ownership: OwnershipMode::Plain,
                     };
 
                     // Add pointwise proposition: arr[i]...[k] == rhs.
@@ -1893,6 +1901,18 @@ fn apply_whole_value_move<'src>(
         return consume_owned_variable(&new_ctx, name);
     }
     new_ctx
+}
+
+fn explicit_transfer_ownership<'src>(
+    bare_metal: bool,
+    expr: &Expr<'src>,
+    ty: &IType<'src>,
+) -> OwnershipMode {
+    if !bare_metal && contains_array_type(ty) && matches!(expr, Expr::Variable(_)) {
+        OwnershipMode::Owned
+    } else {
+        OwnershipMode::Plain
+    }
 }
 
 fn expr_depends_on_region_local_array<'src>(

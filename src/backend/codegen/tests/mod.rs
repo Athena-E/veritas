@@ -100,6 +100,7 @@ fn test_pipeline_add_function() {
                         ty: IType::Int,
                     }),
                     checked_ty: IType::Int,
+                    ownership: OwnershipMode::Plain,
                 })],
                 trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                     name: "z".to_string(),
@@ -294,10 +295,12 @@ fn test_pipeline_multi_function_program() {
                                 value: Literal::Int(21),
                                 ty: IType::Int,
                             })],
+                            arg_ownerships: vec![OwnershipMode::Plain],
                             ownership: OwnershipMode::Plain,
                             ty: IType::Int,
                         }),
                         checked_ty: IType::Int,
+                        ownership: OwnershipMode::Plain,
                     })],
                     trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                         name: "result".to_string(),

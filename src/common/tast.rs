@@ -45,6 +45,7 @@ pub enum TExpr<'src> {
     Call {
         func_name: String,
         args: Vec<Spanned<Self>>,
+        arg_ownerships: Vec<OwnershipMode>,
         ownership: OwnershipMode,
         ty: IType<'src>,
     },
@@ -93,11 +94,13 @@ pub enum TStmt<'src> {
         declared_ty: IType<'src>,
         value: Spanned<TExpr<'src>>,
         checked_ty: IType<'src>,
+        ownership: OwnershipMode,
     },
 
     Assignment {
         lhs: Spanned<TExpr<'src>>,
         rhs: Spanned<TExpr<'src>>,
+        ownership: OwnershipMode,
     },
 
     Return {

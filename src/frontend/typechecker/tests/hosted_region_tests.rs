@@ -232,3 +232,50 @@ fn hosted_target_allows_reinitializing_moved_mutable_arrays() {
     let program = parse_program(src);
     check_program(&program).expect("reinitializing a moved mutable binding should be allowed");
 }
+
+#[test]
+fn hosted_owned_moves_lower_to_explicit_tir_moves() {
+    let src = r#"
+        fn consume(arr: [int; 4]) -> int {
+            arr[0]
+        }
+
+        fn main() -> int {
+            let arr: [int; 4] = [0; 4];
+            let moved: [int; 4] = arr;
+            consume(moved)
+        }
+    "#;
+
+    let program = parse_program(src);
+    let tast = check_program(&program).expect("hosted target should typecheck explicit moves");
+    let tir = lower_program(&tast);
+    let main = tir
+        .functions
+        .iter()
+        .find(|func| func.name == "main")
+        .expect("lowered main should exist");
+    let entry = main
+        .blocks
+        .get(&main.entry_block)
+        .expect("main entry block should exist");
+
+    assert!(entry
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::MoveOwned { .. })));
+
+    let call = entry
+        .instructions
+        .iter()
+        .find_map(|instr| match instr {
+            TirInstr::Call {
+                func,
+                arg_ownerships,
+                ..
+            } if func == "consume" => Some(arg_ownerships.clone()),
+            _ => None,
+        })
+        .expect("main should contain a call to consume");
+    assert_eq!(call, vec![OwnershipMode::Owned]);
+}

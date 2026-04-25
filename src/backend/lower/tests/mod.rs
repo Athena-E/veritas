@@ -89,6 +89,7 @@ fn test_lower_function_with_let() {
                     ty: IType::Int,
                 }),
                 checked_ty: IType::Int,
+                ownership: crate::common::ownership::OwnershipMode::Plain,
             })],
             trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                 name: "z".to_string(),

@@ -24,6 +24,13 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
+    /// dst = move src (ownership transfer)
+    MoveOwned {
+        dst: VirtualReg,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
     /// dst = lhs op rhs
     BinOp {
         dst: VirtualReg,
@@ -63,6 +70,7 @@ pub enum TirInstr<'src> {
         dst: Option<VirtualReg>,
         func: String,
         args: Vec<VirtualReg>,
+        arg_ownerships: Vec<OwnershipMode>,
         ownership: OwnershipMode,
         result_ty: IType<'src>,
     },
@@ -98,6 +106,7 @@ impl<'src> TirInstr<'src> {
         match self {
             TirInstr::LoadImm { dst, .. } => Some(*dst),
             TirInstr::Copy { dst, .. } => Some(*dst),
+            TirInstr::MoveOwned { dst, .. } => Some(*dst),
             TirInstr::BinOp { dst, .. } => Some(*dst),
             TirInstr::UnaryOp { dst, .. } => Some(*dst),
             TirInstr::ArrayLoad { dst, .. } => Some(*dst),
@@ -116,6 +125,7 @@ impl<'src> TirInstr<'src> {
         match self {
             TirInstr::LoadImm { ty, .. } => Some(ty),
             TirInstr::Copy { ty, .. } => Some(ty),
+            TirInstr::MoveOwned { ty, .. } => Some(ty),
             TirInstr::BinOp { ty, .. } => Some(ty),
             TirInstr::UnaryOp { ty, .. } => Some(ty),
             TirInstr::ArrayLoad { element_ty, .. } => Some(element_ty),

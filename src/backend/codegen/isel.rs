@@ -38,6 +38,14 @@ pub fn lower_instruction<'src>(
             });
         }
 
+        TirInstr::MoveOwned { dst, src, ty } => {
+            instrs.push(DtalInstr::MovReg {
+                dst: Reg::Virtual(*dst),
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
         TirInstr::BinOp {
             dst,
             op,
@@ -95,6 +103,7 @@ pub fn lower_instruction<'src>(
             dst,
             func,
             args,
+            arg_ownerships: _,
             ownership: _,
             result_ty,
         } => {
