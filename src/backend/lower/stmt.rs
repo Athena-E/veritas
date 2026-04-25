@@ -338,7 +338,7 @@ fn lower_for_loop<'src>(
     ctx.emit(TirInstr::LoadImm {
         dst: one_reg,
         value: 1,
-        ty: var_ty.clone(),
+        ty: IType::SingletonInt(crate::common::types::IValue::Int(1)),
     });
 
     let i_next_reg = ctx.fresh_reg();

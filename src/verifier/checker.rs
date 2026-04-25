@@ -1030,11 +1030,21 @@ fn verify_type_annotation(
         // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
+        let is_pointer_refinement = matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
+            && matches!(
+                ty,
+                DtalType::Array { .. }
+                    | DtalType::Ref(_)
+                    | DtalType::RefMut(_)
+                    | DtalType::Master(_)
+            );
+
         let is_prologue_refinement =
             matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
                 && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
+            && !is_pointer_refinement
             && !is_prologue_refinement
             && !types_compatible_with_constraints(existing_ty, ty, &state.constraints)
         {
