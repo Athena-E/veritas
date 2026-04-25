@@ -3,8 +3,21 @@ name = "veritas"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+
+[[bin]]
+name = "veritas"
+path = "src/main.rs"
+test = false
+bench = false
+
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+incremental = true
 
 [dependencies]
 ariadne = "0.5.1"
