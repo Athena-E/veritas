@@ -370,6 +370,26 @@ fn verify_state_coercion(
         }
     }
 
+    for reg in &target.owned_registers {
+        if !current.owned_registers.contains(reg) {
+            return Err(VerifyError::JoinMismatch {
+                block: target_label.to_string(),
+                reg: *reg,
+                expected: current
+                    .register_types
+                    .get(reg)
+                    .cloned()
+                    .unwrap_or(crate::backend::dtal::types::DtalType::Int),
+                actual: target
+                    .register_types
+                    .get(reg)
+                    .cloned()
+                    .unwrap_or(crate::backend::dtal::types::DtalType::Int),
+                from_block: source_block.to_string(),
+            });
+        }
+    }
+
     // Check constraint entailment: each constraint declared in the target's
     // entry state must be provable from the current state's constraints.
     // This eliminates trust on .assume directives — they become verified
@@ -515,6 +535,138 @@ mod tests {
                 instructions,
             }],
         }
+    }
+
+    #[test]
+    fn move_owned_and_drop_owned_update_owned_register_state() {
+        let mut state = TypeState::new();
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+
+        let program = make_program(vec![]);
+
+        verify_instruction(
+            &DtalInstr::MoveOwned {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty.clone(),
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert!(!state.owned_registers.contains(&v(0)));
+        assert!(state.owned_registers.contains(&v(1)));
+
+        verify_instruction(
+            &DtalInstr::DropOwned {
+                src: v(1),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert!(!state.owned_registers.contains(&v(1)));
+    }
+
+    #[test]
+    fn dtal_text_roundtrip_preserves_owned_annotations() {
+        use crate::backend::emit::emit_program;
+
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut entry_state = TypeState::new();
+        entry_state.register_types.insert(v(0), array_ty.clone());
+        entry_state.owned_registers.insert(v(0));
+
+        let program = make_program(vec![DtalFunction {
+            name: "owned_ops".to_string(),
+            params: vec![],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![DtalBlock {
+                label: ".entry".to_string(),
+                entry_state,
+                instructions: vec![
+                    DtalInstr::MoveOwned {
+                        dst: v(1),
+                        src: v(0),
+                        ty: array_ty.clone(),
+                    },
+                    DtalInstr::Call {
+                        target: "owned_callee".to_string(),
+                        return_ty: array_ty.clone(),
+                        ownership: crate::common::ownership::OwnershipMode::Owned,
+                    },
+                    DtalInstr::DropOwned {
+                        src: v(1),
+                        ty: array_ty,
+                    },
+                    DtalInstr::Ret,
+                ],
+            }],
+        }]);
+
+        let text = emit_program(&program);
+        let parsed = crate::backend::dtal::parser::parse_dtal(&text).unwrap();
+        let block = &parsed.functions[0].blocks[0];
+
+        assert!(block.entry_state.owned_registers.contains(&v(0)));
+        assert!(matches!(
+            &block.instructions[0],
+            DtalInstr::MoveOwned { dst, src, .. } if *dst == v(1) && *src == v(0)
+        ));
+        assert!(matches!(
+            &block.instructions[1],
+            DtalInstr::Call {
+                ownership: crate::common::ownership::OwnershipMode::Owned,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &block.instructions[2],
+            DtalInstr::DropOwned { src, .. } if *src == v(1)
+        ));
+    }
+
+    #[test]
+    fn owned_call_marks_return_registers_owned() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let callee = make_func("owned_callee", vec![], array_ty.clone(), vec![make_block(".entry", vec![DtalInstr::Ret])]);
+        let program = make_program(vec![callee]);
+        let mut state = TypeState::new();
+
+        verify_instruction(
+            &DtalInstr::Call {
+                target: "owned_callee".to_string(),
+                return_ty: array_ty,
+                ownership: crate::common::ownership::OwnershipMode::Owned,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert!(state.owned_registers.contains(&r0()));
+        assert!(state
+            .owned_registers
+            .contains(&Reg::Physical(PhysicalReg::LR)));
     }
 
     // ========================================================================
@@ -1237,6 +1389,7 @@ mod tests {
                     DtalInstr::Call {
                         target: "requires_positive".to_string(),
                         return_ty: DtalType::Int,
+                        ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
                     DtalInstr::Ret,
                 ],
@@ -1830,6 +1983,7 @@ mod tests {
                     DtalInstr::Call {
                         target: "returns_bool".to_string(),
                         return_ty: DtalType::Int, // wrong annotation — signature says Bool
+                        ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
                     // r0 should have Bool (from callee signature), not Int (from annotation)
                     DtalInstr::Ret,
@@ -1874,6 +2028,7 @@ mod tests {
                     DtalInstr::Call {
                         target: "returns_bool".to_string(),
                         return_ty: DtalType::Int, // annotation lies: says Int
+                        ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
                     // Verifier derives Bool from callee signature → r0 is Bool
                     DtalInstr::Ret,
@@ -2241,6 +2396,7 @@ mod tests {
                     DtalInstr::Call {
                         target: "get_value".to_string(),
                         return_ty: DtalType::Int,
+                        ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
                     // Return value is in LR; move to r0 for subsequent use
                     DtalInstr::MovReg {

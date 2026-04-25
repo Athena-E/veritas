@@ -111,6 +111,7 @@ fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
                     || matches!(src, Reg::Physical(PhysicalReg::R12))
             }
             DtalInstr::MovReg { dst, src, .. }
+            | DtalInstr::MoveOwned { dst, src, .. }
             | DtalInstr::Neg { dst, src, .. }
             | DtalInstr::Not { dst, src, .. } => {
                 matches!(dst, Reg::Physical(PhysicalReg::R12))
@@ -159,6 +160,7 @@ fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
             }
             DtalInstr::TypeAnnotation { reg, .. } => matches!(reg, Reg::Physical(PhysicalReg::R12)),
             DtalInstr::ConstraintAssert { .. }
+            | DtalInstr::DropOwned { .. }
             | DtalInstr::Call { .. }
             | DtalInstr::Jmp { .. }
             | DtalInstr::Branch { .. }
@@ -383,7 +385,7 @@ impl<'a> FunctionLowerer<'a> {
                 );
             }
 
-            DtalInstr::MovReg { dst, src, .. } => {
+            DtalInstr::MovReg { dst, src, .. } | DtalInstr::MoveOwned { dst, src, .. } => {
                 self.lower_mov_reg(*dst, *src);
             }
 
@@ -622,7 +624,9 @@ impl<'a> FunctionLowerer<'a> {
             }
 
             // Annotations don't generate code
-            DtalInstr::TypeAnnotation { .. } | DtalInstr::ConstraintAssert { .. } => {}
+            DtalInstr::TypeAnnotation { .. }
+            | DtalInstr::ConstraintAssert { .. }
+            | DtalInstr::DropOwned { .. } => {}
 
             // Physical allocation instructions — these are only present in the
             // physical DTAL pipeline (verify-after-regalloc). The current x86

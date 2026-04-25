@@ -540,6 +540,7 @@ fn allocate_instruction(
     match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
+        | DtalInstr::MoveOwned { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
         | DtalInstr::ShlImm { dst, .. }
@@ -585,18 +586,26 @@ fn allocate_instruction(
             }
         }
 
-        DtalInstr::MovReg { dst, src, ty } => {
+        DtalInstr::MovReg { dst, src, ty } | DtalInstr::MoveOwned { dst, src, ty } => {
             let src_loc = resolve_reg(*src, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
 
             match (&src_loc, &dst_loc) {
                 (PhysLoc::Reg(s), PhysLoc::Reg(d)) if s == d => {} // nop
                 (PhysLoc::Reg(s), PhysLoc::Reg(d)) => {
-                    instrs.push(DtalInstr::MovReg {
-                        dst: *d,
-                        src: *s,
-                        ty: ty.clone(),
-                    });
+                    let lowered = match instr {
+                        DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                        _ => DtalInstr::MovReg {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                    };
+                    instrs.push(lowered);
                 }
                 (PhysLoc::Reg(s), PhysLoc::Spill(offset)) => {
                     instrs.push(DtalInstr::SpillStore {
@@ -622,6 +631,27 @@ fn allocate_instruction(
                     instrs.push(DtalInstr::SpillStore {
                         src: RAX,
                         offset: *dst_off,
+                        ty: ty.clone(),
+                    });
+                }
+            }
+        }
+
+        DtalInstr::DropOwned { src, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            match src_loc {
+                PhysLoc::Reg(r) => instrs.push(DtalInstr::DropOwned {
+                    src: r,
+                    ty: ty.clone(),
+                }),
+                PhysLoc::Spill(offset) => {
+                    instrs.push(DtalInstr::SpillLoad {
+                        dst: R11,
+                        offset,
+                        ty: ty.clone(),
+                    });
+                    instrs.push(DtalInstr::DropOwned {
+                        src: R11,
                         ty: ty.clone(),
                     });
                 }
@@ -896,7 +926,11 @@ fn allocate_instruction(
             });
         }
 
-        DtalInstr::Call { target, return_ty } => {
+        DtalInstr::Call {
+            target,
+            return_ty,
+            ownership,
+        } => {
             // Save caller-saved registers BEFORE argument setup.
             // The argument-setup moves (mov r0, ...; mov r1, ...) have
             // already been emitted to `instrs`. We need to insert saves
@@ -942,6 +976,7 @@ fn allocate_instruction(
             instrs.push(DtalInstr::Call {
                 target: target.clone(),
                 return_ty: return_ty.clone(),
+                ownership: *ownership,
             });
 
             // Return value is in rax (LR). Move to the destination register

@@ -8,9 +8,10 @@ use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
+use crate::common::ownership::OwnershipMode;
 use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Result of dataflow analysis
 #[allow(dead_code)]
@@ -43,6 +44,9 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
         // Initialize with function parameters
         for (reg, ty) in &func.params {
             entry_state.register_types.insert(*reg, ty.clone());
+            if matches!(ty, DtalType::Array { .. }) {
+                entry_state.owned_registers.insert(*reg);
+            }
         }
 
         // Add precondition to constraints
@@ -320,7 +324,6 @@ fn join_states(
     // Then, for constraints in some but not all predecessors, use Z3 to check
     // if they're provable from the other predecessors' contexts (e.g., a loop
     // invariant that's vacuously true on the entry edge).
-    use std::collections::HashSet;
     let mut kept: HashSet<usize> = HashSet::new();
 
     // Collect all unique constraints from all predecessors
@@ -382,6 +385,49 @@ fn join_states(
                     result.proven_assertions.push(assertion.clone());
                 }
             }
+        }
+    }
+
+    for reg in result.register_types.keys() {
+        if pred_labels.iter().all(|label| {
+            get_pred_state(label)
+                .map(|state| state.owned_registers.contains(reg))
+                .unwrap_or(false)
+        }) {
+            result.owned_registers.insert(*reg);
+        }
+    }
+
+    let stack_len = pred_labels
+        .iter()
+        .filter_map(get_pred_state)
+        .next()
+        .map(|state| state.owned_stack.len());
+    let same_stack_shape = pred_labels.iter().all(|label| {
+        get_pred_state(label)
+            .map(|state| Some(state.owned_stack.len()) == stack_len)
+            .unwrap_or(false)
+    });
+    if same_stack_shape {
+        result.owned_stack = (0..stack_len.unwrap_or(0))
+            .map(|idx| {
+                pred_labels.iter().all(|label| {
+                    get_pred_state(label)
+                        .and_then(|state| state.owned_stack.get(idx))
+                        .copied()
+                        .unwrap_or(false)
+                })
+            })
+            .collect();
+    }
+
+    for offset in result.spill_types.keys() {
+        if pred_labels.iter().all(|label| {
+            get_pred_state(label)
+                .map(|state| state.owned_spills.contains(offset))
+                .unwrap_or(false)
+        }) {
+            result.owned_spills.insert(*offset);
         }
     }
 
@@ -493,6 +539,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .constraints
                 .push(Constraint::Eq(reg_expr, IndexExpr::Const(*imm)));
+            state.owned_registers.remove(dst);
         }
         DtalInstr::MovReg { dst, src, .. } => {
             let ty = state
@@ -501,6 +548,16 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .cloned()
                 .unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, ty);
+            transfer_owned(*src, *dst, state);
+        }
+        DtalInstr::MoveOwned { dst, src, .. } => {
+            let ty = state
+                .register_types
+                .get(src)
+                .cloned()
+                .unwrap_or(DtalType::Int);
+            state.register_types.insert(*dst, ty);
+            transfer_owned(*src, *dst, state);
         }
         DtalInstr::BinOp {
             op,
@@ -594,6 +651,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 }
             };
             state.register_types.insert(*dst, derived_ty);
+            state.owned_registers.remove(dst);
         }
         DtalInstr::AddImm { dst, src, imm, ty } => {
             let src_ty = state
@@ -611,6 +669,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                     .register_types
                     .insert(*dst, DtalType::SingletonInt(result_idx));
             }
+            state.owned_registers.remove(dst);
         }
         DtalInstr::Load { dst, base, ty, .. } => {
             // Derive element type from array base when available
@@ -621,22 +680,32 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             } else {
                 ty.clone()
             };
-            state.register_types.insert(*dst, derived_ty);
+            state.register_types.insert(*dst, derived_ty.clone());
+            if matches!(derived_ty, DtalType::Array { .. }) {
+                state.owned_registers.insert(*dst);
+            } else {
+                state.owned_registers.remove(dst);
+            }
         }
         DtalInstr::LoadOp { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
+            state.owned_registers.remove(dst);
         }
         DtalInstr::SetCC { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Bool);
+            state.owned_registers.remove(dst);
         }
         DtalInstr::Not { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Bool);
+            state.owned_registers.remove(dst);
         }
         DtalInstr::Neg { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
+            state.owned_registers.remove(dst);
         }
         DtalInstr::ShlImm { dst, ty, .. } | DtalInstr::ShrImm { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
+            state.owned_registers.remove(dst);
         }
         DtalInstr::TypeAnnotation { reg, ty } => {
             state.register_types.insert(*reg, ty.clone());
@@ -644,15 +713,39 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::Pop { dst, .. } => {
             let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, popped_ty);
+            if state.owned_stack.pop().unwrap_or(false) {
+                state.owned_registers.insert(*dst);
+            } else {
+                state.owned_registers.remove(dst);
+            }
         }
         DtalInstr::Alloca { dst, ty, .. } => {
             state.register_types.insert(*dst, ty.clone());
+            if matches!(ty, DtalType::Array { .. }) {
+                state.owned_registers.insert(*dst);
+            } else {
+                state.owned_registers.remove(dst);
+            }
         }
-        DtalInstr::Call { return_ty, .. } => {
+        DtalInstr::Call {
+            return_ty,
+            ownership,
+            ..
+        } => {
             use crate::backend::dtal::regs::PhysicalReg;
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
+            state
+                .register_types
+                .insert(Reg::Physical(PhysicalReg::LR), return_ty.clone());
+            if *ownership == OwnershipMode::Owned {
+                state.owned_registers.insert(Reg::Physical(PhysicalReg::R0));
+                state.owned_registers.insert(Reg::Physical(PhysicalReg::LR));
+            } else {
+                state.owned_registers.remove(&Reg::Physical(PhysicalReg::R0));
+                state.owned_registers.remove(&Reg::Physical(PhysicalReg::LR));
+            }
         }
         DtalInstr::Cmp { lhs, rhs } => {
             state.last_cmp = Some(CmpOperands::RegReg(*lhs, *rhs));
@@ -667,6 +760,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .cloned()
                 .unwrap_or(DtalType::Int);
             state.stack.push(src_ty);
+            state.owned_stack.push(state.owned_registers.contains(src));
         }
         DtalInstr::Store { .. } => {}
         DtalInstr::ConstraintAssert { constraint, .. } => {
@@ -687,6 +781,11 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .cloned()
                 .unwrap_or(DtalType::Int);
             state.register_types.insert(rdx, rax_ty);
+            if state.owned_registers.contains(&rax) {
+                state.owned_registers.insert(rdx);
+            } else {
+                state.owned_registers.remove(&rdx);
+            }
         }
         DtalInstr::Idiv { src: _ } => {
             use crate::backend::dtal::regs::PhysicalReg;
@@ -696,14 +795,28 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R2), DtalType::Int);
+            state.owned_registers.remove(&Reg::Physical(PhysicalReg::LR));
+            state.owned_registers.remove(&Reg::Physical(PhysicalReg::R2));
         }
         DtalInstr::PortIn { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Int);
+            state.owned_registers.remove(dst);
         }
         DtalInstr::PortOut { .. } => {}
-        DtalInstr::SpillStore { .. } => {}
-        DtalInstr::SpillLoad { dst, ty, .. } => {
+        DtalInstr::SpillStore { src, offset, .. } => {
+            if state.owned_registers.contains(src) {
+                state.owned_spills.insert(*offset);
+            } else {
+                state.owned_spills.remove(offset);
+            }
+        }
+        DtalInstr::SpillLoad { dst, ty, offset } => {
             state.register_types.insert(*dst, ty.clone());
+            if state.owned_spills.contains(offset) {
+                state.owned_registers.insert(*dst);
+            } else {
+                state.owned_registers.remove(dst);
+            }
         }
         DtalInstr::Prologue { .. } => {
             // Mirror the checker's Prologue handling: define all physical
@@ -728,9 +841,22 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 state
                     .register_types
                     .insert(Reg::Physical(*preg), DtalType::Int);
+                state.owned_registers.remove(&Reg::Physical(*preg));
             }
         }
         DtalInstr::Epilogue { .. } => {}
+        DtalInstr::DropOwned { src, .. } => {
+            state.owned_registers.remove(src);
+        }
+    }
+}
+
+fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
+    let owned = state.owned_registers.remove(&src);
+    if owned {
+        state.owned_registers.insert(dst);
+    } else {
+        state.owned_registers.remove(&dst);
     }
 }
 
@@ -756,6 +882,9 @@ fn states_equal(a: &TypeState, b: &TypeState) -> bool {
         && a.constraints.iter().all(|c| b.constraints.contains(c))
         && a.stack.len() == b.stack.len()
         && a.stack.iter().zip(&b.stack).all(|(a, b)| a == b)
+        && a.owned_registers == b.owned_registers
+        && a.owned_stack == b.owned_stack
+        && a.owned_spills == b.owned_spills
         && a.proven_assertions.len() == b.proven_assertions.len()
         && a.proven_assertions
             .iter()

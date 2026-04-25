@@ -359,6 +359,7 @@ fn emit_region_enter(instrs: &mut Vec<DtalInstr>) {
     instrs.push(DtalInstr::Call {
         target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
         return_ty: DtalType::Int,
+        ownership: OwnershipMode::Plain,
     });
     instrs.push(DtalInstr::MovReg {
         dst: Reg::Physical(PhysicalReg::R12),
@@ -378,6 +379,7 @@ fn emit_region_leave(instrs: &mut Vec<DtalInstr>) {
     instrs.push(DtalInstr::Call {
         target: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
         return_ty: DtalType::Unit,
+        ownership: OwnershipMode::Plain,
     });
 }
 

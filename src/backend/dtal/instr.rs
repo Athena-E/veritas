@@ -5,7 +5,8 @@
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use std::collections::HashMap;
+use crate::common::ownership::OwnershipMode;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Operands of the most recent comparison instruction
@@ -40,6 +41,12 @@ pub struct TypeState {
     /// Types stored at stack spill slot offsets (post-regalloc).
     /// Maps frame offset (negative from rbp) to the type stored there.
     pub spill_types: HashMap<i32, DtalType>,
+    /// Registers currently holding owned values.
+    pub owned_registers: HashSet<Reg>,
+    /// Ownership state for stack values tracked by `Push`/`Pop`.
+    pub owned_stack: Vec<bool>,
+    /// Stack spill slots currently holding owned values.
+    pub owned_spills: HashSet<i32>,
 }
 
 impl TypeState {
@@ -52,6 +59,9 @@ impl TypeState {
             array_versions: HashMap::new(),
             proven_assertions: Vec::new(),
             spill_types: HashMap::new(),
+            owned_registers: HashSet::new(),
+            owned_stack: Vec::new(),
+            owned_spills: HashSet::new(),
         }
     }
 }
@@ -163,6 +173,8 @@ pub enum DtalInstr {
     MovImm { dst: Reg, imm: i128, ty: DtalType },
     /// mov rd, rs
     MovReg { dst: Reg, src: Reg, ty: DtalType },
+    /// move_owned rd, rs
+    MoveOwned { dst: Reg, src: Reg, ty: DtalType },
     /// load rd, [base + offset]
     Load {
         dst: Reg,
@@ -234,7 +246,11 @@ pub enum DtalInstr {
     /// branch if condition
     Branch { cond: CmpOp, target: String },
     /// call function
-    Call { target: String, return_ty: DtalType },
+    Call {
+        target: String,
+        return_ty: DtalType,
+        ownership: OwnershipMode,
+    },
     /// ret
     Ret,
 
@@ -245,6 +261,8 @@ pub enum DtalInstr {
     Pop { dst: Reg, ty: DtalType },
     /// alloca rd, size
     Alloca { dst: Reg, size: u32, ty: DtalType },
+    /// drop_owned rs
+    DropOwned { src: Reg, ty: DtalType },
 
     // Port I/O (bare-metal hardware access)
     /// in al, dx: read byte from I/O port in src to dst

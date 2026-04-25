@@ -10,6 +10,7 @@ use crate::backend::dtal::regs::{PhysicalReg, Reg};
 use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
+use crate::common::ownership::OwnershipMode;
 
 /// Lower a TIR instruction to DTAL instructions
 ///
@@ -39,16 +40,18 @@ pub fn lower_instruction<'src>(
         }
 
         TirInstr::MoveOwned { dst, src, ty } => {
-            instrs.push(DtalInstr::MovReg {
+            instrs.push(DtalInstr::MoveOwned {
                 dst: Reg::Virtual(*dst),
                 src: Reg::Virtual(*src),
                 ty: DtalType::from_itype(ty),
             });
         }
 
-        TirInstr::DropOwned { src: _, ty: _ } => {
-            // Ownership drops are explicit in TIR, but hosted code still reclaims
-            // storage through region teardown rather than per-object destruction.
+        TirInstr::DropOwned { src, ty } => {
+            instrs.push(DtalInstr::DropOwned {
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
         }
 
         TirInstr::BinOp {
@@ -109,10 +112,10 @@ pub fn lower_instruction<'src>(
             func,
             args,
             arg_ownerships: _,
-            ownership: _,
+            ownership,
             result_ty,
         } => {
-            lower_call(instrs, dst.as_ref().copied(), func, args, result_ty);
+            lower_call(instrs, dst.as_ref().copied(), func, args, *ownership, result_ty);
         }
 
         TirInstr::AllocArray {
@@ -163,6 +166,7 @@ pub fn lower_instruction<'src>(
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
                     return_ty: DtalType::Int,
+                    ownership: OwnershipMode::Plain,
                 });
                 instrs.push(DtalInstr::MovReg {
                     dst: Reg::Virtual(*dst),
@@ -181,6 +185,7 @@ pub fn lower_instruction<'src>(
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
                     return_ty: DtalType::Int,
+                    ownership: OwnershipMode::Plain,
                 });
                 instrs.push(DtalInstr::MovReg {
                     dst: Reg::Virtual(*dst),
@@ -200,6 +205,7 @@ pub fn lower_instruction<'src>(
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
                     return_ty: DtalType::Unit,
+                    ownership: OwnershipMode::Plain,
                 });
             }
         }
@@ -431,6 +437,7 @@ fn lower_call<'src>(
     dst: Option<crate::backend::dtal::VirtualReg>,
     func: &str,
     args: &[crate::backend::dtal::VirtualReg],
+    ownership: OwnershipMode,
     result_ty: &crate::common::types::IType<'src>,
 ) {
     use crate::backend::dtal::regs::PhysicalReg;
@@ -470,15 +477,24 @@ fn lower_call<'src>(
     instrs.push(DtalInstr::Call {
         target: func.to_string(),
         return_ty: dtal_result_ty.clone(),
+        ownership,
     });
 
     // Move result from r0 to destination
     if let Some(dst_reg) = dst {
-        instrs.push(DtalInstr::MovReg {
-            dst: Reg::Virtual(dst_reg),
-            src: Reg::Physical(PhysicalReg::R0),
-            ty: dtal_result_ty,
-        });
+        if ownership == OwnershipMode::Owned {
+            instrs.push(DtalInstr::MoveOwned {
+                dst: Reg::Virtual(dst_reg),
+                src: Reg::Physical(PhysicalReg::R0),
+                ty: dtal_result_ty,
+            });
+        } else {
+            instrs.push(DtalInstr::MovReg {
+                dst: Reg::Virtual(dst_reg),
+                src: Reg::Physical(PhysicalReg::R0),
+                ty: dtal_result_ty,
+            });
+        }
     }
 }
 

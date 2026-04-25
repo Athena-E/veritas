@@ -87,6 +87,18 @@ fn emit_block(output: &mut String, block: &DtalBlock) {
         }
         writeln!(output, "}}").unwrap();
     }
+    if !block.entry_state.owned_registers.is_empty() {
+        let mut regs: Vec<_> = block.entry_state.owned_registers.iter().collect();
+        regs.sort_by_key(|reg| emit_reg(reg));
+        write!(output, "    .owned {{").unwrap();
+        for (i, reg) in regs.iter().enumerate() {
+            if i > 0 {
+                write!(output, ", ").unwrap();
+            }
+            write!(output, "{}", emit_reg(reg)).unwrap();
+        }
+        writeln!(output, "}}").unwrap();
+    }
     for constraint in &block.entry_state.constraints {
         writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
     }
@@ -115,6 +127,17 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             writeln!(
                 output,
                 "    mov {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::MoveOwned { dst, src, ty } => {
+            writeln!(
+                output,
+                "    move_owned {}, {}    : {}",
                 emit_reg(dst),
                 emit_reg(src),
                 emit_type(ty)
@@ -267,8 +290,23 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             writeln!(output, "    b{} {}", emit_cmpop(cond), target).unwrap();
         }
 
-        DtalInstr::Call { target, return_ty } => {
-            writeln!(output, "    call {}    : {}", target, emit_type(return_ty)).unwrap();
+        DtalInstr::Call {
+            target,
+            return_ty,
+            ownership,
+        } => {
+            let mnemonic = match ownership {
+                crate::common::ownership::OwnershipMode::Plain => "call",
+                crate::common::ownership::OwnershipMode::Owned => "call_owned",
+            };
+            writeln!(
+                output,
+                "    {} {}    : {}",
+                mnemonic,
+                target,
+                emit_type(return_ty)
+            )
+            .unwrap();
         }
 
         DtalInstr::Ret => {
@@ -289,6 +327,16 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
                 "    alloca {}, {}    : {}",
                 emit_reg(dst),
                 size,
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::DropOwned { src, ty } => {
+            writeln!(
+                output,
+                "    drop_owned {}    : {}",
+                emit_reg(src),
                 emit_type(ty)
             )
             .unwrap();
