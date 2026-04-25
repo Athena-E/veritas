@@ -95,6 +95,7 @@ pub fn lower_instruction<'src>(
             dst,
             func,
             args,
+            ownership: _,
             result_ty,
         } => {
             lower_call(instrs, dst.as_ref().copied(), func, args, result_ty);

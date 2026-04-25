@@ -80,6 +80,10 @@ pub struct TypingContext<'src> {
     // storage. These names are local to the region and therefore safe to
     // retarget to region-local arrays without escaping.
     region_scoped_arrays: Vec<HashSet<String>>,
+
+    // Bindings whose ownership has been moved away and therefore cannot be
+    // read again until they are reinitialized.
+    moved_bindings: HashSet<String>,
 }
 
 impl<'src> TypingContext<'src> {
@@ -98,6 +102,7 @@ impl<'src> TypingContext<'src> {
             region_depth: 0,
             region_local_arrays: Vec::new(),
             region_scoped_arrays: Vec::new(),
+            moved_bindings: HashSet::new(),
         }
     }
 
@@ -117,6 +122,7 @@ impl<'src> TypingContext<'src> {
             region_depth: 0,
             region_local_arrays: Vec::new(),
             region_scoped_arrays: Vec::new(),
+            moved_bindings: HashSet::new(),
         }
     }
 
@@ -147,6 +153,7 @@ impl<'src> TypingContext<'src> {
 
         merged.region_local_arrays = self.region_local_arrays.clone();
         merged.region_scoped_arrays = self.region_scoped_arrays.clone();
+        merged.moved_bindings = region_ctx.moved_bindings.clone();
         merged
     }
 
@@ -252,12 +259,16 @@ impl<'src> TypingContext<'src> {
 
     pub fn with_immutable(&self, name: String, ty: IType<'src>) -> Self {
         let mut new_ctx = self.clone();
-        new_ctx.gamma.insert(name, ty);
+        new_ctx.gamma.insert(name.clone(), ty);
+        new_ctx.moved_bindings.remove(&name);
         new_ctx
     }
 
     #[allow(dead_code)]
     pub fn lookup_immutable(&self, name: &str) -> Option<&IType<'src>> {
+        if self.moved_bindings.contains(name) {
+            return None;
+        }
         self.gamma.get(name)
     }
 
@@ -271,12 +282,13 @@ impl<'src> TypingContext<'src> {
     ) -> Self {
         let mut new_ctx = self.clone();
         new_ctx.delta.insert(
-            name,
+            name.clone(),
             MutableBinding {
                 current_type,
                 master_type,
             },
         );
+        new_ctx.moved_bindings.remove(&name);
         new_ctx
     }
 
@@ -294,6 +306,7 @@ impl<'src> TypingContext<'src> {
                 master_type: binding.master_type.clone(),
             },
         );
+        new_ctx.moved_bindings.remove(name);
 
         Ok(new_ctx)
     }
@@ -309,6 +322,9 @@ impl<'src> TypingContext<'src> {
 
     // Returns the type and whether it's immutable or mutable.
     pub fn lookup_var(&self, name: &str) -> Option<VarBinding<'src>> {
+        if self.moved_bindings.contains(name) {
+            return None;
+        }
         // Check immutable bindings first
         if let Some(ty) = self.gamma.get(name) {
             return Some(VarBinding::Immutable(ty.clone()));
@@ -320,6 +336,18 @@ impl<'src> TypingContext<'src> {
         }
 
         None
+    }
+
+    pub fn mark_moved(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if new_ctx.gamma.contains_key(name) || new_ctx.delta.contains_key(name) {
+            new_ctx.moved_bindings.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn is_moved(&self, name: &str) -> bool {
+        self.moved_bindings.contains(name)
     }
 
     // Function signatures
@@ -411,6 +439,10 @@ impl<'src> TypingContext<'src> {
                 joined.region_scoped_arrays.push(scope.clone());
             }
         }
+
+        joined
+            .moved_bindings
+            .extend(ctx2.moved_bindings.iter().cloned());
 
         joined
     }

@@ -31,7 +31,7 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
             lower_assignment(ctx, lhs, rhs);
         }
 
-        TStmt::Return { expr } => {
+        TStmt::Return { expr, ownership: _ } => {
             lower_return(ctx, expr);
         }
 

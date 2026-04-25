@@ -111,6 +111,7 @@ fn test_context_with_function() {
             ("y".to_string(), IType::Bool),
         ],
         return_type: IType::Unit,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         span: SimpleSpan::new(0, 0),

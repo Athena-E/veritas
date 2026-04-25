@@ -6,6 +6,7 @@ use crate::backend::codegen::codegen_program;
 use crate::backend::emit::emit_program;
 use crate::backend::lower::lower_program;
 use crate::common::ast::{BinOp, Literal};
+use crate::common::ownership::OwnershipMode;
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::IType;
@@ -27,6 +28,7 @@ fn test_pipeline_identity_function() {
                 ty: IType::Int,
             }],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -77,6 +79,7 @@ fn test_pipeline_add_function() {
                 },
             ],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -131,6 +134,7 @@ fn test_pipeline_constant_function() {
             name: "const_five".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -168,6 +172,7 @@ fn test_pipeline_conditional_function() {
                 ty: IType::Int,
             }],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -251,6 +256,7 @@ fn test_pipeline_multi_function_program() {
                     ty: IType::Int,
                 }],
                 return_type: IType::Int,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 body: TFunctionBody {
@@ -274,6 +280,7 @@ fn test_pipeline_multi_function_program() {
                 name: "main".to_string(),
                 parameters: vec![],
                 return_type: IType::Int,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 body: TFunctionBody {
@@ -287,6 +294,7 @@ fn test_pipeline_multi_function_program() {
                                 value: Literal::Int(21),
                                 ty: IType::Int,
                             })],
+                            ownership: OwnershipMode::Plain,
                             ty: IType::Int,
                         }),
                         checked_ty: IType::Int,
@@ -342,6 +350,7 @@ fn test_pipeline_function_with_postcondition() {
             name: "five".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: Some(postcondition),
             body: TFunctionBody {
@@ -409,6 +418,7 @@ fn test_pipeline_function_with_inequality_postcondition() {
             name: "positive".to_string(),
             parameters: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: Some(postcondition),
             body: TFunctionBody {

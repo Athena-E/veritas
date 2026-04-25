@@ -4,6 +4,7 @@
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::types::{BinaryOp, BlockId, UnaryOp};
+use crate::common::ownership::OwnershipMode;
 use crate::common::types::IType;
 
 /// TIR instructions (three-address code in SSA form)
@@ -62,6 +63,7 @@ pub enum TirInstr<'src> {
         dst: Option<VirtualReg>,
         func: String,
         args: Vec<VirtualReg>,
+        ownership: OwnershipMode,
         result_ty: IType<'src>,
     },
 
@@ -146,7 +148,10 @@ pub enum Terminator {
     },
 
     /// Return from function
-    Return { value: Option<VirtualReg> },
+    Return {
+        value: Option<VirtualReg>,
+        ownership: OwnershipMode,
+    },
 
     /// Unreachable (after error or infinite loop)
     Unreachable,

@@ -9,6 +9,7 @@ use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::backend::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
+use crate::common::ownership::OwnershipMode;
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
@@ -191,8 +192,9 @@ pub fn lower_expr<'src>(
         TExpr::Call {
             func_name,
             args,
+            ownership,
             ty,
-        } => lower_call(ctx, func_name, args, ty),
+        } => lower_call(ctx, func_name, args, *ownership, ty),
 
         TExpr::Index { base, index, ty } => lower_index(ctx, base, index, ty),
 
@@ -320,6 +322,7 @@ fn lower_call<'src>(
     ctx: &mut LoweringContext<'src>,
     func_name: &str,
     args: &[Spanned<TExpr<'src>>],
+    ownership: OwnershipMode,
     ty: &IType<'src>,
 ) -> VirtualReg {
     // Lower all arguments
@@ -331,6 +334,7 @@ fn lower_call<'src>(
             dst: None,
             func: func_name.to_string(),
             args: arg_regs,
+            ownership,
             result_ty: ty.clone(),
         });
 
@@ -348,6 +352,7 @@ fn lower_call<'src>(
             dst: Some(dst),
             func: func_name.to_string(),
             args: arg_regs,
+            ownership,
             result_ty: ty.clone(),
         });
         dst

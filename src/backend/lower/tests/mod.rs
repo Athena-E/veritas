@@ -22,6 +22,7 @@ fn test_lower_identity_function() {
             ty: IType::Int,
         }],
         return_type: IType::Int,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         body: TFunctionBody {
@@ -67,6 +68,7 @@ fn test_lower_function_with_let() {
             },
         ],
         return_type: IType::Int,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         body: TFunctionBody {
@@ -118,6 +120,7 @@ fn test_lower_function_returning_literal() {
         name: "const_five".to_string(),
         parameters: vec![],
         return_type: IType::Int,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         body: TFunctionBody {
@@ -157,6 +160,7 @@ fn test_lower_if_expression() {
             ty: IType::Int,
         }],
         return_type: IType::Int,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         body: TFunctionBody {
@@ -250,6 +254,7 @@ fn test_lower_function_with_postcondition() {
         name: "five".to_string(),
         parameters: vec![],
         return_type: IType::Int,
+        returns_owned: false,
         precondition: None,
         postcondition: Some(postcondition),
         body: TFunctionBody {
@@ -280,6 +285,7 @@ fn test_lower_function_without_postcondition() {
         name: "no_postcond".to_string(),
         parameters: vec![],
         return_type: IType::Int,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         body: TFunctionBody {

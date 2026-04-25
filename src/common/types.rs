@@ -59,6 +59,7 @@ pub struct FunctionSignature<'src> {
     pub name: String,
     pub parameters: Vec<(String, IType<'src>)>,
     pub return_type: IType<'src>,
+    pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,
     pub postcondition: Option<IProposition<'src>>,
     #[allow(dead_code)]

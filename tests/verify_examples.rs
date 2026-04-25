@@ -4,7 +4,7 @@
 //! (lex → parse → typecheck → lower → codegen → emit → verify),
 //! ensuring the DTAL verifier accepts all valid programs.
 
-use veritas::pipeline::{compile_verbose, compile_verbose_bare_metal};
+use veritas::pipeline::compile_verbose;
 use veritas::verifier::verify_dtal;
 
 fn compile_and_verify(source: &str) -> Result<(), String> {
@@ -18,12 +18,6 @@ fn compile_and_verify_roundtrip(source: &str) -> Result<(), String> {
         .map_err(|e| format!("Verification failed (in-memory): {}", e))?;
     veritas::verifier::verify_dtal_text(&output.dtal)
         .map_err(|e| format!("Verification failed (text round-trip): {}", e))
-}
-
-fn compile_and_verify_bare_metal(source: &str) -> Result<(), String> {
-    let output =
-        compile_verbose_bare_metal(source).map_err(|e| format!("Compilation failed: {}", e))?;
-    verify_dtal(&output.dtal_program).map_err(|e| format!("Verification failed: {}", e))
 }
 
 macro_rules! verify_example {
@@ -44,17 +38,6 @@ macro_rules! verify_roundtrip {
         fn $name() {
             let source = include_str!(concat!("../src/examples/", $file));
             compile_and_verify_roundtrip(source).unwrap_or_else(|e| panic!("{}: {}", $file, e));
-        }
-    };
-}
-
-macro_rules! verify_example_bare_metal {
-    ($name:ident, $file:expr) => {
-        #[test]
-        #[ignore = "slow end-to-end verification suite; run explicitly"]
-        fn $name() {
-            let source = include_str!(concat!("../src/examples/", $file));
-            compile_and_verify_bare_metal(source).unwrap_or_else(|e| panic!("{}: {}", $file, e));
         }
     };
 }
@@ -100,11 +83,11 @@ verify_example!(e2e_18_precondition_use, "18_precondition_use.veri");
 verify_example!(e2e_19_loop_invariant, "19_loop_invariant.veri");
 verify_example!(e2e_19_quantifier_showcase, "19_quantifier_showcase.veri");
 verify_example!(e2e_21_safe_division, "21_safe_division.veri");
-verify_example_bare_metal!(e2e_22_bubble_sort, "22_bubble_sort.veri");
+verify_example!(e2e_22_bubble_sort, "22_bubble_sort.veri");
 verify_example!(e2e_add, "add.veri");
 verify_example!(e2e_linear_search, "linear_search.veri");
 verify_example!(e2e_smt_minimal, "smt_minimal_annotations.veri");
-verify_example_bare_metal!(e2e_smt_synthesis, "smt_synthesis_tests.veri");
+verify_example!(e2e_smt_synthesis, "smt_synthesis_tests.veri");
 
 // Text round-trip
 verify_roundtrip!(e2e_roundtrip_01_simple, "01_simple.veri");
@@ -117,7 +100,7 @@ verify_roundtrip!(e2e_roundtrip_add, "add.veri");
 
 verify_example!(e2e_20_array_loop_invariant, "20_array_loop_invariant.veri");
 verify_example!(e2e_selective_invalidation, "selective_invalidation.veri");
-verify_example_bare_metal!(e2e_sortedness, "sortedness.veri");
+verify_example!(e2e_sortedness, "sortedness.veri");
 verify_example!(e2e_29_i64_basic, "29_i64_basic.veri");
 verify_example!(e2e_30_i64_safe_midpoint, "30_i64_safe_midpoint.veri");
 verify_example!(e2e_31_u64_basic, "31_u64_basic.veri");

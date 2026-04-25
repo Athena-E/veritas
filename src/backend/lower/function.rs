@@ -10,6 +10,7 @@ use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::lower::stmt::lower_stmts;
 use crate::backend::tir::{Terminator, TirFunction};
+use crate::common::ownership::OwnershipMode;
 use crate::common::tast::TFunction;
 use crate::common::types::{IProposition, IType};
 
@@ -45,6 +46,11 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     ctx.finish_block(
         Terminator::Return {
             value: return_value,
+            ownership: if func.returns_owned {
+                OwnershipMode::Owned
+            } else {
+                OwnershipMode::Plain
+            },
         },
         vec![], // Entry block has no predecessors
     );
@@ -68,6 +74,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         params,
         param_names,
         func.return_type.clone(),
+        func.returns_owned,
         precondition,
         postcondition,
         entry_block,

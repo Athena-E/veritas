@@ -44,6 +44,8 @@ pub struct TirFunction<'src> {
     pub param_names: Vec<String>,
     /// Return type
     pub return_type: IType<'src>,
+    /// Whether returning from this function transfers ownership of the result.
+    pub returns_owned: bool,
     /// Precondition (optional)
     pub precondition: Option<Constraint>,
     /// Postcondition (optional)

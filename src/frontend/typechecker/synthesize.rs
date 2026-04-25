@@ -1,6 +1,7 @@
 // Given an expression e, synthesize its type T and produce a typed expression e'
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
+use crate::common::ownership::OwnershipMode;
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
@@ -60,6 +61,10 @@ pub fn synth_expr<'src>(
                     };
                     Ok(((texpr, span), ty))
                 }
+                None if ctx.is_moved(name) => Err(TypeError::UseAfterMove {
+                    name: name.to_string(),
+                    span,
+                }),
                 None => Err(TypeError::UndefinedVariable {
                     name: name.to_string(),
                     span,
@@ -416,6 +421,11 @@ pub fn synth_expr<'src>(
             let texpr = TExpr::Call {
                 func_name: func_name.to_string(),
                 args: typed_args,
+                ownership: if sig.returns_owned {
+                    OwnershipMode::Owned
+                } else {
+                    OwnershipMode::Plain
+                },
                 ty: ret_ty.clone(),
             };
             Ok(((texpr, span), ret_ty))

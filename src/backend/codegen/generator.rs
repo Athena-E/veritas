@@ -18,6 +18,7 @@ use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::{BasicBlock, BlockId, PhiNode, Terminator, TirFunction, TirProgram};
+use crate::common::ownership::OwnershipMode;
 use std::collections::HashMap;
 
 use super::isel;
@@ -37,6 +38,9 @@ pub struct CodegenContext {
     pub bare_metal: bool,
     /// Whether this function needs a hosted function-local region.
     pub needs_hosted_region: bool,
+    /// Whether this hosted function returns an owned array and therefore
+    /// allocates into the caller's region instead of a callee-local region.
+    pub returns_owned_array: bool,
 }
 
 impl CodegenContext {
@@ -48,6 +52,7 @@ impl CodegenContext {
             var_subs: Vec::new(),
             bare_metal: false,
             needs_hosted_region: false,
+            returns_owned_array: false,
         }
     }
 
@@ -189,7 +194,9 @@ pub fn codegen_function_with_target<'src>(
 ) -> DtalFunction {
     let mut ctx = CodegenContext::new(&func.name);
     ctx.bare_metal = bare_metal;
-    ctx.needs_hosted_region = !bare_metal && function_uses_function_region(func);
+    ctx.returns_owned_array = !bare_metal && func.returns_owned;
+    ctx.needs_hosted_region =
+        !bare_metal && !ctx.returns_owned_array && function_needs_hosted_region(func);
 
     // Build param name → register name substitution map
     ctx.var_subs = func
@@ -201,7 +208,10 @@ pub fn codegen_function_with_target<'src>(
 
     // Add "result" → return value register mapping for postcondition substitution
     for block in func.blocks.values() {
-        if let Terminator::Return { value: Some(vreg) } = &block.terminator {
+        if let Terminator::Return {
+            value: Some(vreg), ..
+        } = &block.terminator
+        {
             ctx.var_subs
                 .push(("result".to_string(), format!("{}", Reg::Virtual(*vreg))));
             break;
@@ -292,6 +302,11 @@ fn codegen_block<'src>(
 
     if ctx.needs_hosted_region && block.id == func.entry_block {
         emit_region_enter(&mut instructions);
+    } else if ctx.returns_owned_array && block.id == func.entry_block {
+        instructions.push(DtalInstr::TypeAnnotation {
+            reg: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R12),
+            ty: DtalType::Int,
+        });
     }
 
     // 1. Lower phi nodes to mov instructions
@@ -323,12 +338,18 @@ fn codegen_block<'src>(
     }
 }
 
-fn function_uses_function_region<'src>(func: &TirFunction<'src>) -> bool {
+fn function_needs_hosted_region<'src>(func: &TirFunction<'src>) -> bool {
     func.blocks.values().any(|block| {
-        block
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, TirInstr::AllocArray { region: None, .. }))
+        block.instructions.iter().any(|instr| {
+            matches!(instr, TirInstr::AllocArray { region: None, .. })
+                || matches!(
+                    instr,
+                    TirInstr::Call {
+                        ownership: OwnershipMode::Owned,
+                        ..
+                    }
+                )
+        })
     })
 }
 
@@ -447,7 +468,10 @@ fn lower_terminator<'src>(
             });
         }
 
-        Terminator::Return { value } => {
+        Terminator::Return {
+            value,
+            ownership: _,
+        } => {
             if let Some(val_reg) = value {
                 let ret_ty = DtalType::from_itype(&func.return_type);
                 if ctx.needs_hosted_region {
