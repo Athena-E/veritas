@@ -487,7 +487,19 @@ fn verify_plain_mov_does_not_duplicate_owned(
             (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
                 | (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
         ) && state.owned_object_ids.get(&dst).copied() == Some(object_id);
-        if !same_alias_pair {
+        let same_register = src == dst;
+        let call_arg_alias = matches!(
+            dst,
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R1)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R2)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R3)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R4)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R5)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R6)
+                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R7)
+        );
+        if !same_alias_pair && !same_register && !call_arg_alias {
             return Err(VerifyError::OwnershipViolation {
                 block: block_label.to_string(),
                 instr_desc: "mov".to_string(),

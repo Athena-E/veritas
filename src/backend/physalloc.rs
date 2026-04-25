@@ -287,6 +287,22 @@ fn emit_store_from(instrs: &mut Vec<DtalInstr>, src: Reg, loc: &PhysLoc, ty: Dta
     }
 }
 
+fn emit_store_from_owned(instrs: &mut Vec<DtalInstr>, src: Reg, loc: &PhysLoc, ty: DtalType) {
+    match loc {
+        PhysLoc::Reg(r) if *r == src => {}
+        PhysLoc::Reg(r) => {
+            instrs.push(DtalInstr::MoveOwned { dst: *r, src, ty });
+        }
+        PhysLoc::Spill(offset) => {
+            instrs.push(DtalInstr::SpillStore {
+                src,
+                offset: *offset,
+                ty,
+            });
+        }
+    }
+}
+
 /// Physically allocate an entire DTAL program.
 ///
 /// Runs register allocation on each function, then applies the allocation
@@ -428,11 +444,19 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                         && saved_to_scratch.is_none()
                     {
                         // Save src to scratch before it gets clobbered
-                        instrs.push(DtalInstr::MovReg {
-                            dst: R11,
-                            src: *src,
-                            ty: DtalType::Int,
-                        });
+                        if matches!(&param_moves[i].2, DtalType::Array { .. }) {
+                            instrs.push(DtalInstr::MoveOwned {
+                                dst: R11,
+                                src: *src,
+                                ty: param_moves[i].2.clone(),
+                            });
+                        } else {
+                            instrs.push(DtalInstr::MovReg {
+                                dst: R11,
+                                src: *src,
+                                ty: DtalType::Int,
+                            });
+                        }
                         saved_to_scratch = Some((*src, R11));
                     }
                 }
@@ -444,7 +468,11 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 } else {
                     *src
                 };
-                emit_store_from(&mut instrs, actual_src, dst_loc, ty.clone());
+                if matches!(ty, DtalType::Array { .. }) {
+                    emit_store_from_owned(&mut instrs, actual_src, dst_loc, ty.clone());
+                } else {
+                    emit_store_from(&mut instrs, actual_src, dst_loc, ty.clone());
+                }
             }
         }
 

@@ -1862,14 +1862,8 @@ fn apply_call_argument_moves<'src>(
         Expr::Call { func_name, args } => {
             let mut new_ctx = ctx.clone();
             if let Some(sig) = ctx.lookup_function(func_name) {
-                for ((arg_expr, _), (_, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
+                for ((arg_expr, _), _) in args.0.iter().zip(sig.parameters.iter()) {
                     new_ctx = apply_call_argument_moves(&new_ctx, arg_expr);
-                    if !new_ctx.bare_metal
-                        && contains_array_type(param_ty)
-                        && let Expr::Variable(name) = arg_expr
-                    {
-                        new_ctx = consume_owned_variable(&new_ctx, name);
-                    }
                 }
             }
             new_ctx
@@ -1908,7 +1902,10 @@ fn explicit_transfer_ownership<'src>(
     expr: &Expr<'src>,
     ty: &IType<'src>,
 ) -> OwnershipMode {
-    if !bare_metal && contains_array_type(ty) && matches!(expr, Expr::Variable(_)) {
+    if !bare_metal
+        && contains_array_type(ty)
+        && matches!(expr, Expr::Variable(_) | Expr::ArrayInit { .. })
+    {
         OwnershipMode::Owned
     } else {
         OwnershipMode::Plain

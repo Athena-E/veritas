@@ -196,7 +196,7 @@ fn hosted_target_rejects_use_after_move_via_let_binding() {
 }
 
 #[test]
-fn hosted_target_rejects_use_after_move_via_call() {
+fn hosted_target_allows_reusing_arrays_after_calls() {
     let src = r#"
         fn consume(arr: [int; 4]) -> int {
             arr[0]
@@ -210,12 +210,7 @@ fn hosted_target_rejects_use_after_move_via_call() {
     "#;
 
     let program = parse_program(src);
-    let err = check_program(&program).expect_err("hosted target should reject moved call arg use");
-
-    match err {
-        TypeError::UseAfterMove { name, .. } => assert_eq!(name, "arr"),
-        other => panic!("expected UseAfterMove, got {other:?}"),
-    }
+    check_program(&program).expect("hosted target should treat array call args as non-consuming");
 }
 
 #[test]
@@ -277,7 +272,7 @@ fn hosted_owned_moves_lower_to_explicit_tir_moves() {
             _ => None,
         })
         .expect("main should contain a call to consume");
-    assert_eq!(call, vec![OwnershipMode::Owned]);
+    assert_eq!(call, vec![OwnershipMode::Plain]);
 }
 
 #[test]

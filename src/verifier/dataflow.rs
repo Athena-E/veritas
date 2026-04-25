@@ -291,14 +291,16 @@ fn join_states(
             .get(&edge_key)
             .or_else(|| exit_states.get(pred_label))
     };
+    let pred_states: Vec<&TypeState> = pred_labels.iter().filter_map(get_pred_state).collect();
+    if pred_states.is_empty() {
+        return Ok(result);
+    }
 
     // Collect all registers that appear in any predecessor
     let mut all_regs: HashSet<Reg> = HashSet::new();
-    for label in pred_labels {
-        if let Some(state) = get_pred_state(label) {
-            for reg in state.register_types.keys() {
-                all_regs.insert(*reg);
-            }
+    for state in &pred_states {
+        for reg in state.register_types.keys() {
+            all_regs.insert(*reg);
         }
     }
 
@@ -306,10 +308,8 @@ fn join_states(
     for reg in all_regs {
         let mut types: Vec<DtalType> = Vec::new();
 
-        for label in pred_labels {
-            if let Some(state) = get_pred_state(label)
-                && let Some(ty) = state.register_types.get(&reg)
-            {
+        for state in &pred_states {
+            if let Some(ty) = state.register_types.get(&reg) {
                 types.push(ty.clone());
             }
         }
@@ -331,28 +331,19 @@ fn join_states(
     // Collect all unique constraints from all predecessors
     let mut all_constraints: Vec<crate::backend::dtal::constraints::Constraint> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    for label in pred_labels {
-        if let Some(state) = get_pred_state(label) {
-            for c in &state.constraints {
-                let key = format!("{:?}", c);
-                if seen.insert(key) {
-                    all_constraints.push(c.clone());
-                }
+    for state in &pred_states {
+        for c in &state.constraints {
+            let key = format!("{:?}", c);
+            if seen.insert(key) {
+                all_constraints.push(c.clone());
             }
         }
     }
 
     for (idx, constraint) in all_constraints.iter().enumerate() {
-        let provable_from_all = pred_labels.iter().all(|label| {
-            get_pred_state(label)
-                .map(|s| {
-                    s.constraints.contains(constraint)
-                        || crate::verifier::checker::is_constraint_provable(
-                            constraint,
-                            &s.constraints,
-                        )
-                })
-                .unwrap_or(false)
+        let provable_from_all = pred_states.iter().all(|s| {
+            s.constraints.contains(constraint)
+                || crate::verifier::checker::is_constraint_provable(constraint, &s.constraints)
         });
         if provable_from_all {
             kept.insert(idx);
@@ -366,102 +357,76 @@ fn join_states(
     }
 
     // Join array versions - take max to ensure fresh names for future stores
-    for label in pred_labels {
-        if let Some(state) = get_pred_state(label) {
-            for (reg, version) in &state.array_versions {
-                let current = result.array_versions.get(reg).copied().unwrap_or(0);
-                if *version > current {
-                    result.array_versions.insert(*reg, *version);
-                }
+    for state in &pred_states {
+        for (reg, version) in &state.array_versions {
+            let current = result.array_versions.get(reg).copied().unwrap_or(0);
+            if *version > current {
+                result.array_versions.insert(*reg, *version);
             }
         }
     }
 
     // Join proven assertions - take union (these are frontend-verified)
     let mut seen_assertions: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for label in pred_labels {
-        if let Some(state) = get_pred_state(label) {
-            for assertion in &state.proven_assertions {
-                let key = format!("{:?}", assertion);
-                if seen_assertions.insert(key) {
-                    result.proven_assertions.push(assertion.clone());
-                }
+    for state in &pred_states {
+        for assertion in &state.proven_assertions {
+            let key = format!("{:?}", assertion);
+            if seen_assertions.insert(key) {
+                result.proven_assertions.push(assertion.clone());
             }
         }
     }
 
     for reg in result.register_types.keys() {
-        if pred_labels.iter().all(|label| {
-            get_pred_state(label)
-                .map(|state| state.owned_registers.contains(reg))
-                .unwrap_or(false)
-        }) {
+        if pred_states.iter().all(|state| state.owned_registers.contains(reg)) {
             result.owned_registers.insert(*reg);
         }
     }
 
     for reg in &result.owned_registers {
-        let first_object_id = pred_labels
+        let first_object_id = pred_states
             .iter()
-            .filter_map(get_pred_state)
             .filter_map(|state| state.owned_object_ids.get(reg).copied())
             .next();
         if let Some(object_id) = first_object_id
-            && pred_labels.iter().all(|label| {
-                get_pred_state(label)
-                    .and_then(|state| state.owned_object_ids.get(reg))
-                    .copied()
-                    == Some(object_id)
-            })
+            && pred_states
+                .iter()
+                .all(|state| state.owned_object_ids.get(reg).copied() == Some(object_id))
         {
             result.owned_object_ids.insert(*reg, object_id);
         }
     }
 
     for reg in result.register_types.keys() {
-        if pred_labels.iter().any(|label| {
-            get_pred_state(label)
-                .map(|state| state.consumed_registers.contains(reg))
-                .unwrap_or(false)
-        }) {
+        if pred_states
+            .iter()
+            .any(|state| state.consumed_registers.contains(reg))
+        {
             result.consumed_registers.insert(*reg);
         }
     }
 
-    let stack_len = pred_labels
+    let stack_len = pred_states.first().map(|state| state.owned_stack.len());
+    let same_stack_shape = pred_states
         .iter()
-        .filter_map(get_pred_state)
-        .next()
-        .map(|state| state.owned_stack.len());
-    let same_stack_shape = pred_labels.iter().all(|label| {
-        get_pred_state(label)
-            .map(|state| Some(state.owned_stack.len()) == stack_len)
-            .unwrap_or(false)
-    });
+        .all(|state| Some(state.owned_stack.len()) == stack_len);
     if same_stack_shape {
         result.owned_stack = (0..stack_len.unwrap_or(0))
             .map(|idx| {
-                pred_labels.iter().all(|label| {
-                    get_pred_state(label)
-                        .and_then(|state| state.owned_stack.get(idx))
-                        .copied()
-                        .unwrap_or(false)
-                })
+                pred_states
+                    .iter()
+                    .all(|state| state.owned_stack.get(idx).copied().unwrap_or(false))
             })
             .collect();
         result.owned_stack_object_ids = (0..stack_len.unwrap_or(0))
             .map(|idx| {
-                let first_object_id = pred_labels
+                let first_object_id = pred_states
                     .iter()
-                    .filter_map(get_pred_state)
                     .filter_map(|state| state.owned_stack_object_ids.get(idx).cloned().flatten())
                     .next();
                 if let Some(object_id) = first_object_id
-                    && pred_labels.iter().all(|label| {
-                        get_pred_state(label)
-                            .and_then(|state| state.owned_stack_object_ids.get(idx))
-                            .cloned()
-                            .flatten()
+                    && pred_states.iter().all(|state| {
+                        state.owned_stack_object_ids.get(idx).cloned().flatten()
                             == Some(object_id)
                     })
                 {
@@ -474,23 +439,18 @@ fn join_states(
     }
 
     for offset in result.spill_types.keys() {
-        if pred_labels.iter().all(|label| {
-            get_pred_state(label)
-                .map(|state| state.owned_spills.contains(offset))
-                .unwrap_or(false)
-        }) {
+        if pred_states
+            .iter()
+            .all(|state| state.owned_spills.contains(offset))
+        {
             result.owned_spills.insert(*offset);
-            let first_object_id = pred_labels
+            let first_object_id = pred_states
                 .iter()
-                .filter_map(get_pred_state)
                 .filter_map(|state| state.owned_spill_object_ids.get(offset).copied())
                 .next();
             if let Some(object_id) = first_object_id
-                && pred_labels.iter().all(|label| {
-                    get_pred_state(label)
-                        .and_then(|state| state.owned_spill_object_ids.get(offset))
-                        .copied()
-                        == Some(object_id)
+                && pred_states.iter().all(|state| {
+                    state.owned_spill_object_ids.get(offset).copied() == Some(object_id)
                 })
             {
                 result.owned_spill_object_ids.insert(*offset, object_id);
@@ -498,9 +458,8 @@ fn join_states(
         }
     }
 
-    result.next_object_id = pred_labels
+    result.next_object_id = pred_states
         .iter()
-        .filter_map(get_pred_state)
         .map(|state| state.next_object_id)
         .max()
         .unwrap_or(0);

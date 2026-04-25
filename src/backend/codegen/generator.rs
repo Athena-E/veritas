@@ -470,10 +470,7 @@ fn lower_terminator<'src>(
             });
         }
 
-        Terminator::Return {
-            value,
-            ownership: _,
-        } => {
+        Terminator::Return { value, ownership } => {
             if let Some(val_reg) = value {
                 let ret_ty = DtalType::from_itype(&func.return_type);
                 if ctx.needs_hosted_region {
@@ -484,6 +481,12 @@ fn lower_terminator<'src>(
                     emit_region_leave(instrs);
                     instrs.push(DtalInstr::Pop {
                         dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        ty: ret_ty,
+                    });
+                } else if *ownership == OwnershipMode::Owned {
+                    instrs.push(DtalInstr::MoveOwned {
+                        dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        src: Reg::Virtual(*val_reg),
                         ty: ret_ty,
                     });
                 } else {
@@ -568,12 +571,20 @@ fn emit_phi_moves<'src>(
             // Find the incoming value for current_block
             for (pred_block, incoming_reg) in &phi.incoming {
                 if *pred_block == current_block {
-                    // Emit mov from incoming_reg to phi.dst
-                    instrs.push(DtalInstr::MovReg {
-                        dst: Reg::Virtual(phi.dst),
-                        src: Reg::Virtual(*incoming_reg),
-                        ty: DtalType::from_itype(&phi.ty),
-                    });
+                    let ty = DtalType::from_itype(&phi.ty);
+                    if matches!(&phi.ty, crate::common::types::IType::Array { .. }) {
+                        instrs.push(DtalInstr::MoveOwned {
+                            dst: Reg::Virtual(phi.dst),
+                            src: Reg::Virtual(*incoming_reg),
+                            ty,
+                        });
+                    } else {
+                        instrs.push(DtalInstr::MovReg {
+                            dst: Reg::Virtual(phi.dst),
+                            src: Reg::Virtual(*incoming_reg),
+                            ty,
+                        });
+                    }
                     break;
                 }
             }

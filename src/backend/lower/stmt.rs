@@ -308,6 +308,9 @@ fn lower_for_loop<'src>(
         if name != var {
             let phi_reg = ctx.fresh_reg();
             let original_ty = ctx.lookup_var_type(name);
+            if matches!(&original_ty, IType::Array { .. }) && !ctx.is_owned_live(name) {
+                continue;
+            }
 
             // For refined types, preserve the refinement as an existential
             // constraint on the phi node. This allows the verifier to derive
@@ -382,6 +385,7 @@ fn lower_for_loop<'src>(
 
     // 5. Lower the body block
     ctx.start_block(body_block);
+    ctx.enter_scope();
 
     // Emit loop invariant assertion (if present) in the body block,
     // where the ConstraintAssume provides loop counter bounds.
@@ -399,8 +403,11 @@ fn lower_for_loop<'src>(
         lower_stmt(ctx, stmt);
     }
 
+    ctx.emit_scope_exit_drops();
+
     // Snapshot variables after body
     let vars_after_body = ctx.snapshot_var_map();
+    ctx.exit_scope();
 
     // 6. Increment loop variable: i_next = i + 1
     let one_reg = ctx.fresh_reg();
@@ -503,8 +510,11 @@ fn lower_while_loop<'src>(
     // Create phi nodes for ALL existing mutable variables (loop-carried state)
     let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
     for (name, &before_reg) in &vars_before_loop {
-        let phi_reg = ctx.fresh_reg();
         let original_ty = ctx.lookup_var_type(name);
+        if matches!(&original_ty, IType::Array { .. }) && !ctx.is_owned_live(name) {
+            continue;
+        }
+        let phi_reg = ctx.fresh_reg();
 
         // Preserve refined types as existential constraints on phi nodes
         let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
@@ -551,6 +561,7 @@ fn lower_while_loop<'src>(
 
     // Lower the body block
     ctx.start_block(body_block);
+    ctx.enter_scope();
 
     // Emit loop invariant assertion if present
     if let Some(inv_constraint) = invariant {
@@ -567,8 +578,11 @@ fn lower_while_loop<'src>(
         lower_stmt(ctx, stmt);
     }
 
+    ctx.emit_scope_exit_drops();
+
     // Snapshot variables after body
     let vars_after_body = ctx.snapshot_var_map();
+    ctx.exit_scope();
     let body_end_block = ctx.current_block().expect("Should be in body block");
 
     // Update loop-carried variable phi nodes with body's incoming edges

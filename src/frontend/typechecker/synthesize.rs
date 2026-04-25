@@ -13,14 +13,6 @@ use crate::frontend::typechecker::{
 };
 use std::sync::Arc;
 
-fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
-    match ty {
-        IType::Array { .. } => true,
-        IType::RefinedInt { base, .. } => contains_array_type(base),
-        _ => false,
-    }
-}
-
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
@@ -401,11 +393,7 @@ pub fn synth_expr<'src>(
 
                 typed_args.push(targ);
                 arg_types.push(arg_ty);
-                arg_ownerships.push(if !ctx.bare_metal && contains_array_type(param_ty) {
-                    OwnershipMode::Owned
-                } else {
-                    OwnershipMode::Plain
-                });
+                arg_ownerships.push(OwnershipMode::Plain);
             }
 
             // Check precondition if present
