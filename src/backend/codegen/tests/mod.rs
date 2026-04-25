@@ -305,8 +305,8 @@ fn test_pipeline_multi_function_program() {
     assert_eq!(tir.functions.len(), 2);
 
     let dtal = codegen_program(&tir);
-    // 2 user functions + 6 runtime stubs (including __rt_alloc)
-    assert_eq!(dtal.functions.len(), 8);
+    // 2 user functions + 8 runtime stubs (including hosted region helpers)
+    assert_eq!(dtal.functions.len(), 10);
 
     let output = emit_program(&dtal);
     assert!(output.contains(".function helper"));
@@ -365,8 +365,8 @@ fn test_pipeline_function_with_postcondition() {
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
-    // 1 user function + 6 runtime stubs (including __rt_alloc)
-    assert_eq!(dtal.functions.len(), 7);
+    // 1 user function + 8 runtime stubs (including hosted region helpers)
+    assert_eq!(dtal.functions.len(), 9);
     assert!(
         dtal.functions[0].postcondition.is_some(),
         "DTAL should have postcondition"
