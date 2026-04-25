@@ -22,6 +22,9 @@ pub enum VerifyError {
     /// Register used before definition
     UndefinedRegister { reg: Reg, block: String },
 
+    /// Register used after its owned value was consumed by move/drop
+    ConsumedRegister { reg: Reg, block: String },
+
     /// Constraint cannot be proven from context
     UnprovableConstraint {
         constraint: Constraint,
@@ -98,6 +101,13 @@ pub enum VerifyError {
 
     /// Internal error (should not happen)
     InternalError { msg: String },
+
+    /// Ownership rule violated
+    OwnershipViolation {
+        block: String,
+        instr_desc: String,
+        msg: String,
+    },
 }
 
 impl fmt::Display for VerifyError {
@@ -119,6 +129,13 @@ impl fmt::Display for VerifyError {
                 write!(
                     f,
                     "Register {:?} used before definition in block '{}'",
+                    reg, block
+                )
+            }
+            VerifyError::ConsumedRegister { reg, block } => {
+                write!(
+                    f,
+                    "Register {:?} used after ownership was consumed in block '{}'",
                     reg, block
                 )
             }
@@ -230,6 +247,17 @@ impl fmt::Display for VerifyError {
             }
             VerifyError::InternalError { msg } => {
                 write!(f, "Internal verifier error: {}", msg)
+            }
+            VerifyError::OwnershipViolation {
+                block,
+                instr_desc,
+                msg,
+            } => {
+                write!(
+                    f,
+                    "Ownership violation in block '{}' at '{}': {}",
+                    block, instr_desc, msg
+                )
             }
         }
     }

@@ -669,6 +669,111 @@ mod tests {
             .contains(&Reg::Physical(PhysicalReg::LR)));
     }
 
+    #[test]
+    fn consumed_owned_register_cannot_be_used_again() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        let program = make_program(vec![]);
+
+        verify_instruction(
+            &DtalInstr::MoveOwned {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty.clone(),
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        let err = verify_instruction(
+            &DtalInstr::Load {
+                dst: v(2),
+                base: v(0),
+                offset: v(3),
+                ty: DtalType::Int,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::ConsumedRegister { reg, .. } if reg == v(0)));
+    }
+
+    #[test]
+    fn double_drop_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        let program = make_program(vec![]);
+
+        verify_instruction(
+            &DtalInstr::DropOwned {
+                src: v(0),
+                ty: array_ty.clone(),
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        let err = verify_instruction(
+            &DtalInstr::DropOwned {
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            VerifyError::ConsumedRegister { reg, .. } if reg == v(0)
+        ));
+    }
+
+    #[test]
+    fn plain_mov_of_owned_value_is_rejected_as_ownership_duplication() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 7);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::MovReg {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
     // ========================================================================
     // Existing tests (rewritten with helpers)
     // ========================================================================

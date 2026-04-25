@@ -166,9 +166,9 @@ pub fn lower_instruction<'src>(
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
                     return_ty: DtalType::Int,
-                    ownership: OwnershipMode::Plain,
+                    ownership: OwnershipMode::Owned,
                 });
-                instrs.push(DtalInstr::MovReg {
+                instrs.push(DtalInstr::MoveOwned {
                     dst: Reg::Virtual(*dst),
                     src: Reg::Physical(PhysicalReg::R0),
                     ty: array_ty.clone(),

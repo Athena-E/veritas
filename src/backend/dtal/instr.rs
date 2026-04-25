@@ -43,10 +43,20 @@ pub struct TypeState {
     pub spill_types: HashMap<i32, DtalType>,
     /// Registers currently holding owned values.
     pub owned_registers: HashSet<Reg>,
+    /// Object identity for each register that currently owns a value.
+    pub owned_object_ids: HashMap<Reg, u32>,
     /// Ownership state for stack values tracked by `Push`/`Pop`.
     pub owned_stack: Vec<bool>,
+    /// Object identities for stack values tracked by `Push`/`Pop`.
+    pub owned_stack_object_ids: Vec<Option<u32>>,
     /// Stack spill slots currently holding owned values.
     pub owned_spills: HashSet<i32>,
+    /// Object identities for owned spill slots.
+    pub owned_spill_object_ids: HashMap<i32, u32>,
+    /// Registers whose previously-owned value has been consumed by move/drop.
+    pub consumed_registers: HashSet<Reg>,
+    /// Fresh object id supply for ownership-capability tracking.
+    pub next_object_id: u32,
 }
 
 impl TypeState {
@@ -60,8 +70,13 @@ impl TypeState {
             proven_assertions: Vec::new(),
             spill_types: HashMap::new(),
             owned_registers: HashSet::new(),
+            owned_object_ids: HashMap::new(),
             owned_stack: Vec::new(),
+            owned_stack_object_ids: Vec::new(),
             owned_spills: HashSet::new(),
+            owned_spill_object_ids: HashMap::new(),
+            consumed_registers: HashSet::new(),
+            next_object_id: 0,
         }
     }
 }
