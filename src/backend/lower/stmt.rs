@@ -13,6 +13,10 @@ use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
 
+fn is_owned_type<'src>(ty: &IType<'src>) -> bool {
+    matches!(ty, IType::Array { .. })
+}
+
 /// Lower a statement to TIR
 ///
 /// This may emit instructions and/or create new basic blocks.
@@ -86,6 +90,11 @@ fn lower_let<'src>(
     ty: &IType<'src>,
     ownership: OwnershipMode,
 ) {
+    let prior_binding = ctx
+        .lookup_var(name)
+        .zip(Some(ctx.lookup_var_type(name)))
+        .filter(|(_, prior_ty)| is_owned_type(prior_ty));
+
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
     let bound_reg = if ownership == OwnershipMode::Owned
@@ -101,6 +110,17 @@ fn lower_let<'src>(
     } else {
         value_reg
     };
+
+    if let Some((prior_reg, prior_ty)) = prior_binding {
+        let transferred_from_shadowed = ownership == OwnershipMode::Owned
+            && matches!(&value.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name);
+        if !transferred_from_shadowed {
+            ctx.emit(TirInstr::DropOwned {
+                src: prior_reg,
+                ty: prior_ty,
+            });
+        }
+    }
 
     // Bind the variable name to this register with its type
     ctx.bind_var_typed(name, bound_reg, ty.clone());
@@ -118,6 +138,10 @@ fn lower_assignment<'src>(
             // Simple variable assignment
             // In SSA, we create a new register and update the binding
             let rhs_reg = lower_expr(ctx, rhs);
+            let prior_reg = ctx.lookup_var(name);
+            let prior_ty = ctx.lookup_var_type(name);
+            let self_assignment =
+                matches!(&rhs.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name);
 
             // Create a copy to a new register (SSA form)
             // Use the RHS type, not the LHS declared type (which may be a stale singleton)
@@ -133,6 +157,16 @@ fn lower_assignment<'src>(
                     dst: new_reg,
                     src: rhs_reg,
                     ty: rhs.0.get_type().clone(),
+                });
+            }
+
+            if let Some(prior_reg) = prior_reg
+                && is_owned_type(&prior_ty)
+                && !self_assignment
+            {
+                ctx.emit(TirInstr::DropOwned {
+                    src: prior_reg,
+                    ty: prior_ty,
                 });
             }
 

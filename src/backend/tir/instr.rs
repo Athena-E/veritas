@@ -31,6 +31,12 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
+    /// drop src (ownership destruction)
+    DropOwned {
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
     /// dst = lhs op rhs
     BinOp {
         dst: VirtualReg,
@@ -107,6 +113,7 @@ impl<'src> TirInstr<'src> {
             TirInstr::LoadImm { dst, .. } => Some(*dst),
             TirInstr::Copy { dst, .. } => Some(*dst),
             TirInstr::MoveOwned { dst, .. } => Some(*dst),
+            TirInstr::DropOwned { .. } => None,
             TirInstr::BinOp { dst, .. } => Some(*dst),
             TirInstr::UnaryOp { dst, .. } => Some(*dst),
             TirInstr::ArrayLoad { dst, .. } => Some(*dst),
@@ -126,6 +133,7 @@ impl<'src> TirInstr<'src> {
             TirInstr::LoadImm { ty, .. } => Some(ty),
             TirInstr::Copy { ty, .. } => Some(ty),
             TirInstr::MoveOwned { ty, .. } => Some(ty),
+            TirInstr::DropOwned { ty, .. } => Some(ty),
             TirInstr::BinOp { ty, .. } => Some(ty),
             TirInstr::UnaryOp { ty, .. } => Some(ty),
             TirInstr::ArrayLoad { element_ty, .. } => Some(element_ty),

@@ -279,3 +279,61 @@ fn hosted_owned_moves_lower_to_explicit_tir_moves() {
         .expect("main should contain a call to consume");
     assert_eq!(call, vec![OwnershipMode::Owned]);
 }
+
+#[test]
+fn hosted_owned_shadowing_lowers_to_explicit_tir_drop() {
+    let src = r#"
+        fn main() -> int {
+            let arr: [int; 4] = [0; 4];
+            let arr: [int; 4] = [1; 4];
+            arr[0]
+        }
+    "#;
+
+    let program = parse_program(src);
+    let tast = check_program(&program).expect("hosted target should typecheck shadowing");
+    let tir = lower_program(&tast);
+    let main = tir
+        .functions
+        .iter()
+        .find(|func| func.name == "main")
+        .expect("lowered main should exist");
+    let entry = main
+        .blocks
+        .get(&main.entry_block)
+        .expect("main entry block should exist");
+
+    assert!(entry
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
+}
+
+#[test]
+fn hosted_owned_reassignment_lowers_to_explicit_tir_drop() {
+    let src = r#"
+        fn main() -> int {
+            let mut arr: [int; 4] = [0; 4];
+            arr = [1; 4];
+            arr[0]
+        }
+    "#;
+
+    let program = parse_program(src);
+    let tast = check_program(&program).expect("hosted target should typecheck reassignment");
+    let tir = lower_program(&tast);
+    let main = tir
+        .functions
+        .iter()
+        .find(|func| func.name == "main")
+        .expect("lowered main should exist");
+    let entry = main
+        .blocks
+        .get(&main.entry_block)
+        .expect("main entry block should exist");
+
+    assert!(entry
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
+}

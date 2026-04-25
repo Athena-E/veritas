@@ -46,6 +46,11 @@ pub fn lower_instruction<'src>(
             });
         }
 
+        TirInstr::DropOwned { src: _, ty: _ } => {
+            // Ownership drops are explicit in TIR, but hosted code still reclaims
+            // storage through region teardown rather than per-object destruction.
+        }
+
         TirInstr::BinOp {
             dst,
             op,
