@@ -177,6 +177,7 @@ pub fn verify_instruction(
         // Call: derive return type from callee's declared signature
         DtalInstr::Call {
             target,
+            arg_ownerships,
             ownership,
             ..
         } => {
@@ -272,6 +273,17 @@ pub fn verify_instruction(
                 let object_id = fresh_object_id(state);
                 assign_owned_object(Reg::Physical(PhysicalReg::R0), object_id, state);
                 assign_owned_object(Reg::Physical(PhysicalReg::LR), object_id, state);
+            }
+            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
+                if !arg_ownership.consumes_input() {
+                    continue;
+                }
+                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                    let param_reg = Reg::Physical(param_reg);
+                    verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
+                    clear_owned(param_reg, state);
+                    consume_reg(param_reg, state);
+                }
             }
             clear_consumed(Reg::Physical(PhysicalReg::R0), state);
             clear_consumed(Reg::Physical(PhysicalReg::LR), state);
@@ -425,6 +437,8 @@ pub fn verify_instruction(
         }
     }
 
+    verify_unique_owned_objects(state, block_label, "state update")?;
+
     Ok(())
 }
 
@@ -556,6 +570,49 @@ fn fresh_object_id(state: &mut TypeState) -> u32 {
 fn assign_owned_object(reg: Reg, object_id: u32, state: &mut TypeState) {
     state.owned_registers.insert(reg);
     state.owned_object_ids.insert(reg, object_id);
+}
+
+pub(crate) fn is_allowed_owned_alias_pair(lhs: Reg, rhs: Reg) -> bool {
+    matches!(
+        (lhs, rhs),
+        (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+        ) | (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+        )
+    )
+}
+
+pub(crate) fn verify_unique_owned_objects(
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    let mut regs: Vec<(Reg, u32)> = state
+        .owned_object_ids
+        .iter()
+        .map(|(reg, object_id)| (*reg, *object_id))
+        .collect();
+    regs.sort_by_key(|(reg, object_id)| (format!("{:?}", reg), *object_id));
+
+    for (idx, (lhs_reg, lhs_object)) in regs.iter().enumerate() {
+        for (rhs_reg, rhs_object) in regs.iter().skip(idx + 1) {
+            if lhs_object == rhs_object && !is_allowed_owned_alias_pair(*lhs_reg, *rhs_reg) {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block_label.to_string(),
+                    instr_desc: instr_desc.to_string(),
+                    msg: format!(
+                        "object o{} has multiple live owners: {:?} and {:?}",
+                        lhs_object, lhs_reg, rhs_reg
+                    ),
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Verify mov immediate instruction

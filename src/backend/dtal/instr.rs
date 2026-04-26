@@ -263,6 +263,7 @@ pub enum DtalInstr {
     /// call function
     Call {
         target: String,
+        arg_ownerships: Vec<OwnershipMode>,
         return_ty: DtalType,
         ownership: OwnershipMode,
     },

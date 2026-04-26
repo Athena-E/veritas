@@ -390,6 +390,22 @@ fn verify_state_coercion(
         }
     }
 
+    for (reg, target_object_id) in &target.owned_object_ids {
+        if current.owned_object_ids.get(reg).copied() != Some(*target_object_id) {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "state coercion".to_string(),
+                msg: format!(
+                    "register {:?} must own object o{} on edge {} -> {}",
+                    reg, target_object_id, source_block, target_label
+                ),
+            });
+        }
+    }
+
+    checker::verify_unique_owned_objects(current, source_block, "state coercion")?;
+    checker::verify_unique_owned_objects(target, target_label, "state coercion target")?;
+
     // Check constraint entailment: each constraint declared in the target's
     // entry state must be provable from the current state's constraints.
     // This eliminates trust on .assume directives — they become verified
@@ -609,6 +625,7 @@ mod tests {
                     },
                     DtalInstr::Call {
                         target: "owned_callee".to_string(),
+                        arg_ownerships: vec![],
                         return_ty: array_ty.clone(),
                         ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                     },
@@ -633,9 +650,10 @@ mod tests {
         assert!(matches!(
             &block.instructions[1],
             DtalInstr::Call {
+                arg_ownerships,
                 ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                 ..
-            }
+            } if arg_ownerships.is_empty()
         ));
         assert!(matches!(
             &block.instructions[2],
@@ -656,6 +674,7 @@ mod tests {
         verify_instruction(
             &DtalInstr::Call {
                 target: "owned_callee".to_string(),
+                arg_ownerships: vec![],
                 return_ty: array_ty,
                 ownership: crate::common::ownership::OwnershipMode::FreshOwned,
             },
@@ -669,6 +688,45 @@ mod tests {
         assert!(state
             .owned_registers
             .contains(&Reg::Physical(PhysicalReg::LR)));
+    }
+
+    #[test]
+    fn consuming_call_argument_is_consumed_at_call_boundary() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let callee = make_func(
+            "consume_arr",
+            vec![(v(0), DtalType::Int), (v(1), array_ty.clone())],
+            DtalType::Unit,
+            vec![make_block(".entry", vec![DtalInstr::Ret])],
+        );
+        let program = make_program(vec![callee]);
+        let mut state = TypeState::new();
+        let r1 = Reg::Physical(PhysicalReg::R1);
+        state.register_types.insert(r1, array_ty);
+        state.owned_registers.insert(r1);
+        state.owned_object_ids.insert(r1, 7);
+
+        verify_instruction(
+            &DtalInstr::Call {
+                target: "consume_arr".to_string(),
+                arg_ownerships: vec![
+                    crate::common::ownership::OwnershipMode::Plain,
+                    crate::common::ownership::OwnershipMode::Consume,
+                ],
+                return_ty: DtalType::Unit,
+                ownership: crate::common::ownership::OwnershipMode::Plain,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert!(!state.owned_registers.contains(&r1));
+        assert!(state.consumed_registers.contains(&r1));
     }
 
     #[test]
@@ -775,6 +833,24 @@ mod tests {
         )
         .unwrap_err();
 
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn duplicate_live_owners_of_same_object_are_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.register_types.insert(v(1), array_ty);
+        state.owned_registers.insert(v(0));
+        state.owned_registers.insert(v(1));
+        state.owned_object_ids.insert(v(0), 11);
+        state.owned_object_ids.insert(v(1), 11);
+
+        let err = checker::verify_unique_owned_objects(&state, ".entry", "test").unwrap_err();
         assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
     }
 
@@ -1497,6 +1573,7 @@ mod tests {
                 vec![
                     DtalInstr::Call {
                         target: "requires_positive".to_string(),
+                        arg_ownerships: vec![],
                         return_ty: DtalType::Int,
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
@@ -2091,6 +2168,7 @@ mod tests {
                 vec![
                     DtalInstr::Call {
                         target: "returns_bool".to_string(),
+                        arg_ownerships: vec![],
                         return_ty: DtalType::Int, // wrong annotation — signature says Bool
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
@@ -2136,6 +2214,7 @@ mod tests {
                 vec![
                     DtalInstr::Call {
                         target: "returns_bool".to_string(),
+                        arg_ownerships: vec![],
                         return_ty: DtalType::Int, // annotation lies: says Int
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
@@ -2504,6 +2583,7 @@ mod tests {
                     },
                     DtalInstr::Call {
                         target: "get_value".to_string(),
+                        arg_ownerships: vec![],
                         return_ty: DtalType::Int,
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },

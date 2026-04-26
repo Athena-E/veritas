@@ -392,7 +392,7 @@ impl<'a> DtalParser<'a> {
             "shli" => self.parse_shli(&tokens, ty_comment),
             "shri" => self.parse_shri(&tokens, ty_comment),
             "jmp" => self.parse_jmp(&tokens),
-            "call" | "call_owned" => self.parse_call(&tokens, ty_comment),
+            "call" | "call_owned" | "call_consume" => self.parse_call(&tokens, ty_comment),
             "ret" => Ok(Some(DtalInstr::Ret)),
             "push" => self.parse_push(&tokens, ty_comment),
             "pop" => self.parse_pop(&tokens, ty_comment),
@@ -838,6 +838,29 @@ impl<'a> DtalParser<'a> {
 
         Ok(Some(DtalInstr::Call {
             target: tokens[1].to_string(),
+            arg_ownerships: tokens
+                .get(2)
+                .and_then(|token| token.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')))
+                .map(|effects| {
+                    if effects.is_empty() {
+                        Ok(Vec::new())
+                    } else {
+                        effects
+                            .split(',')
+                            .map(|effect| match effect {
+                                "plain" => Ok(OwnershipMode::Plain),
+                                "consume" => Ok(OwnershipMode::Consume),
+                                "fresh" => Ok(OwnershipMode::FreshOwned),
+                                other => Err(self.err(format!(
+                                    "invalid call ownership effect '{}'",
+                                    other
+                                ))),
+                            })
+                            .collect()
+                    }
+                })
+                .transpose()?
+                .unwrap_or_default(),
             return_ty,
             ownership: if tokens[0] == "call_owned" {
                 OwnershipMode::FreshOwned

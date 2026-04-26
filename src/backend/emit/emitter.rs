@@ -292,6 +292,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
 
         DtalInstr::Call {
             target,
+            arg_ownerships,
             return_ty,
             ownership,
         } => {
@@ -300,11 +301,26 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
                 crate::common::ownership::OwnershipMode::Consume => "call_consume",
                 crate::common::ownership::OwnershipMode::FreshOwned => "call_owned",
             };
+            let arg_suffix = if arg_ownerships.is_empty() {
+                String::new()
+            } else {
+                let effects = arg_ownerships
+                    .iter()
+                    .map(|mode| match mode {
+                        crate::common::ownership::OwnershipMode::Plain => "plain",
+                        crate::common::ownership::OwnershipMode::Consume => "consume",
+                        crate::common::ownership::OwnershipMode::FreshOwned => "fresh",
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(" [{}]", effects)
+            };
             writeln!(
                 output,
-                "    {} {}    : {}",
+                "    {} {}{}    : {}",
                 mnemonic,
                 target,
+                arg_suffix,
                 emit_type(return_ty)
             )
             .unwrap();

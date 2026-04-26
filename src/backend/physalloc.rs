@@ -1048,6 +1048,7 @@ fn allocate_instruction(
 
         DtalInstr::Call {
             target,
+            arg_ownerships,
             return_ty,
             ownership,
         } => {
@@ -1114,6 +1115,7 @@ fn allocate_instruction(
             // Call
             instrs.push(DtalInstr::Call {
                 target: target.clone(),
+                arg_ownerships: arg_ownerships.clone(),
                 return_ty: return_ty.clone(),
                 ownership: *ownership,
             });

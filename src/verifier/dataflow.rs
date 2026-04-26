@@ -463,6 +463,8 @@ fn join_states(
         .max()
         .unwrap_or(0);
 
+    checker::verify_unique_owned_objects(&result, target_label, "join")?;
+
     Ok(result)
 }
 
@@ -794,6 +796,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Call {
+            arg_ownerships,
             return_ty,
             ownership,
             ..
@@ -820,6 +823,20 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 state.owned_registers.remove(&Reg::Physical(PhysicalReg::LR));
                 state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::R0));
                 state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::LR));
+            }
+            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
+                if !arg_ownership.consumes_input() {
+                    continue;
+                }
+                if let Some(param_reg) = crate::backend::dtal::regs::PhysicalReg::param_regs()
+                    .get(index)
+                    .copied()
+                {
+                    let param_reg = Reg::Physical(param_reg);
+                    state.owned_registers.remove(&param_reg);
+                    state.owned_object_ids.remove(&param_reg);
+                    state.consumed_registers.insert(param_reg);
+                }
             }
             state.consumed_registers.remove(&Reg::Physical(PhysicalReg::R0));
             state.consumed_registers.remove(&Reg::Physical(PhysicalReg::LR));
