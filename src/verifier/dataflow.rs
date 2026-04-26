@@ -583,8 +583,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .cloned()
                 .unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, ty);
-            state.owned_registers.remove(dst);
-            state.owned_object_ids.remove(dst);
+            preserve_plain_mov_alias_ownership(*src, *dst, state);
             state.consumed_registers.remove(dst);
         }
         DtalInstr::MoveOwned { dst, src, .. } => {
@@ -936,9 +935,8 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             ] {
                 state
                     .register_types
-                    .insert(Reg::Physical(*preg), DtalType::Int);
-                state.owned_registers.remove(&Reg::Physical(*preg));
-                state.owned_object_ids.remove(&Reg::Physical(*preg));
+                    .entry(Reg::Physical(*preg))
+                    .or_insert(DtalType::Int);
                 state.consumed_registers.remove(&Reg::Physical(*preg));
             }
         }
@@ -955,6 +953,28 @@ fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
     let object_id = state.owned_object_ids.remove(&src);
     state.owned_registers.remove(&src);
     if let Some(object_id) = object_id {
+        state.owned_registers.insert(dst);
+        state.owned_object_ids.insert(dst, object_id);
+    } else {
+        state.owned_registers.remove(&dst);
+        state.owned_object_ids.remove(&dst);
+    }
+}
+
+fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState) {
+    let is_abi_return_alias = matches!(
+        (src, dst),
+        (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+        ) | (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+        )
+    );
+    if is_abi_return_alias
+        && let Some(object_id) = state.owned_object_ids.get(&src).copied()
+    {
         state.owned_registers.insert(dst);
         state.owned_object_ids.insert(dst, object_id);
     } else {

@@ -27,6 +27,7 @@ pub fn verify_instruction(
         DtalInstr::MovReg { dst, src, ty } => {
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
             verify_plain_mov_does_not_duplicate_owned(*src, *dst, state, block_label)?;
+            preserve_plain_mov_alias_ownership(*src, *dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -46,10 +47,14 @@ pub fn verify_instruction(
             ty,
         } => {
             verify_binop(*op, *dst, *lhs, *rhs, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::AddImm { dst, src, imm, ty } => {
             verify_add_imm(*dst, *src, *imm, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Load {
@@ -59,6 +64,8 @@ pub fn verify_instruction(
             ty,
         } => {
             verify_load(*dst, *base, *offset, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::LoadOp {
@@ -70,6 +77,8 @@ pub fn verify_instruction(
             ..
         } => {
             verify_load_op(*dst, *base, *offset, *other, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Store { base, offset, src } => {
@@ -93,14 +102,20 @@ pub fn verify_instruction(
 
         DtalInstr::Not { dst, src, ty } => {
             verify_not(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Neg { dst, src, ty } => {
             verify_neg(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::ShlImm { dst, src, ty, .. } | DtalInstr::ShrImm { dst, src, ty, .. } => {
             verify_shift_imm(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::TypeAnnotation { reg, ty } => {
@@ -394,8 +409,8 @@ pub fn verify_instruction(
             ] {
                 state
                     .register_types
-                    .insert(Reg::Physical(*preg), DtalType::Int);
-                state.owned_registers.remove(&Reg::Physical(*preg));
+                    .entry(Reg::Physical(*preg))
+                    .or_insert(DtalType::Int);
                 clear_consumed(Reg::Physical(*preg), state);
             }
         }
@@ -439,6 +454,26 @@ fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
     let object_id = state.owned_object_ids.remove(&src);
     state.owned_registers.remove(&src);
     if let Some(object_id) = object_id {
+        assign_owned_object(dst, object_id, state);
+    } else {
+        clear_owned(dst, state);
+    }
+}
+
+fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState) {
+    let is_abi_return_alias = matches!(
+        (src, dst),
+        (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+        ) | (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+        )
+    );
+    if is_abi_return_alias
+        && let Some(object_id) = state.owned_object_ids.get(&src).copied()
+    {
         assign_owned_object(dst, object_id, state);
     } else {
         clear_owned(dst, state);
@@ -1235,9 +1270,10 @@ fn verify_type_annotation(
                     | DtalType::Master(_)
             );
 
-        let is_prologue_refinement =
-            matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
-                && matches!(reg, Reg::Physical(_));
+        let is_prologue_refinement = matches!(
+            existing_ty,
+            DtalType::Int | DtalType::I64 | DtalType::U64 | DtalType::SingletonInt(_)
+        ) && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
             && !is_pointer_refinement
