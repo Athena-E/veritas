@@ -86,8 +86,97 @@ pub fn verify_dtal_text(input: &str) -> Result<(), VerifyTextError> {
 /// Verify a complete DTAL program
 pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
     for func in &program.functions {
+        validate_alias_borrow_usage(func)?;
         verify_function(func, program)?;
     }
+    Ok(())
+}
+
+fn validate_alias_borrow_usage(func: &DtalFunction) -> Result<(), VerifyError> {
+    use crate::backend::dtal::regs::{PhysicalReg, Reg};
+
+    fn is_call_setup_instr(instr: &DtalInstr) -> bool {
+        matches!(
+            instr,
+            DtalInstr::AliasBorrow { .. } | DtalInstr::MoveOwned { .. } | DtalInstr::Push { .. }
+        )
+    }
+
+    let param_regs = PhysicalReg::param_regs();
+
+    for block in &func.blocks {
+        for (idx, instr) in block.instructions.iter().enumerate() {
+            let DtalInstr::AliasBorrow { dst, .. } = instr else {
+                continue;
+            };
+
+            let Reg::Physical(dst_reg) = dst else {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block.label.clone(),
+                    instr_desc: "alias_borrow".to_string(),
+                    msg: "alias_borrow destination must be an ABI parameter register".to_string(),
+                });
+            };
+
+            let mut call_idx = idx + 1;
+            while call_idx < block.instructions.len() && is_call_setup_instr(&block.instructions[call_idx]) {
+                call_idx += 1;
+            }
+
+            let Some(DtalInstr::Call { arg_ownerships, .. }) = block.instructions.get(call_idx) else {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block.label.clone(),
+                    instr_desc: "alias_borrow".to_string(),
+                    msg: "alias_borrow is only valid in the contiguous setup immediately before a call".to_string(),
+                });
+            };
+
+            let mut setup_start = call_idx;
+            while setup_start > 0 && is_call_setup_instr(&block.instructions[setup_start - 1]) {
+                setup_start -= 1;
+            }
+
+            let arg_index = block.instructions[setup_start..idx]
+                .iter()
+                .filter(|instr| is_call_setup_instr(instr))
+                .count();
+
+            if arg_index >= arg_ownerships.len() {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block.label.clone(),
+                    instr_desc: "alias_borrow".to_string(),
+                    msg: format!(
+                        "alias_borrow corresponds to argument {} but call has only {} ownership entries",
+                        arg_index,
+                        arg_ownerships.len()
+                    ),
+                });
+            }
+
+            if arg_ownerships[arg_index] != crate::common::ownership::OwnershipMode::Plain {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block.label.clone(),
+                    instr_desc: "alias_borrow".to_string(),
+                    msg: format!(
+                        "alias_borrow may only set up plain call arguments, but argument {} is {:?}",
+                        arg_index, arg_ownerships[arg_index]
+                    ),
+                });
+            }
+
+            if arg_index >= param_regs.len() || *dst_reg != param_regs[arg_index] {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block.label.clone(),
+                    instr_desc: "alias_borrow".to_string(),
+                    msg: format!(
+                        "alias_borrow for argument {} must target {:?}, found {:?}",
+                        arg_index, param_regs[arg_index], dst_reg
+                    ),
+                });
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -880,6 +969,62 @@ mod tests {
 
         assert!(state.owned_registers.contains(&v(0)));
         assert!(!state.owned_registers.contains(&v(1)));
+    }
+
+    #[test]
+    fn alias_borrow_outside_call_setup_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let program = make_program(vec![make_func(
+            "main",
+            vec![],
+            DtalType::Unit,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::AliasBorrow {
+                        dst: r0(),
+                        src: v(0),
+                        ty: array_ty,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+
+        let err = verify_dtal(&program).unwrap_err();
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn alias_borrow_for_consuming_call_argument_is_rejected() {
+        let program = make_program(vec![make_func(
+            "main",
+            vec![],
+            DtalType::Unit,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::AliasBorrow {
+                        dst: r0(),
+                        src: v(0),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Call {
+                        target: "f".to_string(),
+                        arg_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+                        return_ty: DtalType::Unit,
+                        ownership: crate::common::ownership::OwnershipMode::Plain,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+
+        let err = verify_dtal(&program).unwrap_err();
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
     }
 
     // ========================================================================
