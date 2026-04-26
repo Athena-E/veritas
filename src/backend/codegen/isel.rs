@@ -478,7 +478,7 @@ fn lower_call<'src>(
                     ty: DtalType::Int,
                 });
             } else {
-                instrs.push(DtalInstr::MovReg {
+                instrs.push(DtalInstr::AliasBorrow {
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),
                     ty: DtalType::Int,

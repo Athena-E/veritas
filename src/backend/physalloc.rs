@@ -589,6 +589,7 @@ fn allocate_instruction(
     match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
+        | DtalInstr::AliasBorrow { dst, .. }
         | DtalInstr::MoveOwned { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
@@ -635,7 +636,9 @@ fn allocate_instruction(
             }
         }
 
-        DtalInstr::MovReg { dst, src, ty } | DtalInstr::MoveOwned { dst, src, ty } => {
+        DtalInstr::MovReg { dst, src, ty }
+        | DtalInstr::AliasBorrow { dst, src, ty }
+        | DtalInstr::MoveOwned { dst, src, ty } => {
             let src_loc = resolve_reg(*src, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
 
@@ -644,6 +647,11 @@ fn allocate_instruction(
                 (PhysLoc::Reg(s), PhysLoc::Reg(d)) => {
                     let lowered = match instr {
                         DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                        DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
                             dst: *d,
                             src: *s,
                             ty: ty.clone(),
@@ -1085,7 +1093,9 @@ fn allocate_instruction(
             let mut arg_move_count = 0;
             for instr in instrs.iter().rev() {
                 match instr {
-                    DtalInstr::MovReg { dst, .. } | DtalInstr::MoveOwned { dst, .. }
+                    DtalInstr::MovReg { dst, .. }
+                    | DtalInstr::AliasBorrow { dst, .. }
+                    | DtalInstr::MoveOwned { dst, .. }
                         if arg_regs.contains(dst) =>
                     {
                         arg_move_count += 1;

@@ -385,7 +385,9 @@ impl<'a> FunctionLowerer<'a> {
                 );
             }
 
-            DtalInstr::MovReg { dst, src, .. } | DtalInstr::MoveOwned { dst, src, .. } => {
+            DtalInstr::MovReg { dst, src, .. }
+            | DtalInstr::AliasBorrow { dst, src, .. }
+            | DtalInstr::MoveOwned { dst, src, .. } => {
                 self.lower_mov_reg(*dst, *src);
             }
 

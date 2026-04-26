@@ -381,6 +381,7 @@ impl<'a> DtalParser<'a> {
 
         match tokens[0] {
             "mov" => self.parse_mov(&tokens, ty_comment),
+            "alias_borrow" => self.parse_alias_borrow(&tokens, ty_comment),
             "move_owned" => self.parse_move_owned(&tokens, ty_comment),
             "load" => self.parse_load(&tokens, ty_comment),
             "store" => self.parse_store(&tokens),
@@ -552,6 +553,27 @@ impl<'a> DtalParser<'a> {
             .transpose()?
             .unwrap_or(DtalType::Int);
         Ok(Some(DtalInstr::MoveOwned { dst, src, ty }))
+    }
+
+    fn parse_alias_borrow(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 3 {
+            return Err(self.err("alias_borrow requires 2 operands"));
+        }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2];
+        let dst =
+            parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::AliasBorrow { dst, src, ty }))
     }
 
     fn parse_store(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {

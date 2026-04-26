@@ -587,6 +587,17 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             preserve_plain_mov_alias_ownership(*src, *dst, state);
             state.consumed_registers.remove(dst);
         }
+        DtalInstr::AliasBorrow { dst, src, .. } => {
+            let ty = state
+                .register_types
+                .get(src)
+                .cloned()
+                .unwrap_or(DtalType::Int);
+            state.register_types.insert(*dst, ty);
+            state.owned_registers.remove(dst);
+            state.owned_object_ids.remove(dst);
+            state.consumed_registers.remove(dst);
+        }
         DtalInstr::MoveOwned { dst, src, .. } => {
             let ty = state
                 .register_types
@@ -958,22 +969,58 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         }
         DtalInstr::Epilogue { .. } => {}
         DtalInstr::DropOwned { src, .. } => {
-            state.owned_registers.remove(src);
-            state.owned_object_ids.remove(src);
-            state.consumed_registers.insert(*src);
+            let object_id = state.owned_object_ids.get(src).copied();
+            clear_owned_alias_group(*src, object_id, state);
+            consume_owned_alias_group(*src, object_id, state);
         }
     }
 }
 
 fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
-    let object_id = state.owned_object_ids.remove(&src);
-    state.owned_registers.remove(&src);
+    let object_id = state.owned_object_ids.get(&src).copied();
+    clear_owned_alias_group(src, object_id, state);
     if let Some(object_id) = object_id {
         state.owned_registers.insert(dst);
         state.owned_object_ids.insert(dst, object_id);
     } else {
         state.owned_registers.remove(&dst);
         state.owned_object_ids.remove(&dst);
+    }
+}
+
+fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
+    match reg {
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => Some(Reg::Physical(
+            crate::backend::dtal::regs::PhysicalReg::LR,
+        )),
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => Some(Reg::Physical(
+            crate::backend::dtal::regs::PhysicalReg::R0,
+        )),
+        _ => None,
+    }
+}
+
+fn clear_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
+    state.owned_registers.remove(&reg);
+    state.owned_object_ids.remove(&reg);
+    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
+        let same_object = object_id
+            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
+        if same_object {
+            state.owned_registers.remove(&counterpart);
+            state.owned_object_ids.remove(&counterpart);
+        }
+    }
+}
+
+fn consume_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
+    state.consumed_registers.insert(reg);
+    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
+        let same_object = object_id
+            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
+        if same_object {
+            state.consumed_registers.insert(counterpart);
+        }
     }
 }
 

@@ -30,6 +30,12 @@ pub fn verify_instruction(
             clear_consumed(*dst, state);
         }
 
+        DtalInstr::AliasBorrow { dst, src, ty } => {
+            verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_consumed(*dst, state);
+        }
+
         DtalInstr::MoveOwned { dst, src, ty } => {
             verify_owned_available(*src, state, block_label, "move_owned")?;
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
@@ -432,8 +438,9 @@ pub fn verify_instruction(
 
         DtalInstr::DropOwned { src, .. } => {
             verify_owned_available(*src, state, block_label, "drop_owned")?;
-            clear_owned(*src, state);
-            consume_reg(*src, state);
+            let object_id = state.owned_object_ids.get(src).copied();
+            clear_owned_alias_group(*src, object_id, state);
+            consume_owned_alias_group(*src, object_id, state);
         }
     }
 
@@ -445,6 +452,40 @@ pub fn verify_instruction(
 fn clear_owned(reg: Reg, state: &mut TypeState) {
     state.owned_registers.remove(&reg);
     state.owned_object_ids.remove(&reg);
+}
+
+fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
+    match reg {
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => Some(Reg::Physical(
+            crate::backend::dtal::regs::PhysicalReg::LR,
+        )),
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => Some(Reg::Physical(
+            crate::backend::dtal::regs::PhysicalReg::R0,
+        )),
+        _ => None,
+    }
+}
+
+fn clear_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
+    clear_owned(reg, state);
+    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
+        let same_object = object_id
+            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
+        if same_object {
+            clear_owned(counterpart, state);
+        }
+    }
+}
+
+fn consume_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
+    consume_reg(reg, state);
+    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
+        let same_object = object_id
+            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
+        if same_object {
+            consume_reg(counterpart, state);
+        }
+    }
 }
 
 fn consume_reg(reg: Reg, state: &mut TypeState) {
@@ -464,8 +505,8 @@ fn set_reg_owned(reg: Reg, owned: bool, state: &mut TypeState) {
 }
 
 fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
-    let object_id = state.owned_object_ids.remove(&src);
-    state.owned_registers.remove(&src);
+    let object_id = state.owned_object_ids.get(&src).copied();
+    clear_owned_alias_group(src, object_id, state);
     if let Some(object_id) = object_id {
         assign_owned_object(dst, object_id, state);
     } else {
@@ -536,18 +577,7 @@ fn verify_plain_mov_does_not_duplicate_owned(
                 | (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
         ) && state.owned_object_ids.get(&dst).copied() == Some(object_id);
         let same_register = src == dst;
-        let call_arg_alias = matches!(
-            dst,
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R1)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R2)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R3)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R4)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R5)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R6)
-                | Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R7)
-        );
-        if !same_alias_pair && !same_register && !call_arg_alias {
+        if !same_alias_pair && !same_register {
             return Err(VerifyError::OwnershipViolation {
                 block: block_label.to_string(),
                 instr_desc: "mov".to_string(),

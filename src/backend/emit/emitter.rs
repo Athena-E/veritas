@@ -134,6 +134,17 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::AliasBorrow { dst, src, ty } => {
+            writeln!(
+                output,
+                "    alias_borrow {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
         DtalInstr::MoveOwned { dst, src, ty } => {
             writeln!(
                 output,

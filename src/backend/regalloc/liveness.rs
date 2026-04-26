@@ -207,6 +207,7 @@ impl LivenessAnalysis {
         let reg = match instr {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
             DtalInstr::MovReg { dst, .. } => Some(*dst),
+            DtalInstr::AliasBorrow { dst, .. } => Some(*dst),
             DtalInstr::MoveOwned { dst, .. } => Some(*dst),
             DtalInstr::Load { dst, .. } => Some(*dst),
             DtalInstr::LoadOp { dst, .. } => Some(*dst),
@@ -231,6 +232,7 @@ impl LivenessAnalysis {
     fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
+            DtalInstr::AliasBorrow { src, .. } => vec![*src],
             DtalInstr::MoveOwned { src, .. } => vec![*src],
             DtalInstr::Load { base, offset, .. } => vec![*base, *offset],
             DtalInstr::LoadOp {

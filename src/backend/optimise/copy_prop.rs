@@ -82,7 +82,9 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
     let mut changed = false;
 
     match instr {
-        DtalInstr::MovReg { src, .. } | DtalInstr::MoveOwned { src, .. } => {
+        DtalInstr::MovReg { src, .. }
+        | DtalInstr::AliasBorrow { src, .. }
+        | DtalInstr::MoveOwned { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
         DtalInstr::Load { base, offset, .. } => {

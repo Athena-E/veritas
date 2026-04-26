@@ -625,7 +625,7 @@ mod tests {
                     },
                     DtalInstr::Call {
                         target: "owned_callee".to_string(),
-                        arg_ownerships: vec![],
+                        arg_ownerships: vec![crate::common::ownership::OwnershipMode::Plain],
                         return_ty: array_ty.clone(),
                         ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                     },
@@ -653,7 +653,7 @@ mod tests {
                 arg_ownerships,
                 ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                 ..
-            } if arg_ownerships.is_empty()
+            } if arg_ownerships == &vec![crate::common::ownership::OwnershipMode::Plain]
         ));
         assert!(matches!(
             &block.instructions[2],
@@ -852,6 +852,34 @@ mod tests {
 
         let err = checker::verify_unique_owned_objects(&state, ".entry", "test").unwrap_err();
         assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn alias_borrow_allows_non_owning_alias_of_owned_value() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 21);
+        let program = make_program(vec![]);
+
+        verify_instruction(
+            &DtalInstr::AliasBorrow {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert!(state.owned_registers.contains(&v(0)));
+        assert!(!state.owned_registers.contains(&v(1)));
     }
 
     // ========================================================================
