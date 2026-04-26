@@ -297,7 +297,8 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
         } => {
             let mnemonic = match ownership {
                 crate::common::ownership::OwnershipMode::Plain => "call",
-                crate::common::ownership::OwnershipMode::Owned => "call_owned",
+                crate::common::ownership::OwnershipMode::Consume => "call_consume",
+                crate::common::ownership::OwnershipMode::FreshOwned => "call_owned",
             };
             writeln!(
                 output,

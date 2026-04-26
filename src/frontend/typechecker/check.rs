@@ -549,14 +549,10 @@ pub fn check_stmt<'src>(
 
             let move_ctx = apply_whole_value_move(ctx, &expr.0, &ret_ty);
 
-            let tstmt = TStmt::Return {
-                expr: Box::new(texpr),
-                ownership: if !ctx.bare_metal && contains_array_type(&ret_ty) {
-                    OwnershipMode::Owned
-                } else {
-                    OwnershipMode::Plain
-                },
-            };
+                    let tstmt = TStmt::Return {
+                        expr: Box::new(texpr),
+                        ownership: explicit_transfer_ownership(ctx.bare_metal, &expr.0, &ret_ty),
+                    };
 
             Ok(((tstmt, span), move_ctx))
         }
@@ -1321,6 +1317,11 @@ fn check_program_with_options<'src>(
         let return_type = ast_type_to_itype(&func.return_type)?;
         let returns_owned =
             !bare_metal && contains_array_type(&return_type) && func.name != "main";
+        let return_ownership = if returns_owned {
+            OwnershipMode::FreshOwned
+        } else {
+            OwnershipMode::Plain
+        };
         if !bare_metal && contains_array_type(&return_type) && func.name == "main" {
             return Err(TypeError::UnsupportedFeature {
                 feature:
@@ -1374,7 +1375,9 @@ fn check_program_with_options<'src>(
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
+            parameter_ownerships: vec![OwnershipMode::Plain; func.parameters.len()],
             return_type,
+            return_ownership,
             returns_owned,
             precondition,
             postcondition,
@@ -1394,7 +1397,9 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "print_int".into(),
                 parameters: vec![("n".into(), IType::Int)],
+                parameter_ownerships: vec![OwnershipMode::Plain],
                 return_type: IType::Unit,
+                return_ownership: OwnershipMode::Plain,
                 returns_owned: false,
                 precondition: None,
                 postcondition: None,
@@ -1406,7 +1411,9 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "print_char".into(),
                 parameters: vec![("c".into(), IType::Int)],
+                parameter_ownerships: vec![OwnershipMode::Plain],
                 return_type: IType::Unit,
+                return_ownership: OwnershipMode::Plain,
                 returns_owned: false,
                 precondition: None,
                 postcondition: None,
@@ -1418,7 +1425,9 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "read_int".into(),
                 parameters: vec![],
+                parameter_ownerships: vec![],
                 return_type: IType::Int,
+                return_ownership: OwnershipMode::Plain,
                 returns_owned: false,
                 precondition: None,
                 postcondition: None,
@@ -1433,7 +1442,9 @@ fn check_program_with_options<'src>(
         FunctionSignature {
             name: "port_in".into(),
             parameters: vec![("port".into(), IType::Int)],
+            parameter_ownerships: vec![OwnershipMode::Plain],
             return_type: IType::Int,
+            return_ownership: OwnershipMode::Plain,
             returns_owned: false,
             precondition: None,
             postcondition: None,
@@ -1445,7 +1456,9 @@ fn check_program_with_options<'src>(
         FunctionSignature {
             name: "port_out".into(),
             parameters: vec![("port".into(), IType::Int), ("value".into(), IType::Int)],
+            parameter_ownerships: vec![OwnershipMode::Plain, OwnershipMode::Plain],
             return_type: IType::Unit,
+            return_ownership: OwnershipMode::Plain,
             returns_owned: false,
             precondition: None,
             postcondition: None,
@@ -1862,8 +1875,20 @@ fn apply_call_argument_moves<'src>(
         Expr::Call { func_name, args } => {
             let mut new_ctx = ctx.clone();
             if let Some(sig) = ctx.lookup_function(func_name) {
-                for ((arg_expr, _), _) in args.0.iter().zip(sig.parameters.iter()) {
+                for (((arg_expr, _), (_param_name, param_ty)), arg_ownership) in args
+                    .0
+                    .iter()
+                    .zip(sig.parameters.iter())
+                    .zip(sig.parameter_ownerships.iter())
+                {
                     new_ctx = apply_call_argument_moves(&new_ctx, arg_expr);
+                    if arg_ownership.consumes_input()
+                        && !new_ctx.bare_metal
+                        && contains_array_type(param_ty)
+                        && let Expr::Variable(name) = arg_expr
+                    {
+                        new_ctx = consume_owned_variable(&new_ctx, name);
+                    }
                 }
             }
             new_ctx
@@ -1902,13 +1927,14 @@ fn explicit_transfer_ownership<'src>(
     expr: &Expr<'src>,
     ty: &IType<'src>,
 ) -> OwnershipMode {
-    if !bare_metal
-        && contains_array_type(ty)
-        && matches!(expr, Expr::Variable(_) | Expr::ArrayInit { .. })
-    {
-        OwnershipMode::Owned
-    } else {
-        OwnershipMode::Plain
+    if bare_metal || !contains_array_type(ty) {
+        return OwnershipMode::Plain;
+    }
+
+    match expr {
+        Expr::Variable(_) => OwnershipMode::Consume,
+        Expr::ArrayInit { .. } => OwnershipMode::FreshOwned,
+        _ => OwnershipMode::Plain,
     }
 }
 

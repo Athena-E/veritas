@@ -8,7 +8,6 @@ use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use crate::common::ownership::OwnershipMode;
 use crate::verifier::error::VerifyError;
 
 /// Verify a single instruction updates the type state correctly
@@ -261,15 +260,15 @@ pub fn verify_instruction(
                 .insert(Reg::Physical(PhysicalReg::LR), derived_return_ty);
             set_reg_owned(
                 Reg::Physical(PhysicalReg::R0),
-                *ownership == OwnershipMode::Owned,
+                ownership.produces_owned_output(),
                 state,
             );
             set_reg_owned(
                 Reg::Physical(PhysicalReg::LR),
-                *ownership == OwnershipMode::Owned,
+                ownership.produces_owned_output(),
                 state,
             );
-            if *ownership == OwnershipMode::Owned {
+            if ownership.produces_owned_output() {
                 let object_id = fresh_object_id(state);
                 assign_owned_object(Reg::Physical(PhysicalReg::R0), object_id, state);
                 assign_owned_object(Reg::Physical(PhysicalReg::LR), object_id, state);

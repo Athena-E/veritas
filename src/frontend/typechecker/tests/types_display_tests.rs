@@ -61,7 +61,9 @@ fn test_display_function_signature() {
     let sig = FunctionSignature {
         name: "foo".to_string(),
         parameters: vec![("x".to_string(), IType::Int)],
+        parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Plain],
         return_type: IType::Bool,
+        return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,
         precondition: None,
         postcondition: None,
@@ -76,7 +78,13 @@ fn test_display_function_signature() {
             ("b".to_string(), IType::Bool),
             ("c".to_string(), IType::Unit),
         ],
+        parameter_ownerships: vec![
+            crate::common::ownership::OwnershipMode::Plain,
+            crate::common::ownership::OwnershipMode::Plain,
+            crate::common::ownership::OwnershipMode::Plain,
+        ],
         return_type: IType::Int,
+        return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,
         precondition: None,
         postcondition: None,
@@ -90,7 +98,9 @@ fn test_display_function_signature() {
     let sig_no_params = FunctionSignature {
         name: "empty".to_string(),
         parameters: vec![],
+        parameter_ownerships: vec![],
         return_type: IType::Bool,
+        return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,
         precondition: None,
         postcondition: None,

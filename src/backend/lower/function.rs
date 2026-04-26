@@ -69,7 +69,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         Terminator::Return {
             value: return_value,
             ownership: if func.returns_owned {
-                OwnershipMode::Owned
+                OwnershipMode::FreshOwned
             } else {
                 OwnershipMode::Plain
             },

@@ -110,7 +110,12 @@ fn test_context_with_function() {
             ("x".to_string(), IType::Int),
             ("y".to_string(), IType::Bool),
         ],
+        parameter_ownerships: vec![
+            crate::common::ownership::OwnershipMode::Plain,
+            crate::common::ownership::OwnershipMode::Plain,
+        ],
         return_type: IType::Unit,
+        return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,
         precondition: None,
         postcondition: None,

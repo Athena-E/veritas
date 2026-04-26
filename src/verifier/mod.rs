@@ -610,7 +610,7 @@ mod tests {
                     DtalInstr::Call {
                         target: "owned_callee".to_string(),
                         return_ty: array_ty.clone(),
-                        ownership: crate::common::ownership::OwnershipMode::Owned,
+                        ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                     },
                     DtalInstr::DropOwned {
                         src: v(1),
@@ -633,7 +633,7 @@ mod tests {
         assert!(matches!(
             &block.instructions[1],
             DtalInstr::Call {
-                ownership: crate::common::ownership::OwnershipMode::Owned,
+                ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                 ..
             }
         ));
@@ -657,7 +657,7 @@ mod tests {
             &DtalInstr::Call {
                 target: "owned_callee".to_string(),
                 return_ty: array_ty,
-                ownership: crate::common::ownership::OwnershipMode::Owned,
+                ownership: crate::common::ownership::OwnershipMode::FreshOwned,
             },
             &mut state,
             ".entry",

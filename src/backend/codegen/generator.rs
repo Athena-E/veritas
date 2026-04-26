@@ -345,7 +345,7 @@ fn function_needs_hosted_region<'src>(func: &TirFunction<'src>) -> bool {
                 || matches!(
                     instr,
                     TirInstr::Call {
-                        ownership: OwnershipMode::Owned,
+                        ownership: OwnershipMode::FreshOwned,
                         ..
                     }
                 )
@@ -483,7 +483,7 @@ fn lower_terminator<'src>(
                         dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
                         ty: ret_ty,
                     });
-                } else if *ownership == OwnershipMode::Owned {
+                } else if ownership.produces_owned_output() {
                     instrs.push(DtalInstr::MoveOwned {
                         dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
                         src: Reg::Virtual(*val_reg),

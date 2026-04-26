@@ -1,7 +1,6 @@
 // Given an expression e, synthesize its type T and produce a typed expression e'
 
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
-use crate::common::ownership::OwnershipMode;
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
@@ -380,7 +379,12 @@ pub fn synth_expr<'src>(
             let mut typed_args = Vec::new();
             let mut arg_types = Vec::new();
             let mut arg_ownerships = Vec::new();
-            for (arg, (_param_name, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
+            for ((arg, (_param_name, param_ty)), arg_ownership) in args
+                .0
+                .iter()
+                .zip(sig.parameters.iter())
+                .zip(sig.parameter_ownerships.iter())
+            {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
                 if !is_subtype(ctx, &arg_ty, param_ty) {
@@ -393,7 +397,7 @@ pub fn synth_expr<'src>(
 
                 typed_args.push(targ);
                 arg_types.push(arg_ty);
-                arg_ownerships.push(OwnershipMode::Plain);
+                arg_ownerships.push(*arg_ownership);
             }
 
             // Check precondition if present
@@ -424,11 +428,7 @@ pub fn synth_expr<'src>(
                 func_name: func_name.to_string(),
                 args: typed_args,
                 arg_ownerships,
-                ownership: if sig.returns_owned {
-                    OwnershipMode::Owned
-                } else {
-                    OwnershipMode::Plain
-                },
+                ownership: sig.return_ownership,
                 ty: ret_ty.clone(),
             };
             Ok(((texpr, span), ret_ty))

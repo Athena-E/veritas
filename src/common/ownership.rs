@@ -1,11 +1,16 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OwnershipMode {
     Plain,
-    Owned,
+    Consume,
+    FreshOwned,
 }
 
 impl OwnershipMode {
-    pub fn is_owned(self) -> bool {
-        matches!(self, Self::Owned)
+    pub fn consumes_input(self) -> bool {
+        matches!(self, Self::Consume)
+    }
+
+    pub fn produces_owned_output(self) -> bool {
+        matches!(self, Self::FreshOwned)
     }
 }

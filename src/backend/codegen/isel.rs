@@ -166,7 +166,7 @@ pub fn lower_instruction<'src>(
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
                     return_ty: DtalType::Int,
-                    ownership: OwnershipMode::Owned,
+                    ownership: OwnershipMode::FreshOwned,
                 });
                 instrs.push(DtalInstr::MoveOwned {
                     dst: Reg::Virtual(*dst),
@@ -482,7 +482,7 @@ fn lower_call<'src>(
 
     // Move result from r0 to destination
     if let Some(dst_reg) = dst {
-        if ownership == OwnershipMode::Owned {
+        if ownership.produces_owned_output() {
             instrs.push(DtalInstr::MoveOwned {
                 dst: Reg::Virtual(dst_reg),
                 src: Reg::Physical(PhysicalReg::R0),

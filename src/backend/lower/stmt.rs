@@ -97,7 +97,7 @@ fn lower_let<'src>(
 
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
-    let bound_reg = if ownership == OwnershipMode::Owned
+    let bound_reg = if ownership.consumes_input()
         && matches!(&value.0, TExpr::Variable { .. })
     {
         let moved_reg = ctx.fresh_reg();
@@ -115,7 +115,7 @@ fn lower_let<'src>(
     };
 
     if let Some((prior_reg, prior_ty)) = prior_binding {
-        let transferred_from_shadowed = ownership == OwnershipMode::Owned
+        let transferred_from_shadowed = ownership.consumes_input()
             && matches!(&value.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name);
         if !transferred_from_shadowed {
             ctx.emit(TirInstr::DropOwned {
@@ -149,7 +149,7 @@ fn lower_assignment<'src>(
             // Create a copy to a new register (SSA form)
             // Use the RHS type, not the LHS declared type (which may be a stale singleton)
             let new_reg = ctx.fresh_reg();
-            if ownership == OwnershipMode::Owned && matches!(&rhs.0, TExpr::Variable { .. }) {
+            if ownership.consumes_input() && matches!(&rhs.0, TExpr::Variable { .. }) {
                 ctx.emit(TirInstr::MoveOwned {
                     dst: new_reg,
                     src: rhs_reg,

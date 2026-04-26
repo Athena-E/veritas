@@ -333,7 +333,7 @@ fn lower_call<'src>(
         .zip(arg_ownerships.iter())
         .map(|(arg, arg_ownership)| {
             let arg_reg = lower_expr(ctx, arg);
-            if *arg_ownership == OwnershipMode::Owned && matches!(&arg.0, TExpr::Variable { .. }) {
+            if arg_ownership.consumes_input() && matches!(&arg.0, TExpr::Variable { .. }) {
                 let moved_reg = ctx.fresh_reg();
                 ctx.emit(TirInstr::MoveOwned {
                     dst: moved_reg,

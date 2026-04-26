@@ -1,10 +1,17 @@
 use crate::backend::lower::lower_program;
 use crate::backend::tir::{Terminator, TirInstr};
+use crate::common::ast::{Expr, Stmt};
 use crate::common::ownership::OwnershipMode;
+use crate::common::types::{FunctionSignature, IType, IValue};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
-use crate::frontend::typechecker::{TypeError, check_program, check_program_bare_metal};
+use crate::frontend::typechecker::check::check_stmt;
+use crate::frontend::typechecker::{
+    TypeError, TypingContext, check_program, check_program_bare_metal,
+};
 use chumsky::prelude::*;
+use im::HashMap;
+use std::sync::Arc;
 
 fn parse_program<'src>(src: &'src str) -> crate::common::ast::Program<'src> {
     let tokens = lexer().parse(src).into_result().unwrap();
@@ -114,7 +121,7 @@ fn hosted_owned_array_returns_are_explicit_in_tast_and_tir() {
     assert!(make_arr.returns_owned);
     match &make_arr.body.statements[0].0 {
         crate::common::tast::TStmt::Return { ownership, .. } => {
-            assert_eq!(*ownership, OwnershipMode::Owned);
+            assert_eq!(*ownership, OwnershipMode::FreshOwned);
         }
         other => panic!("expected explicit return stmt, got {other:?}"),
     }
@@ -128,7 +135,7 @@ fn hosted_owned_array_returns_are_explicit_in_tast_and_tir() {
     match &main.body.statements[0].0 {
         crate::common::tast::TStmt::Let { value, .. } => match &value.0 {
             crate::common::tast::TExpr::Call { ownership, .. } => {
-                assert_eq!(*ownership, OwnershipMode::Owned);
+                assert_eq!(*ownership, OwnershipMode::FreshOwned);
             }
             other => panic!("expected explicit owned call, got {other:?}"),
         },
@@ -148,7 +155,7 @@ fn hosted_owned_array_returns_are_explicit_in_tast_and_tir() {
         .expect("make_arr entry block should exist");
     match &entry.terminator {
         Terminator::Return { ownership, .. } => {
-            assert_eq!(*ownership, OwnershipMode::Owned);
+            assert_eq!(*ownership, OwnershipMode::FreshOwned);
         }
         other => panic!("expected explicit owned TIR return, got {other:?}"),
     }
@@ -173,7 +180,7 @@ fn hosted_owned_array_returns_are_explicit_in_tast_and_tir() {
             _ => None,
         })
         .expect("main should contain a call to make_arr");
-    assert_eq!(call, OwnershipMode::Owned);
+    assert_eq!(call, OwnershipMode::FreshOwned);
 }
 
 #[test]
@@ -211,6 +218,42 @@ fn hosted_target_allows_reusing_arrays_after_calls() {
 
     let program = parse_program(src);
     check_program(&program).expect("hosted target should treat array call args as non-consuming");
+}
+
+#[test]
+fn consuming_signature_marks_call_argument_as_consumed() {
+    let span = SimpleSpan::new(0, 0);
+    let array_ty = IType::Array {
+        element_type: Arc::new(IType::Int),
+        size: IValue::Int(4),
+    };
+
+    let sig = FunctionSignature {
+        name: "take_arr".to_string(),
+        parameters: vec![("arr".to_string(), array_ty.clone())],
+        parameter_ownerships: vec![OwnershipMode::Consume],
+        return_type: IType::Int,
+        return_ownership: OwnershipMode::Plain,
+        returns_owned: false,
+        precondition: None,
+        postcondition: None,
+        span,
+    };
+
+    let mut functions = HashMap::new();
+    functions.insert("take_arr".to_string(), sig);
+
+    let ctx = TypingContext::with_functions(functions).with_immutable("arr".to_string(), array_ty);
+    let stmt = Stmt::Expr((
+        Expr::Call {
+            func_name: "take_arr",
+            args: (vec![((Expr::Variable("arr")), span)], span),
+        },
+        span,
+    ));
+
+    let (_, new_ctx) = check_stmt(&ctx, &(stmt, span)).expect("consuming call should typecheck");
+    assert!(new_ctx.is_moved("arr"));
 }
 
 #[test]

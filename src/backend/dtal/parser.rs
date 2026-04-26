@@ -840,7 +840,9 @@ impl<'a> DtalParser<'a> {
             target: tokens[1].to_string(),
             return_ty,
             ownership: if tokens[0] == "call_owned" {
-                OwnershipMode::Owned
+                OwnershipMode::FreshOwned
+            } else if tokens[0] == "call_consume" {
+                OwnershipMode::Consume
             } else {
                 OwnershipMode::Plain
             },

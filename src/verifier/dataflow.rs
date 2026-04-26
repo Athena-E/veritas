@@ -8,7 +8,6 @@ use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use crate::common::ownership::OwnershipMode;
 use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
@@ -806,7 +805,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::LR), return_ty.clone());
-            if *ownership == OwnershipMode::Owned {
+            if ownership.produces_owned_output() {
                 let object_id = fresh_object_id(state);
                 state.owned_registers.insert(Reg::Physical(PhysicalReg::R0));
                 state.owned_registers.insert(Reg::Physical(PhysicalReg::LR));
