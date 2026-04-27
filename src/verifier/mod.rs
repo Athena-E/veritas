@@ -969,6 +969,64 @@ mod tests {
 
         assert!(state.owned_registers.contains(&v(0)));
         assert!(!state.owned_registers.contains(&v(1)));
+        assert_eq!(state.shared_borrow_object_ids.get(&v(1)).copied(), Some(21));
+    }
+
+    #[test]
+    fn move_owned_while_shared_borrow_live_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.register_types.insert(v(1), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 31);
+        state.shared_borrow_object_ids.insert(v(1), 31);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::MoveOwned {
+                dst: v(2),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn drop_owned_while_shared_borrow_live_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.register_types.insert(v(1), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 32);
+        state.shared_borrow_object_ids.insert(v(1), 32);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::DropOwned {
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
     }
 
     #[test]
