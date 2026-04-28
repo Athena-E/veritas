@@ -303,6 +303,8 @@ fn join_states(
         return Ok(result);
     }
 
+    verify_borrow_join_compatibility(&pred_states, target_label)?;
+
     // Collect all registers that appear in any predecessor
     let mut all_regs: HashSet<Reg> = HashSet::new();
     for state in &pred_states {
@@ -564,6 +566,63 @@ fn join_states(
     checker::verify_unique_owned_objects(&result, target_label, "join")?;
 
     Ok(result)
+}
+
+fn verify_borrow_join_compatibility(
+    pred_states: &[&TypeState],
+    target_label: &str,
+) -> Result<(), VerifyError> {
+    if pred_states.len() <= 1 {
+        return Ok(());
+    }
+
+    let baseline = pred_states[0];
+    for state in pred_states.iter().skip(1) {
+        if baseline.shared_borrow_object_ids != state.shared_borrow_object_ids {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "join".to_string(),
+                msg: "predecessors disagree on shared-borrow register state".to_string(),
+            });
+        }
+        if baseline.mutable_borrow_object_ids != state.mutable_borrow_object_ids {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "join".to_string(),
+                msg: "predecessors disagree on mutable-borrow register state".to_string(),
+            });
+        }
+        if baseline.shared_borrow_stack_object_ids != state.shared_borrow_stack_object_ids {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "join".to_string(),
+                msg: "predecessors disagree on shared-borrow stack state".to_string(),
+            });
+        }
+        if baseline.mutable_borrow_stack_object_ids != state.mutable_borrow_stack_object_ids {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "join".to_string(),
+                msg: "predecessors disagree on mutable-borrow stack state".to_string(),
+            });
+        }
+        if baseline.shared_borrow_spill_object_ids != state.shared_borrow_spill_object_ids {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "join".to_string(),
+                msg: "predecessors disagree on shared-borrow spill state".to_string(),
+            });
+        }
+        if baseline.mutable_borrow_spill_object_ids != state.mutable_borrow_spill_object_ids {
+            return Err(VerifyError::OwnershipViolation {
+                block: target_label.to_string(),
+                instr_desc: "join".to_string(),
+                msg: "predecessors disagree on mutable-borrow spill state".to_string(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 /// Join multiple types into their least upper bound

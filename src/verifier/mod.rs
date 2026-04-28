@@ -1195,6 +1195,261 @@ mod tests {
     }
 
     #[test]
+    fn branch_local_shared_borrow_is_rejected_at_join() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let program = make_program(vec![DtalFunction {
+            name: "main".to_string(),
+            params: vec![(v(0), array_ty.clone())],
+            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                make_block(
+                    ".entry",
+                    vec![
+                        DtalInstr::MovImm {
+                            dst: v(9),
+                            imm: 0,
+                            ty: DtalType::Int,
+                        },
+                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Branch {
+                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            target: ".then".to_string(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".else".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".then",
+                    vec![
+                        DtalInstr::AliasBorrow {
+                            dst: v(1),
+                            src: v(0),
+                            ty: array_ty.clone(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".join".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".else",
+                    vec![DtalInstr::Jmp {
+                        target: ".join".to_string(),
+                    }],
+                ),
+                make_block(".join", vec![DtalInstr::Ret]),
+            ],
+        }]);
+
+        let err = verify_dtal(&program).unwrap_err();
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn mixed_shared_and_mutable_borrow_is_rejected_at_join() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let program = make_program(vec![DtalFunction {
+            name: "main".to_string(),
+            params: vec![(v(0), array_ty.clone())],
+            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                make_block(
+                    ".entry",
+                    vec![
+                        DtalInstr::MovImm {
+                            dst: v(9),
+                            imm: 0,
+                            ty: DtalType::Int,
+                        },
+                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Branch {
+                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            target: ".then".to_string(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".else".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".then",
+                    vec![
+                        DtalInstr::AliasBorrow {
+                            dst: v(1),
+                            src: v(0),
+                            ty: array_ty.clone(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".join".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".else",
+                    vec![
+                        DtalInstr::BorrowMut {
+                            dst: v(2),
+                            src: v(0),
+                            ty: array_ty.clone(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".join".to_string(),
+                        },
+                    ],
+                ),
+                make_block(".join", vec![DtalInstr::Ret]),
+            ],
+        }]);
+
+        let err = verify_dtal(&program).unwrap_err();
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn borrow_end_on_one_path_only_is_rejected_at_join() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let program = make_program(vec![DtalFunction {
+            name: "main".to_string(),
+            params: vec![(v(0), array_ty.clone())],
+            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                make_block(
+                    ".entry",
+                    vec![
+                        DtalInstr::AliasBorrow {
+                            dst: v(1),
+                            src: v(0),
+                            ty: array_ty.clone(),
+                        },
+                        DtalInstr::MovImm {
+                            dst: v(9),
+                            imm: 0,
+                            ty: DtalType::Int,
+                        },
+                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Branch {
+                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            target: ".then".to_string(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".else".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".then",
+                    vec![
+                        DtalInstr::BorrowEnd {
+                            src: v(1),
+                            ty: array_ty.clone(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".join".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".else",
+                    vec![DtalInstr::Jmp {
+                        target: ".join".to_string(),
+                    }],
+                ),
+                make_block(".join", vec![DtalInstr::Ret]),
+            ],
+        }]);
+
+        let err = verify_dtal(&program).unwrap_err();
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn loop_carried_shared_borrow_is_preserved() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let program = make_program(vec![DtalFunction {
+            name: "main".to_string(),
+            params: vec![(v(0), array_ty.clone())],
+            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            return_type: DtalType::Unit,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                make_block(
+                    ".entry",
+                    vec![
+                        DtalInstr::AliasBorrow {
+                            dst: v(1),
+                            src: v(0),
+                            ty: array_ty.clone(),
+                        },
+                        DtalInstr::MovImm {
+                            dst: v(9),
+                            imm: 0,
+                            ty: DtalType::Int,
+                        },
+                        DtalInstr::Jmp {
+                            target: ".header".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".header",
+                    vec![
+                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Branch {
+                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            target: ".exit".to_string(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".body".to_string(),
+                        },
+                    ],
+                ),
+                make_block(
+                    ".body",
+                    vec![DtalInstr::Jmp {
+                        target: ".header".to_string(),
+                    }],
+                ),
+                make_block(
+                    ".exit",
+                    vec![
+                        DtalInstr::BorrowEnd {
+                            src: v(1),
+                            ty: array_ty,
+                        },
+                        DtalInstr::Ret,
+                    ],
+                ),
+            ],
+        }]);
+
+        verify_dtal(&program).unwrap();
+    }
+
+    #[test]
     fn alias_borrow_for_consuming_call_argument_is_rejected() {
         let program = make_program(vec![
             make_func(
