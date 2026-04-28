@@ -384,6 +384,7 @@ impl<'a> DtalParser<'a> {
             "mov" => self.parse_mov(&tokens, ty_comment),
             "alias_borrow" => self.parse_alias_borrow(&tokens, ty_comment),
             "move_owned" => self.parse_move_owned(&tokens, ty_comment),
+            "borrow_end" => self.parse_borrow_end(&tokens, ty_comment),
             "load" => self.parse_load(&tokens, ty_comment),
             "store" => self.parse_store(&tokens),
             "add" | "sub" | "mul" | "div" | "and" | "or" => self.parse_binop(&tokens, ty_comment),
@@ -575,6 +576,23 @@ impl<'a> DtalParser<'a> {
             .transpose()?
             .unwrap_or(DtalType::Int);
         Ok(Some(DtalInstr::AliasBorrow { dst, src, ty }))
+    }
+
+    fn parse_borrow_end(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() != 2 {
+            return Err(self.err("borrow_end requires exactly 1 operand"));
+        }
+        let src = parse_reg(tokens[1].trim_end_matches(','))
+            .ok_or_else(|| self.err("invalid source register"))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::BorrowEnd { src, ty }))
     }
 
     fn parse_store(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {

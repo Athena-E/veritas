@@ -1013,6 +1013,76 @@ mod tests {
     }
 
     #[test]
+    fn borrow_end_releases_shared_borrow_so_owner_can_move() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 51);
+        let program = make_program(vec![]);
+
+        verify_instruction(
+            &DtalInstr::AliasBorrow {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty.clone(),
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        verify_instruction(
+            &DtalInstr::BorrowEnd {
+                src: v(1),
+                ty: array_ty.clone(),
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert!(!state.shared_borrow_object_ids.contains_key(&v(1)));
+
+        verify_instruction(
+            &DtalInstr::MoveOwned {
+                dst: v(2),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn borrow_end_without_live_shared_borrow_is_rejected() {
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), DtalType::Int);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::BorrowEnd {
+                src: v(0),
+                ty: DtalType::Int,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
     fn alias_borrow_for_consuming_call_argument_is_rejected() {
         let program = make_program(vec![
             make_func(

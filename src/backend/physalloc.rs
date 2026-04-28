@@ -716,6 +716,27 @@ fn allocate_instruction(
             }
         }
 
+        DtalInstr::BorrowEnd { src, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            match src_loc {
+                PhysLoc::Reg(r) => instrs.push(DtalInstr::BorrowEnd {
+                    src: r,
+                    ty: ty.clone(),
+                }),
+                PhysLoc::Spill(offset) => {
+                    instrs.push(DtalInstr::SpillLoad {
+                        dst: R11,
+                        offset,
+                        ty: ty.clone(),
+                    });
+                    instrs.push(DtalInstr::BorrowEnd {
+                        src: R11,
+                        ty: ty.clone(),
+                    });
+                }
+            }
+        }
+
         DtalInstr::BinOp {
             op,
             dst,

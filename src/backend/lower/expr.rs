@@ -327,7 +327,12 @@ fn lower_call<'src>(
     ownership: OwnershipMode,
     ty: &IType<'src>,
 ) -> VirtualReg {
+    fn should_borrow_shared<'src>(arg_ty: &IType<'src>, ownership: OwnershipMode) -> bool {
+        !ownership.consumes_input() && matches!(arg_ty, IType::Array { .. })
+    }
+
     // Lower all arguments
+    let mut borrow_end_regs = Vec::new();
     let arg_regs: Vec<VirtualReg> = args
         .iter()
         .zip(arg_ownerships.iter())
@@ -344,6 +349,15 @@ fn lower_call<'src>(
                     ctx.mark_var_moved(name);
                 }
                 moved_reg
+            } else if should_borrow_shared(arg.0.get_type(), *arg_ownership) {
+                let borrowed_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::BorrowShared {
+                    dst: borrowed_reg,
+                    src: arg_reg,
+                    ty: arg.0.get_type().clone(),
+                });
+                borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
+                borrowed_reg
             } else {
                 arg_reg
             }
@@ -360,6 +374,12 @@ fn lower_call<'src>(
             ownership,
             result_ty: ty.clone(),
         });
+        for (borrow_reg, borrow_ty) in borrow_end_regs {
+            ctx.emit(TirInstr::BorrowEnd {
+                src: borrow_reg,
+                ty: borrow_ty,
+            });
+        }
 
         // Return a dummy unit value
         let dst = ctx.fresh_reg();
@@ -379,6 +399,12 @@ fn lower_call<'src>(
             ownership,
             result_ty: ty.clone(),
         });
+        for (borrow_reg, borrow_ty) in borrow_end_regs {
+            ctx.emit(TirInstr::BorrowEnd {
+                src: borrow_reg,
+                ty: borrow_ty,
+            });
+        }
         dst
     }
 }

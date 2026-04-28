@@ -238,6 +238,7 @@ impl LinearScanAllocator {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
             DtalInstr::MovReg { dst, .. } => Some(*dst),
             DtalInstr::AliasBorrow { dst, .. } => Some(*dst),
+            DtalInstr::BorrowEnd { .. } => None,
             DtalInstr::MoveOwned { dst, .. } => Some(*dst),
             DtalInstr::Load { dst, .. } => Some(*dst),
             DtalInstr::LoadOp { dst, .. } => Some(*dst),
@@ -262,6 +263,7 @@ impl LinearScanAllocator {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
             DtalInstr::AliasBorrow { src, .. } => vec![*src],
+            DtalInstr::BorrowEnd { src, .. } => vec![*src],
             DtalInstr::MoveOwned { src, .. } => vec![*src],
             DtalInstr::Load { base, offset, .. } => vec![*base, *offset],
             DtalInstr::LoadOp {
@@ -466,6 +468,7 @@ impl GraphColoringAllocator {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
             DtalInstr::MovReg { dst, .. } => Some(*dst),
             DtalInstr::AliasBorrow { dst, .. } => Some(*dst),
+            DtalInstr::BorrowEnd { .. } => None,
             DtalInstr::MoveOwned { dst, .. } => Some(*dst),
             DtalInstr::Load { dst, .. } => Some(*dst),
             DtalInstr::LoadOp { dst, .. } => Some(*dst),
@@ -490,6 +493,7 @@ impl GraphColoringAllocator {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
             DtalInstr::AliasBorrow { src, .. } => vec![*src],
+            DtalInstr::BorrowEnd { src, .. } => vec![*src],
             DtalInstr::MoveOwned { src, .. } => vec![*src],
             DtalInstr::Load { base, offset, .. } => vec![*base, *offset],
             DtalInstr::LoadOp {

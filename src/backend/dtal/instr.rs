@@ -199,8 +199,10 @@ pub enum DtalInstr {
     MovImm { dst: Reg, imm: i128, ty: DtalType },
     /// mov rd, rs
     MovReg { dst: Reg, src: Reg, ty: DtalType },
-    /// alias_borrow rd, rs (shared borrow, currently restricted to plain call args)
+    /// alias_borrow rd, rs (shared borrow)
     AliasBorrow { dst: Reg, src: Reg, ty: DtalType },
+    /// borrow_end rs
+    BorrowEnd { src: Reg, ty: DtalType },
     /// move_owned rd, rs
     MoveOwned { dst: Reg, src: Reg, ty: DtalType },
     /// load rd, [base + offset]

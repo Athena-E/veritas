@@ -145,6 +145,10 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::BorrowEnd { src, ty } => {
+            writeln!(output, "    borrow_end {}    : {}", emit_reg(src), emit_type(ty)).unwrap();
+        }
+
         DtalInstr::MoveOwned { dst, src, ty } => {
             writeln!(
                 output,

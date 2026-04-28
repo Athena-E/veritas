@@ -652,6 +652,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             assign_shared_borrow_from(*src, *dst, state);
             state.consumed_registers.remove(dst);
         }
+        DtalInstr::BorrowEnd { src, .. } => {
+            state.shared_borrow_object_ids.remove(src);
+        }
         DtalInstr::MoveOwned { dst, src, .. } => {
             let ty = state
                 .register_types

@@ -221,6 +221,42 @@ fn hosted_target_allows_reusing_arrays_after_calls() {
 }
 
 #[test]
+fn plain_array_calls_lower_to_explicit_tir_borrows_and_borrow_end() {
+    let src = r#"
+        fn consume(arr: [int; 4]) -> int {
+            arr[0]
+        }
+
+        fn main() -> int {
+            let arr: [int; 4] = [0; 4];
+            consume(arr)
+        }
+    "#;
+
+    let program = parse_program(src);
+    let tast = check_program(&program).expect("plain array call should typecheck");
+    let tir = lower_program(&tast);
+    let main = tir
+        .functions
+        .iter()
+        .find(|func| func.name == "main")
+        .expect("lowered main should exist");
+    let entry = main
+        .blocks
+        .get(&main.entry_block)
+        .expect("main entry block should exist");
+
+    assert!(entry
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::BorrowShared { .. })));
+    assert!(entry
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. })));
+}
+
+#[test]
 fn consuming_signature_marks_call_argument_as_consumed() {
     let span = SimpleSpan::new(0, 0);
     let array_ty = IType::Array {

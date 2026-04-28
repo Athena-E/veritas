@@ -54,6 +54,21 @@ pub fn lower_instruction<'src>(
             });
         }
 
+        TirInstr::BorrowShared { dst, src, ty } => {
+            instrs.push(DtalInstr::AliasBorrow {
+                dst: Reg::Virtual(*dst),
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
+        TirInstr::BorrowEnd { src, ty } => {
+            instrs.push(DtalInstr::BorrowEnd {
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
         TirInstr::BinOp {
             dst,
             op,

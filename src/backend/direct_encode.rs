@@ -359,6 +359,7 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
 
         DtalInstr::TypeAnnotation { .. }
         | DtalInstr::ConstraintAssert { .. }
-        | DtalInstr::DropOwned { .. } => {}
+        | DtalInstr::DropOwned { .. }
+        | DtalInstr::BorrowEnd { .. } => {}
     }
 }

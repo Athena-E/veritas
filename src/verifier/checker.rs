@@ -39,6 +39,11 @@ pub fn verify_instruction(
             clear_consumed(*dst, state);
         }
 
+        DtalInstr::BorrowEnd { src, .. } => {
+            verify_shared_borrow_available(*src, state, block_label, "borrow_end")?;
+            clear_shared_borrow(*src, state);
+        }
+
         DtalInstr::MoveOwned { dst, src, ty } => {
             verify_owned_available(*src, state, block_label, "move_owned")?;
             verify_object_not_shared_borrowed(*src, state, block_label, "move_owned")?;
@@ -501,6 +506,22 @@ fn clear_owned(reg: Reg, state: &mut TypeState) {
 
 fn clear_shared_borrow(reg: Reg, state: &mut TypeState) {
     state.shared_borrow_object_ids.remove(&reg);
+}
+
+fn verify_shared_borrow_available(
+    reg: Reg,
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    if !state.shared_borrow_object_ids.contains_key(&reg) {
+        return Err(VerifyError::OwnershipViolation {
+            block: block_label.to_string(),
+            instr_desc: instr_desc.to_string(),
+            msg: format!("register {:?} does not currently hold a shared borrow", reg),
+        });
+    }
+    Ok(())
 }
 
 fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {

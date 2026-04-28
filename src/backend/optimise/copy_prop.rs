@@ -84,6 +84,7 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
     match instr {
         DtalInstr::MovReg { src, .. }
         | DtalInstr::AliasBorrow { src, .. }
+        | DtalInstr::BorrowEnd { src, .. }
         | DtalInstr::MoveOwned { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
@@ -173,6 +174,7 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
     let def_reg = match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
+        | DtalInstr::AliasBorrow { dst, .. }
         | DtalInstr::MoveOwned { dst, .. }
         | DtalInstr::Load { dst, .. }
         | DtalInstr::LoadOp { dst, .. }
@@ -185,6 +187,7 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         | DtalInstr::Pop { dst, .. }
         | DtalInstr::Alloca { dst, .. }
         | DtalInstr::SetCC { dst, .. } => Some(*dst),
+        DtalInstr::BorrowEnd { .. } => None,
         _ => None,
     };
 
