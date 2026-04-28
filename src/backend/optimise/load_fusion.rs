@@ -305,6 +305,7 @@ mod tests {
         DtalFunction {
             name: "test".to_string(),
             params: vec![],
+            parameter_ownerships: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

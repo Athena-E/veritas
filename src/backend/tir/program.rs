@@ -6,6 +6,7 @@ use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::instr::{Terminator, TirInstr};
 use crate::backend::tir::phi::PhiNode;
 use crate::backend::tir::types::{BlockId, RegisterState};
+use crate::common::ownership::OwnershipMode;
 use crate::common::types::IType;
 use std::collections::HashMap;
 
@@ -39,6 +40,8 @@ pub struct TirFunction<'src> {
     pub name: String,
     /// Parameters with their SSA registers and types
     pub params: Vec<(VirtualReg, IType<'src>)>,
+    /// Ownership effect for each parameter, parallel to `params`.
+    pub parameter_ownerships: Vec<OwnershipMode>,
     /// Parameter names (parallel to `params`), for translating constraints
     /// from source-level variable names to register names
     pub param_names: Vec<String>,

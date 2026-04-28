@@ -116,6 +116,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
         DtalFunction {
             name: "print_int".to_string(),
             params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            parameter_ownerships: vec![OwnershipMode::Plain],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -124,6 +125,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
         DtalFunction {
             name: "print_char".to_string(),
             params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            parameter_ownerships: vec![OwnershipMode::Plain],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -132,6 +134,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
         DtalFunction {
             name: "read_int".to_string(),
             params: vec![],
+            parameter_ownerships: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -140,6 +143,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
         DtalFunction {
             name: "port_in".to_string(),
             params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            parameter_ownerships: vec![OwnershipMode::Plain],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -151,6 +155,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
                 (Reg::Physical(PhysicalReg::R0), DtalType::Int),
                 (Reg::Physical(PhysicalReg::R1), DtalType::Int),
             ],
+            parameter_ownerships: vec![OwnershipMode::Plain, OwnershipMode::Plain],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -160,6 +165,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
         DtalFunction {
             name: crate::backend::runtime::RT_REGION_ENTER.to_string(),
             params: vec![],
+            parameter_ownerships: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -171,6 +177,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
                 (Reg::Physical(PhysicalReg::R0), DtalType::Int),
                 (Reg::Physical(PhysicalReg::R1), DtalType::Int),
             ],
+            parameter_ownerships: vec![OwnershipMode::Plain, OwnershipMode::Plain],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -179,6 +186,7 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
         DtalFunction {
             name: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
             params: vec![(Reg::Physical(PhysicalReg::R0), DtalType::Int)],
+            parameter_ownerships: vec![OwnershipMode::Plain],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -254,6 +262,7 @@ pub fn codegen_function_with_target<'src>(
     let mut dtal_func = DtalFunction {
         name: func.name.clone(),
         params: params.clone(),
+        parameter_ownerships: func.parameter_ownerships.clone(),
         return_type: DtalType::from_itype(&func.return_type),
         precondition: func
             .precondition

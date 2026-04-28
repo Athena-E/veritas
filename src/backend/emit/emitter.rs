@@ -504,6 +504,7 @@ mod tests {
         let func = DtalFunction {
             name: "test".to_string(),
             params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
+            parameter_ownerships: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

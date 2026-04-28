@@ -94,6 +94,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     ctx.build_function(
         func.name.clone(),
         params,
+        func.parameter_ownerships.clone(),
         param_names,
         func.return_type.clone(),
         func.returns_owned,

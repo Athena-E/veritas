@@ -558,6 +558,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     DtalFunction {
         name: func.name.clone(),
         params: phys_params,
+        parameter_ownerships: func.parameter_ownerships.clone(),
         return_type: func.return_type.clone(),
         precondition: phys_precond,
         postcondition: phys_postcond,

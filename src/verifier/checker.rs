@@ -270,15 +270,34 @@ pub fn verify_instruction(
                 });
             };
 
+            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
+                if !arg_ownership.consumes_input() {
+                    if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                        clear_shared_borrow(Reg::Physical(param_reg), state);
+                    }
+                    continue;
+                }
+                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                    let param_reg = Reg::Physical(param_reg);
+                        verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
+                        verify_object_not_shared_borrowed(
+                            param_reg,
+                            state,
+                            block_label,
+                            "call_consume_arg",
+                        )?;
+                        clear_owned(param_reg, state);
+                        clear_shared_borrow(param_reg, state);
+                        consume_reg(param_reg, state);
+                }
+            }
+
             // Set return type in both R0 and LR:
             // - Virtual DTAL reads the return value from R0 (`mov vN, r0`)
             // - Physical DTAL reads it from LR (`mov r0, lr`)
             //
-            // Setting both is safe because:
-            // - In virtual DTAL, R0 is the designated return register
-            // - In physical DTAL, R0 (rdi) is caller-saved and the
-            //   call-clobber-aware allocator guarantees no live value
-            //   is in a caller-saved register across a call
+            // This must happen after consuming call arguments because the first
+            // consuming argument also lives in R0.
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty.clone());
@@ -299,28 +318,6 @@ pub fn verify_instruction(
                 let object_id = fresh_object_id(state);
                 assign_owned_object(Reg::Physical(PhysicalReg::R0), object_id, state);
                 assign_owned_object(Reg::Physical(PhysicalReg::LR), object_id, state);
-            }
-            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
-                if !arg_ownership.consumes_input() {
-                    continue;
-                }
-                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
-                    let param_reg = Reg::Physical(param_reg);
-                    if arg_ownership.consumes_input() {
-                        verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
-                        verify_object_not_shared_borrowed(
-                            param_reg,
-                            state,
-                            block_label,
-                            "call_consume_arg",
-                        )?;
-                        clear_owned(param_reg, state);
-                        clear_shared_borrow(param_reg, state);
-                        consume_reg(param_reg, state);
-                    } else {
-                        clear_shared_borrow(param_reg, state);
-                    }
-                }
             }
             clear_consumed(Reg::Physical(PhysicalReg::R0), state);
             clear_consumed(Reg::Physical(PhysicalReg::LR), state);

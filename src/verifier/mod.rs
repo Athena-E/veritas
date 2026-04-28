@@ -96,10 +96,15 @@ fn validate_alias_borrow_usage(func: &DtalFunction) -> Result<(), VerifyError> {
     use crate::backend::dtal::regs::{PhysicalReg, Reg};
 
     fn is_call_setup_instr(instr: &DtalInstr) -> bool {
+        use crate::backend::dtal::regs::Reg;
         matches!(
             instr,
             DtalInstr::AliasBorrow { .. } | DtalInstr::MoveOwned { .. } | DtalInstr::Push { .. }
-        )
+        ) && match instr {
+            DtalInstr::AliasBorrow { .. } | DtalInstr::Push { .. } => true,
+            DtalInstr::MoveOwned { dst, .. } => matches!(dst, Reg::Physical(_)),
+            _ => false,
+        }
     }
 
     let param_regs = PhysicalReg::param_regs();
@@ -603,9 +608,11 @@ mod tests {
         return_type: DtalType,
         blocks: Vec<DtalBlock>,
     ) -> DtalFunction {
+        let parameter_ownerships = vec![crate::common::ownership::OwnershipMode::Plain; params.len()];
         DtalFunction {
             name: name.to_string(),
             params,
+            parameter_ownerships,
             return_type,
             precondition: None,
             postcondition: None,
@@ -628,9 +635,11 @@ mod tests {
         entry_state: TypeState,
         instructions: Vec<DtalInstr>,
     ) -> DtalFunction {
+        let parameter_ownerships = vec![crate::common::ownership::OwnershipMode::Plain; params.len()];
         DtalFunction {
             name: name.to_string(),
             params,
+            parameter_ownerships,
             return_type,
             precondition: None,
             postcondition: None,
@@ -700,6 +709,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "owned_ops".to_string(),
             params: vec![],
+            parameter_ownerships: vec![],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -2097,6 +2107,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "ok".to_string(),
             params: vec![(v(0), DtalType::Int)],
+            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Plain],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -2132,6 +2143,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "ok".to_string(),
             params: vec![],
+            parameter_ownerships: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -2177,6 +2189,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "bad".to_string(),
             params: vec![],
+            parameter_ownerships: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

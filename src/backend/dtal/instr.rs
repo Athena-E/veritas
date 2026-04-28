@@ -108,6 +108,8 @@ pub struct DtalFunction {
     pub name: String,
     /// Parameter registers with their types
     pub params: Vec<(Reg, DtalType)>,
+    /// Ownership effect for each parameter, parallel to `params`.
+    pub parameter_ownerships: Vec<OwnershipMode>,
     /// Return type
     pub return_type: DtalType,
     /// Precondition (if any)

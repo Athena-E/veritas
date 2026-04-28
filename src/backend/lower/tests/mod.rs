@@ -21,6 +21,7 @@ fn test_lower_identity_function() {
             name: "x".to_string(),
             ty: IType::Int,
         }],
+        parameter_ownerships: vec![],
         return_type: IType::Int,
         returns_owned: false,
         precondition: None,
@@ -67,6 +68,7 @@ fn test_lower_function_with_let() {
                 ty: IType::Int,
             },
         ],
+        parameter_ownerships: vec![],
         return_type: IType::Int,
         returns_owned: false,
         precondition: None,
@@ -120,6 +122,7 @@ fn test_lower_function_returning_literal() {
     let func = TFunction {
         name: "const_five".to_string(),
         parameters: vec![],
+        parameter_ownerships: vec![],
         return_type: IType::Int,
         returns_owned: false,
         precondition: None,
@@ -160,6 +163,7 @@ fn test_lower_if_expression() {
             name: "x".to_string(),
             ty: IType::Int,
         }],
+        parameter_ownerships: vec![],
         return_type: IType::Int,
         returns_owned: false,
         precondition: None,
@@ -254,6 +258,7 @@ fn test_lower_function_with_postcondition() {
     let func = TFunction {
         name: "five".to_string(),
         parameters: vec![],
+        parameter_ownerships: vec![],
         return_type: IType::Int,
         returns_owned: false,
         precondition: None,
@@ -285,6 +290,7 @@ fn test_lower_function_without_postcondition() {
     let func = TFunction {
         name: "no_postcond".to_string(),
         parameters: vec![],
+        parameter_ownerships: vec![],
         return_type: IType::Int,
         returns_owned: false,
         precondition: None,

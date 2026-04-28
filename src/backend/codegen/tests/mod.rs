@@ -27,6 +27,7 @@ fn test_pipeline_identity_function() {
                 name: "x".to_string(),
                 ty: IType::Int,
             }],
+            parameter_ownerships: vec![],
             return_type: IType::Int,
             returns_owned: false,
             precondition: None,
@@ -78,6 +79,7 @@ fn test_pipeline_add_function() {
                     ty: IType::Int,
                 },
             ],
+            parameter_ownerships: vec![],
             return_type: IType::Int,
             returns_owned: false,
             precondition: None,
@@ -134,6 +136,7 @@ fn test_pipeline_constant_function() {
         functions: vec![TFunction {
             name: "const_five".to_string(),
             parameters: vec![],
+            parameter_ownerships: vec![],
             return_type: IType::Int,
             returns_owned: false,
             precondition: None,
@@ -172,6 +175,7 @@ fn test_pipeline_conditional_function() {
                 name: "x".to_string(),
                 ty: IType::Int,
             }],
+            parameter_ownerships: vec![],
             return_type: IType::Int,
             returns_owned: false,
             precondition: None,
@@ -256,6 +260,7 @@ fn test_pipeline_multi_function_program() {
                     name: "n".to_string(),
                     ty: IType::Int,
                 }],
+                parameter_ownerships: vec![],
                 return_type: IType::Int,
                 returns_owned: false,
                 precondition: None,
@@ -280,6 +285,7 @@ fn test_pipeline_multi_function_program() {
             TFunction {
                 name: "main".to_string(),
                 parameters: vec![],
+                parameter_ownerships: vec![],
                 return_type: IType::Int,
                 returns_owned: false,
                 precondition: None,
@@ -352,6 +358,7 @@ fn test_pipeline_function_with_postcondition() {
         functions: vec![TFunction {
             name: "five".to_string(),
             parameters: vec![],
+            parameter_ownerships: vec![],
             return_type: IType::Int,
             returns_owned: false,
             precondition: None,
@@ -420,6 +427,7 @@ fn test_pipeline_function_with_inequality_postcondition() {
         functions: vec![TFunction {
             name: "positive".to_string(),
             parameters: vec![],
+            parameter_ownerships: vec![],
             return_type: IType::Int,
             returns_owned: false,
             precondition: None,

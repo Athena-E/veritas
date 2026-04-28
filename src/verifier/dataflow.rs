@@ -41,13 +41,18 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
         let mut entry_state = TypeState::new();
 
         // Initialize with function parameters
-        for (reg, ty) in &func.params {
+        for ((reg, ty), ownership) in func.params.iter().zip(func.parameter_ownerships.iter()) {
             entry_state.register_types.insert(*reg, ty.clone());
-            if matches!(ty, DtalType::Array { .. }) {
+            if ownership.consumes_input() && matches!(ty, DtalType::Array { .. }) {
                 let object_id = fresh_object_id(&mut entry_state);
                 entry_state.owned_registers.insert(*reg);
                 entry_state.owned_object_ids.insert(*reg, object_id);
                 entry_state.shared_borrow_object_ids.remove(reg);
+            } else if matches!(ty, DtalType::Array { .. }) {
+                let object_id = fresh_object_id(&mut entry_state);
+                entry_state.shared_borrow_object_ids.insert(*reg, object_id);
+                entry_state.owned_registers.remove(reg);
+                entry_state.owned_object_ids.remove(reg);
             }
         }
 
@@ -876,6 +881,22 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             ..
         } => {
             use crate::backend::dtal::regs::PhysicalReg;
+            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
+                if let Some(param_reg) = crate::backend::dtal::regs::PhysicalReg::param_regs()
+                    .get(index)
+                    .copied()
+                {
+                    let param_reg = Reg::Physical(param_reg);
+                    if arg_ownership.consumes_input() {
+                        state.owned_registers.remove(&param_reg);
+                        state.owned_object_ids.remove(&param_reg);
+                        state.shared_borrow_object_ids.remove(&param_reg);
+                        state.consumed_registers.insert(param_reg);
+                    } else {
+                        state.shared_borrow_object_ids.remove(&param_reg);
+                    }
+                }
+            }
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), return_ty.clone());
@@ -892,27 +913,23 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 state
                     .owned_object_ids
                     .insert(Reg::Physical(PhysicalReg::LR), object_id);
+                state
+                    .shared_borrow_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::R0));
+                state
+                    .shared_borrow_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::LR));
             } else {
                 state.owned_registers.remove(&Reg::Physical(PhysicalReg::R0));
                 state.owned_registers.remove(&Reg::Physical(PhysicalReg::LR));
                 state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::R0));
                 state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::LR));
-            }
-            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
-                if let Some(param_reg) = crate::backend::dtal::regs::PhysicalReg::param_regs()
-                    .get(index)
-                    .copied()
-                {
-                    let param_reg = Reg::Physical(param_reg);
-                    if arg_ownership.consumes_input() {
-                        state.owned_registers.remove(&param_reg);
-                        state.owned_object_ids.remove(&param_reg);
-                        state.shared_borrow_object_ids.remove(&param_reg);
-                        state.consumed_registers.insert(param_reg);
-                    } else {
-                        state.shared_borrow_object_ids.remove(&param_reg);
-                    }
-                }
+                state
+                    .shared_borrow_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::R0));
+                state
+                    .shared_borrow_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::LR));
             }
             state.consumed_registers.remove(&Reg::Physical(PhysicalReg::R0));
             state.consumed_registers.remove(&Reg::Physical(PhysicalReg::LR));

@@ -144,6 +144,7 @@ pub type TFunctionBody<'src> = TBlock<'src>;
 pub struct TFunction<'src> {
     pub name: String,
     pub parameters: Vec<TParameter<'src>>,
+    pub parameter_ownerships: Vec<OwnershipMode>,
     pub return_type: IType<'src>,
     pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,

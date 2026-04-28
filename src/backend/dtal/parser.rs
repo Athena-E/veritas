@@ -193,6 +193,7 @@ impl<'a> DtalParser<'a> {
 
         Ok(DtalFunction {
             name,
+            parameter_ownerships: vec![OwnershipMode::Plain; params.len()],
             params,
             return_type,
             precondition,
@@ -1583,6 +1584,7 @@ add:
             functions: vec![DtalFunction {
                 name: "test".to_string(),
                 params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
+                parameter_ownerships: vec![],
                 return_type: DtalType::Int,
                 precondition: None,
                 postcondition: None,

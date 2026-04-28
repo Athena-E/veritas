@@ -1257,6 +1257,10 @@ pub fn check_function<'src>(
     let tfunc = TFunction {
         name: func_inner.name.to_string(),
         parameters: tparams,
+        parameter_ownerships: global_ctx
+            .lookup_function(func_inner.name)
+            .map(|sig| sig.parameter_ownerships.clone())
+            .unwrap_or_else(|| vec![OwnershipMode::Plain; func_inner.parameters.len()]),
         return_type,
         returns_owned: global_ctx
             .lookup_function(func_inner.name)
@@ -1372,10 +1376,12 @@ fn check_program_with_options<'src>(
             }
         }
 
+        let parameter_ownerships = infer_parameter_ownerships(&func);
+
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
-            parameter_ownerships: vec![OwnershipMode::Plain; func.parameters.len()],
+            parameter_ownerships,
             return_type,
             return_ownership,
             returns_owned,
@@ -1760,6 +1766,87 @@ fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
         IType::RefinedInt { base, .. } => contains_array_type(base),
         _ => false,
     }
+}
+
+fn source_type_contains_array<'src>(ty: &AstType<'src>) -> bool {
+    match ty {
+        AstType::Array { .. } => true,
+        AstType::Ref(inner) | AstType::RefMut(inner) => source_type_contains_array(&inner.0),
+        AstType::Unit
+        | AstType::Int
+        | AstType::I64
+        | AstType::U64
+        | AstType::Bool
+        | AstType::SingletonInt(_)
+        | AstType::RefinedInt { .. }
+        | AstType::RefinedI64 { .. }
+        | AstType::RefinedU64 { .. } => false,
+    }
+}
+
+fn infer_parameter_ownerships<'src>(func: &Function<'src>) -> Vec<OwnershipMode> {
+    func.parameters
+        .iter()
+        .map(|param| {
+            if !source_type_contains_array(&param.0.ty.0) {
+                return OwnershipMode::Plain;
+            }
+            if block_consumes_variable(&func.body, param.0.name)
+                || func
+                    .body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_is_whole_value_variable(&expr.0, param.0.name))
+            {
+                OwnershipMode::Consume
+            } else {
+                OwnershipMode::Plain
+            }
+        })
+        .collect()
+}
+
+fn block_consumes_variable<'src>(block: &Block<'src>, name: &str) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|stmt| stmt_consumes_variable(&stmt.0, name))
+        || block
+            .trailing_expr
+            .as_ref()
+            .is_some_and(|expr| expr_consumes_variable(&expr.0, name))
+}
+
+fn stmt_consumes_variable<'src>(stmt: &Stmt<'src>, name: &str) -> bool {
+    match stmt {
+        Stmt::Let { value, .. } => expr_is_whole_value_variable(&value.0, name),
+        Stmt::Assignment { rhs, .. } => expr_is_whole_value_variable(&rhs.0, name),
+        Stmt::Return { expr } => expr_is_whole_value_variable(&expr.0, name),
+        Stmt::Expr(expr) => expr_consumes_variable(&expr.0, name),
+        Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::Region { body } => {
+            block_consumes_variable(body, name)
+        }
+    }
+}
+
+fn expr_consumes_variable<'src>(expr: &Expr<'src>, name: &str) -> bool {
+    match expr {
+        Expr::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            block_consumes_variable(then_block, name)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_consumes_variable(block, name))
+        }
+        _ => expr_is_whole_value_variable(expr, name),
+    }
+}
+
+fn expr_is_whole_value_variable<'src>(expr: &Expr<'src>, name: &str) -> bool {
+    matches!(expr, Expr::Variable(var_name) if *var_name == name)
 }
 
 fn expr_mentions_var<'src>(expr: &Expr<'src>, name: &str) -> bool {
