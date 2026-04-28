@@ -9,6 +9,46 @@ use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_e
 use im::HashMap;
 use std::sync::Arc;
 
+fn borrow_binding_target_name<'src>(expr: &Expr<'src>) -> Option<(&'src str, crate::common::ownership::BorrowKind)> {
+    match expr {
+        Expr::Borrow { kind, expr } => match &expr.0 {
+            Expr::Variable(name) => Some((name, *kind)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn reject_shadowing_borrowed_owner<'src>(
+    ctx: &TypingContext<'src>,
+    name: &str,
+    span: Span,
+) -> Result<(), TypeError<'src>> {
+    if ctx.is_borrowed(name) && ctx.lookup_borrow_binding(name).is_none() {
+        return Err(TypeError::BorrowConflict {
+            name: name.to_string(),
+            reason: "cannot shadow a binding while it is borrowed".to_string(),
+            span,
+        });
+    }
+    Ok(())
+}
+
+fn reject_mutating_borrowed_owner<'src>(
+    ctx: &TypingContext<'src>,
+    name: &str,
+    span: Span,
+) -> Result<(), TypeError<'src>> {
+    if ctx.is_borrowed(name) {
+        return Err(TypeError::BorrowConflict {
+            name: name.to_string(),
+            reason: "cannot mutate a binding while it is borrowed".to_string(),
+            span,
+        });
+    }
+    Ok(())
+}
+
 /// Recursively walk an expression and replace `arr[i]` subexpressions with their
 /// resolved concrete values from the typing context. Returns `(resolved_expr, any_resolved)`.
 fn resolve_array_reads_in_expr<'src>(
@@ -122,6 +162,8 @@ pub fn check_stmt<'src>(
             value,
             is_mut: false,
         } => {
+            reject_shadowing_borrowed_owner(ctx, name, span)?;
+
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
@@ -145,10 +187,21 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty);
+            let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty, value.1)?;
 
             // Add to context with the synthesized type (more precise)
             let mut new_ctx = move_ctx.with_immutable(name.to_string(), value_ty.clone());
+            if matches!(ann_ty, IType::Ref(_) | IType::RefMut(_))
+                && !matches!(value.0, Expr::Borrow { .. })
+            {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "copying reference values is not yet supported".to_string(),
+                    span: value.1,
+                });
+            }
+            if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
+                new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
+            }
             if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&value_ty) {
                 new_ctx = new_ctx.mark_region_scoped_array(name);
             }
@@ -202,6 +255,8 @@ pub fn check_stmt<'src>(
             value,
             is_mut: true,
         } => {
+            reject_shadowing_borrowed_owner(ctx, name, span)?;
+
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
@@ -233,9 +288,20 @@ pub fn check_stmt<'src>(
                 IType::Array { .. } | IType::RefinedInt { .. } => ann_ty.clone(),
                 _ => value_ty.clone(),
             };
-            let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty);
+            let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty, value.1)?;
 
             let mut new_ctx = move_ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            if matches!(ann_ty, IType::Ref(_) | IType::RefMut(_))
+                && !matches!(value.0, Expr::Borrow { .. })
+            {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "copying reference values is not yet supported".to_string(),
+                    span: value.1,
+                });
+            }
+            if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
+                new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
+            }
             if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&current_ty) {
                 new_ctx = new_ctx.mark_region_scoped_array(name);
             }
@@ -332,6 +398,10 @@ pub fn check_stmt<'src>(
             match &lhs.0 {
                 // Variable assignment
                 crate::common::ast::Expr::Variable(var_name) => {
+                    if ctx.lookup_borrow_binding(var_name).is_none() {
+                        reject_mutating_borrowed_owner(ctx, var_name, span)?;
+                    }
+
                     let rhs_depends_on_region_local = !ctx.bare_metal
                         && ctx.in_region_scope()
                         && contains_array_type(&rhs_ty)
@@ -377,9 +447,9 @@ pub fn check_stmt<'src>(
                     // Update mutable variable's current type
                     let move_ctx = if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name)
                     {
-                        apply_call_argument_moves(ctx, &rhs.0)
+                        apply_call_argument_moves(ctx, &rhs.0)?
                     } else {
-                        apply_whole_value_move(ctx, &rhs.0, &rhs_ty)
+                        apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?
                     };
 
                     let mut new_ctx =
@@ -389,6 +459,19 @@ pub fn check_stmt<'src>(
                                 reason: e,
                                 span,
                             })?;
+
+                    new_ctx = new_ctx.release_borrow_binding(var_name);
+                    if matches!(master_base, IType::Ref(_) | IType::RefMut(_))
+                        && !matches!(rhs.0, Expr::Borrow { .. })
+                    {
+                        return Err(TypeError::UnsupportedFeature {
+                            feature: "copying reference values is not yet supported".to_string(),
+                            span: rhs.1,
+                        });
+                    }
+                    if let Some((owner_name, kind)) = borrow_binding_target_name(&rhs.0) {
+                        new_ctx = new_ctx.add_borrow_binding(var_name, owner_name, kind);
+                    }
 
                     if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&rhs_ty) {
                         if rhs_depends_on_region_local {
@@ -437,6 +520,10 @@ pub fn check_stmt<'src>(
 
                 // Array indexing assignment
                 crate::common::ast::Expr::Index { base, index } => {
+                    if let Expr::Variable(arr_name) = &base.0 {
+                        reject_mutating_borrowed_owner(ctx, arr_name, span)?;
+                    }
+
                     let (tbase, base_ty) = synth_expr(ctx, base)?;
                     let (tindex, index_ty) = synth_expr(ctx, index)?;
 
@@ -481,7 +568,7 @@ pub fn check_stmt<'src>(
                         ty: elem_ty.clone(),
                     };
 
-                    let move_ctx = apply_whole_value_move(ctx, &rhs.0, &rhs_ty);
+                    let move_ctx = apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?;
 
                     let tstmt = TStmt::Assignment {
                         lhs: (tlhs_expr, lhs.1),
@@ -577,7 +664,7 @@ pub fn check_stmt<'src>(
                 }
             }
 
-            let move_ctx = apply_whole_value_move(ctx, &expr.0, &ret_ty);
+            let move_ctx = apply_whole_value_move(ctx, &expr.0, &ret_ty, expr.1)?;
 
                     let tstmt = TStmt::Return {
                         expr: Box::new(texpr),
@@ -702,7 +789,9 @@ pub fn check_stmt<'src>(
             };
 
             // Check body statements with invariant in context
-            let (tbody, body_ctx) = check_stmts(&loop_ctx, &body.statements)?;
+            let scoped_loop_ctx = loop_ctx.enter_borrow_scope();
+            let (tbody, body_ctx) = check_stmts(&scoped_loop_ctx, &body.statements)?;
+            let body_ctx = body_ctx.exit_borrow_scope();
 
             // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
@@ -850,7 +939,9 @@ pub fn check_stmt<'src>(
             };
 
             // Step 3: Check body statements
-            let (tbody, body_ctx) = check_stmts(&loop_ctx, &body.statements)?;
+            let scoped_loop_ctx = loop_ctx.enter_borrow_scope();
+            let (tbody, body_ctx) = check_stmts(&scoped_loop_ctx, &body.statements)?;
+            let body_ctx = body_ctx.exit_borrow_scope();
 
             // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
@@ -932,7 +1023,7 @@ pub fn check_stmt<'src>(
                 _ => {
                     let (texpr, _) = synth_expr(ctx, expr)?;
                     let tstmt = TStmt::Expr(texpr);
-                    Ok(((tstmt, span), apply_call_argument_moves(ctx, &expr.0)))
+                    Ok(((tstmt, span), apply_call_argument_moves(ctx, &expr.0)?))
                 }
             }
         }
@@ -1055,7 +1146,8 @@ fn check_block_as_stmt<'src>(
     ctx: &TypingContext<'src>,
     block: &Block<'src>,
 ) -> Result<(TBlock<'src>, TypingContext<'src>), TypeError<'src>> {
-    let (typed_stmts, stmts_ctx) = check_stmts(ctx, &block.statements)?;
+    let scoped_ctx = ctx.enter_borrow_scope();
+    let (typed_stmts, stmts_ctx) = check_stmts(&scoped_ctx, &block.statements)?;
 
     // If there's a trailing expression, check it and thread context
     if let Some(trailing) = &block.trailing_expr {
@@ -1081,7 +1173,7 @@ fn check_block_as_stmt<'src>(
                         statements: all_stmts,
                         trailing_expr: None,
                     },
-                    final_ctx,
+                    final_ctx.exit_borrow_scope(),
                 ))
             }
             // Other trailing expressions: synthesize and include
@@ -1092,7 +1184,7 @@ fn check_block_as_stmt<'src>(
                         statements: typed_stmts,
                         trailing_expr: Some(Box::new(texpr)),
                     },
-                    stmts_ctx,
+                    stmts_ctx.exit_borrow_scope(),
                 ))
             }
         }
@@ -1102,7 +1194,7 @@ fn check_block_as_stmt<'src>(
                 statements: typed_stmts,
                 trailing_expr: None,
             },
-            stmts_ctx,
+            stmts_ctx.exit_borrow_scope(),
         ))
     }
 }
@@ -1229,7 +1321,8 @@ pub fn check_function<'src>(
     }
     func_ctx = func_ctx.with_current_function(func_inner.name.to_string());
 
-    let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
+    let scoped_func_ctx = func_ctx.enter_borrow_scope();
+    let (tbody, final_ctx) = check_stmts(&scoped_func_ctx, &func_inner.body.statements)?;
 
     // Check if body contains any return statements
     fn has_return_stmt(stmts: &[Spanned<TStmt>]) -> bool {
@@ -2039,7 +2132,7 @@ fn consume_owned_variable<'src>(ctx: &TypingContext<'src>, name: &str) -> Typing
 fn apply_call_argument_moves<'src>(
     ctx: &TypingContext<'src>,
     expr: &Expr<'src>,
-) -> TypingContext<'src> {
+) -> Result<TypingContext<'src>, TypeError<'src>> {
     match expr {
         Expr::Call { func_name, args } => {
             let mut new_ctx = ctx.clone();
@@ -2050,33 +2143,40 @@ fn apply_call_argument_moves<'src>(
                     .zip(sig.parameters.iter())
                     .zip(sig.parameter_kinds.iter())
                 {
-                    new_ctx = apply_call_argument_moves(&new_ctx, arg_expr);
+                    new_ctx = apply_call_argument_moves(&new_ctx, arg_expr)?;
                     if arg_kind.is_owned_value()
                         && !new_ctx.bare_metal
                         && contains_array_type(param_ty)
                         && let Expr::Variable(name) = arg_expr
                     {
+                        if new_ctx.is_borrowed(name) {
+                            return Err(TypeError::BorrowConflict {
+                                name: name.to_string(),
+                                reason: "cannot move a binding while it is borrowed".to_string(),
+                                span: args.1,
+                            });
+                        }
                         new_ctx = consume_owned_variable(&new_ctx, name);
                     }
                 }
             }
-            new_ctx
+            Ok(new_ctx)
         }
         Expr::BinOp { lhs, rhs, .. } => {
-            let after_lhs = apply_call_argument_moves(ctx, &lhs.0);
+            let after_lhs = apply_call_argument_moves(ctx, &lhs.0)?;
             apply_call_argument_moves(&after_lhs, &rhs.0)
         }
         Expr::UnaryOp { cond, .. } => apply_call_argument_moves(ctx, &cond.0),
         Expr::Borrow { expr, .. } => apply_call_argument_moves(ctx, &expr.0),
         Expr::Index { base, index } => {
-            let after_base = apply_call_argument_moves(ctx, &base.0);
+            let after_base = apply_call_argument_moves(ctx, &base.0)?;
             apply_call_argument_moves(&after_base, &index.0)
         }
         Expr::ArrayInit { value, length } => {
-            let after_value = apply_call_argument_moves(ctx, &value.0);
+            let after_value = apply_call_argument_moves(ctx, &value.0)?;
             apply_call_argument_moves(&after_value, &length.0)
         }
-        _ => ctx.clone(),
+        _ => Ok(ctx.clone()),
     }
 }
 
@@ -2084,12 +2184,20 @@ fn apply_whole_value_move<'src>(
     ctx: &TypingContext<'src>,
     expr: &Expr<'src>,
     ty: &IType<'src>,
-) -> TypingContext<'src> {
-    let new_ctx = apply_call_argument_moves(ctx, expr);
+    span: Span,
+) -> Result<TypingContext<'src>, TypeError<'src>> {
+    let new_ctx = apply_call_argument_moves(ctx, expr)?;
     if !new_ctx.bare_metal && contains_array_type(ty) && let Expr::Variable(name) = expr {
-        return consume_owned_variable(&new_ctx, name);
+        if new_ctx.is_borrowed(name) {
+            return Err(TypeError::BorrowConflict {
+                name: name.to_string(),
+                reason: "cannot move a binding while it is borrowed".to_string(),
+                span,
+            });
+        }
+        return Ok(consume_owned_variable(&new_ctx, name));
     }
-    new_ctx
+    Ok(new_ctx)
 }
 
 fn explicit_transfer_ownership<'src>(

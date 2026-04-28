@@ -111,6 +111,15 @@ pub fn synth_expr<'src>(
                 });
             }
 
+            if kind.is_shared() && ctx.has_mutable_borrow(place_name) {
+                return Err(TypeError::BorrowConflict {
+                    name: place_name.to_string(),
+                    reason: "cannot create a shared borrow while a mutable borrow is live"
+                        .to_string(),
+                    span: place.1,
+                });
+            }
+
             if kind.is_mutable() {
                 match ctx.lookup_var(place_name) {
                     Some(VarBinding::Mutable(_)) => {}
@@ -132,6 +141,16 @@ pub fn synth_expr<'src>(
                             span: place.1,
                         });
                     }
+                }
+
+                if ctx.is_borrowed(place_name) {
+                    return Err(TypeError::BorrowConflict {
+                        name: place_name.to_string(),
+                        reason:
+                            "cannot create a mutable borrow while another borrow is live"
+                                .to_string(),
+                        span: place.1,
+                    });
                 }
             }
 
@@ -558,16 +577,17 @@ pub fn synth_expr<'src>(
             if let Some(prop) = extract_proposition(&cond.0) {
                 then_ctx = then_ctx.with_proposition(prop);
             }
+            then_ctx = then_ctx.enter_borrow_scope();
 
             // Check then block statements, then handle trailing expression
             let (tthen_stmts, then_ctx_out) = check_stmts(&then_ctx, &then_block.statements)?;
-            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr
-            {
+            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr {
                 let (texpr, ty) = synth_expr(&then_ctx_out, trailing)?;
                 (Some(Box::new(texpr)), Some(ty))
             } else {
                 (None, None)
             };
+            let then_ctx_out = then_ctx_out.exit_borrow_scope();
 
             let tthen_block = TBlock {
                 statements: tthen_stmts,
@@ -582,6 +602,7 @@ pub fn synth_expr<'src>(
                     let neg_prop = negate_proposition(&prop);
                     else_ctx = else_ctx.with_proposition(neg_prop);
                 }
+                else_ctx = else_ctx.enter_borrow_scope();
 
                 let (telse_stmts, else_ctx_out) = check_stmts(&else_ctx, &else_stmts.statements)?;
                 let (else_trailing, else_result_ty) =
@@ -591,6 +612,7 @@ pub fn synth_expr<'src>(
                     } else {
                         (None, None)
                     };
+                let _else_ctx_out = else_ctx_out.exit_borrow_scope();
 
                 let telse_block_val = TBlock {
                     statements: telse_stmts,

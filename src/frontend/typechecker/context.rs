@@ -1,4 +1,5 @@
 use crate::common::ast::{BinOp, Expr, Literal};
+use crate::common::ownership::BorrowKind;
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::helpers::rename_prop_var;
 use chumsky::prelude::SimpleSpan;
@@ -23,6 +24,18 @@ pub struct MutableBinding<'src> {
 pub enum VarBinding<'src> {
     Immutable(IType<'src>),
     Mutable(MutableBinding<'src>),
+}
+
+#[derive(Clone, Debug, Default)]
+struct BorrowState {
+    shared: usize,
+    mutable: bool,
+}
+
+#[derive(Clone, Debug)]
+struct BorrowBinding {
+    owner: String,
+    kind: BorrowKind,
 }
 
 // Typing context
@@ -84,6 +97,17 @@ pub struct TypingContext<'src> {
     // Bindings whose ownership has been moved away and therefore cannot be
     // read again until they are reinitialized.
     moved_bindings: HashSet<String>,
+
+    // Active borrow state for owner bindings in the current lexical scope tree.
+    active_borrows: HashMap<String, BorrowState>,
+
+    // Local bindings that hold references, mapped back to the owner binding
+    // they borrow from. This is only needed for the first lexical borrow
+    // checker slice; lowering still does not consume reference expressions.
+    borrow_bindings: HashMap<String, BorrowBinding>,
+
+    // Lexical scope stack for borrow bindings created in each block scope.
+    borrow_scopes: Vec<Vec<String>>,
 }
 
 impl<'src> TypingContext<'src> {
@@ -103,6 +127,9 @@ impl<'src> TypingContext<'src> {
             region_local_arrays: Vec::new(),
             region_scoped_arrays: Vec::new(),
             moved_bindings: HashSet::new(),
+            active_borrows: HashMap::new(),
+            borrow_bindings: HashMap::new(),
+            borrow_scopes: Vec::new(),
         }
     }
 
@@ -123,7 +150,26 @@ impl<'src> TypingContext<'src> {
             region_local_arrays: Vec::new(),
             region_scoped_arrays: Vec::new(),
             moved_bindings: HashSet::new(),
+            active_borrows: HashMap::new(),
+            borrow_bindings: HashMap::new(),
+            borrow_scopes: Vec::new(),
         }
+    }
+
+    pub fn enter_borrow_scope(&self) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.borrow_scopes.push(Vec::new());
+        new_ctx
+    }
+
+    pub fn exit_borrow_scope(&self) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(bindings) = new_ctx.borrow_scopes.pop() {
+            for binding in bindings {
+                new_ctx = new_ctx.release_borrow_binding(&binding);
+            }
+        }
+        new_ctx
     }
 
     pub fn enter_region_scope(&self) -> Self {
@@ -154,6 +200,9 @@ impl<'src> TypingContext<'src> {
         merged.region_local_arrays = self.region_local_arrays.clone();
         merged.region_scoped_arrays = self.region_scoped_arrays.clone();
         merged.moved_bindings = region_ctx.moved_bindings.clone();
+        merged.active_borrows = self.active_borrows.clone();
+        merged.borrow_bindings = self.borrow_bindings.clone();
+        merged.borrow_scopes = self.borrow_scopes.clone();
         merged
     }
 
@@ -258,7 +307,7 @@ impl<'src> TypingContext<'src> {
     // Immutable context
 
     pub fn with_immutable(&self, name: String, ty: IType<'src>) -> Self {
-        let mut new_ctx = self.clone();
+        let mut new_ctx = self.release_borrow_binding(&name);
         new_ctx.gamma.insert(name.clone(), ty);
         new_ctx.moved_bindings.remove(&name);
         new_ctx
@@ -280,7 +329,7 @@ impl<'src> TypingContext<'src> {
         current_type: IType<'src>,
         master_type: IType<'src>,
     ) -> Self {
-        let mut new_ctx = self.clone();
+        let mut new_ctx = self.release_borrow_binding(&name);
         new_ctx.delta.insert(
             name.clone(),
             MutableBinding {
@@ -348,6 +397,77 @@ impl<'src> TypingContext<'src> {
 
     pub fn is_moved(&self, name: &str) -> bool {
         self.moved_bindings.contains(name)
+    }
+
+    pub fn add_borrow_binding(&self, binding_name: &str, owner_name: &str, kind: BorrowKind) -> Self {
+        let mut new_ctx = self.release_borrow_binding(binding_name);
+        let mut state = new_ctx
+            .active_borrows
+            .get(owner_name)
+            .cloned()
+            .unwrap_or_default();
+        match kind {
+            BorrowKind::Shared => state.shared += 1,
+            BorrowKind::Mutable => state.mutable = true,
+        }
+        new_ctx.active_borrows.insert(owner_name.to_string(), state);
+        new_ctx.borrow_bindings.insert(
+            binding_name.to_string(),
+            BorrowBinding {
+                owner: owner_name.to_string(),
+                kind,
+            },
+        );
+        if let Some(scope) = new_ctx.borrow_scopes.last_mut() {
+            scope.push(binding_name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn release_borrow_binding(&self, binding_name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        let Some(binding) = new_ctx.borrow_bindings.remove(binding_name) else {
+            return new_ctx;
+        };
+        if let Some(state) = new_ctx.active_borrows.get_mut(&binding.owner) {
+            match binding.kind {
+                BorrowKind::Shared => {
+                    state.shared = state.shared.saturating_sub(1);
+                }
+                BorrowKind::Mutable => {
+                    state.mutable = false;
+                }
+            }
+            if state.shared == 0 && !state.mutable {
+                new_ctx.active_borrows.remove(&binding.owner);
+            }
+        }
+        for scope in &mut new_ctx.borrow_scopes {
+            scope.retain(|name| name != binding_name);
+        }
+        new_ctx
+    }
+
+    pub fn lookup_borrow_binding(&self, name: &str) -> Option<(&str, BorrowKind)> {
+        self.borrow_bindings
+            .get(name)
+            .map(|binding| (binding.owner.as_str(), binding.kind))
+    }
+
+    pub fn has_shared_borrows(&self, owner: &str) -> bool {
+        self.active_borrows
+            .get(owner)
+            .is_some_and(|state| state.shared > 0)
+    }
+
+    pub fn has_mutable_borrow(&self, owner: &str) -> bool {
+        self.active_borrows
+            .get(owner)
+            .is_some_and(|state| state.mutable)
+    }
+
+    pub fn is_borrowed(&self, owner: &str) -> bool {
+        self.has_shared_borrows(owner) || self.has_mutable_borrow(owner)
     }
 
     // Function signatures

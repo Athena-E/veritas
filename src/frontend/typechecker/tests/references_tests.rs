@@ -22,6 +22,13 @@ fn ref_mut_int_type() -> Spanned<Type<'static>> {
     spanned(Type::RefMut(Box::new(int_type())))
 }
 
+fn int_array_type(size: i128) -> Spanned<Type<'static>> {
+    spanned(Type::Array {
+        element_type: Box::new(int_type()),
+        size: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(size)))),
+    })
+}
+
 fn make_program<'src>(functions: Vec<Function<'src>>) -> Program<'src> {
     Program {
         constants: vec![],
@@ -255,4 +262,176 @@ fn shared_borrow_parameter_call_typechecks() {
 
     check_program(&make_program(vec![inspect, main]))
         .expect("shared-borrow parameter call should typecheck");
+}
+
+#[test]
+fn shared_borrow_blocks_owner_mutation() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: spanned(Type::Unit),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rx",
+                    ty: ref_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+                spanned(Stmt::Assignment {
+                    lhs: spanned(Expr::Variable("x")),
+                    rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(2))),
+                }),
+            ],
+            trailing_expr: None,
+        },
+    };
+
+    let err = check_program(&make_program(vec![func]))
+        .expect_err("mutating a shared-borrowed owner should be rejected");
+    assert!(matches!(err, TypeError::BorrowConflict { .. }));
+}
+
+#[test]
+fn mutable_borrow_blocks_shared_borrow() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: spanned(Type::Unit),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "mx",
+                    ty: ref_mut_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Mutable,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rx",
+                    ty: ref_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+            ],
+            trailing_expr: None,
+        },
+    };
+
+    let err = check_program(&make_program(vec![func]))
+        .expect_err("shared borrow during live mutable borrow should be rejected");
+    assert!(matches!(err, TypeError::BorrowConflict { .. }));
+}
+
+#[test]
+fn moving_borrowed_array_is_rejected() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: spanned(Type::Unit),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "arr",
+                    ty: int_array_type(1),
+                    value: spanned(Expr::ArrayInit {
+                        value: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(1)))),
+                        length: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(1)))),
+                    }),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rarr",
+                    ty: spanned(Type::Ref(Box::new(int_array_type(1)))),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("arr"))),
+                    }),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "arr2",
+                    ty: int_array_type(1),
+                    value: spanned(Expr::Variable("arr")),
+                }),
+            ],
+            trailing_expr: None,
+        },
+    };
+
+    let err = check_program(&make_program(vec![func]))
+        .expect_err("moving a borrowed array should be rejected");
+    assert!(matches!(err, TypeError::BorrowConflict { .. }));
+}
+
+#[test]
+fn shared_borrow_ends_at_if_block_exit() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: spanned(Type::Unit),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+                }),
+                spanned(Stmt::Expr(spanned(Expr::If {
+                    cond: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Bool(true)))),
+                    then_block: crate::common::ast::Block {
+                        statements: vec![spanned(Stmt::Let {
+                            is_mut: false,
+                            name: "rx",
+                            ty: ref_int_type(),
+                            value: spanned(Expr::Borrow {
+                                kind: BorrowKind::Shared,
+                                expr: Box::new(spanned(Expr::Variable("x"))),
+                            }),
+                        })],
+                        trailing_expr: None,
+                    },
+                    else_block: None,
+                }))),
+                spanned(Stmt::Assignment {
+                    lhs: spanned(Expr::Variable("x")),
+                    rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(2))),
+                }),
+            ],
+            trailing_expr: None,
+        },
+    };
+
+    check_program(&make_program(vec![func]))
+        .expect("shared borrow should end when the if block scope exits");
 }
