@@ -1,4 +1,5 @@
 use super::span::Spanned;
+use crate::common::ownership::BorrowKind;
 use std::fmt;
 
 // Token definition
@@ -174,6 +175,10 @@ pub enum Expr<'src> {
     UnaryOp {
         op: UnaryOp,
         cond: Box<Spanned<Self>>,
+    },
+    Borrow {
+        kind: BorrowKind,
+        expr: Box<Spanned<Self>>,
     },
     Call {
         func_name: &'src str,

@@ -1,5 +1,5 @@
 use crate::common::ast::{BinOp, Literal, UnaryOp};
-use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::types::{IProposition, IType};
 
@@ -42,6 +42,12 @@ pub enum TExpr<'src> {
         ty: IType<'src>,
     },
 
+    Borrow {
+        kind: BorrowKind,
+        expr: Box<Spanned<Self>>,
+        ty: IType<'src>,
+    },
+
     Call {
         func_name: String,
         args: Vec<Spanned<Self>>,
@@ -78,6 +84,7 @@ impl<'src> TExpr<'src> {
             TExpr::Variable { ty, .. } => ty,
             TExpr::BinOp { ty, .. } => ty,
             TExpr::UnaryOp { ty, .. } => ty,
+            TExpr::Borrow { ty, .. } => ty,
             TExpr::Call { ty, .. } => ty,
             TExpr::Index { ty, .. } => ty,
             TExpr::ArrayInit { ty, .. } => ty,

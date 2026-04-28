@@ -189,6 +189,10 @@ pub fn lower_expr<'src>(
 
         TExpr::UnaryOp { op, operand, ty } => lower_unaryop(ctx, *op, operand, ty),
 
+        TExpr::Borrow { .. } => {
+            panic!("reference lowering is not implemented yet")
+        }
+
         TExpr::Call {
             func_name,
             args,

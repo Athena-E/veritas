@@ -109,6 +109,10 @@ fn fmt_expr(expr: &Expr) -> String {
             };
             format!("{}{}", op_str, fmt_expr(&cond.0))
         }
+        Expr::Borrow { kind, expr } => {
+            let prefix = if kind.is_shared() { "&" } else { "&mut " };
+            format!("{}{}", prefix, fmt_expr(&expr.0))
+        }
         Expr::Call { func_name, args } => {
             let args_str = args
                 .0

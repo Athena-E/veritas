@@ -75,6 +75,7 @@ impl SmtOracle {
                 }
                 UnaryOp::Not => None,
             },
+            Expr::Borrow { .. } => None,
 
             Expr::Index { .. } => {
                 // Encode (possibly nested) array indexing using Z3 array theory.
@@ -200,6 +201,7 @@ impl SmtOracle {
                 }
                 UnaryOp::Neg => None,
             },
+            Expr::Borrow { .. } => None,
 
             Expr::Forall {
                 var,

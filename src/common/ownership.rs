@@ -13,6 +13,12 @@ pub enum ParameterKind {
     MutableBorrow,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BorrowKind {
+    Shared,
+    Mutable,
+}
+
 impl OwnershipMode {
     pub fn consumes_input(self) -> bool {
         matches!(self, Self::Consume)
@@ -42,5 +48,15 @@ impl ParameterKind {
 
     pub fn is_borrow(self) -> bool {
         self.is_shared_borrow() || self.is_mutable_borrow()
+    }
+}
+
+impl BorrowKind {
+    pub fn is_shared(self) -> bool {
+        matches!(self, Self::Shared)
+    }
+
+    pub fn is_mutable(self) -> bool {
+        matches!(self, Self::Mutable)
     }
 }

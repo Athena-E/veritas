@@ -12,6 +12,20 @@ use crate::frontend::typechecker::{
 };
 use std::sync::Arc;
 
+fn borrow_exposed_type<'src>(ty: &IType<'src>) -> IType<'src> {
+    match ty {
+        IType::SingletonInt(IValue::Int(_)) => IType::Int,
+        IType::SingletonInt(IValue::Bool(_)) => IType::Bool,
+        IType::RefinedInt { base, .. } => borrow_exposed_type(base),
+        IType::Array { element_type, size } => IType::Array {
+            element_type: Arc::new(borrow_exposed_type(element_type)),
+            size: size.clone(),
+        },
+        IType::Master(base) => borrow_exposed_type(base),
+        _ => ty.clone(),
+    }
+}
+
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
@@ -69,6 +83,70 @@ pub fn synth_expr<'src>(
                     span,
                 }),
             }
+        }
+
+        Expr::Borrow { kind, expr: place } => {
+            let place_name = match &place.0 {
+                Expr::Variable(name) => *name,
+                _ => {
+                    return Err(TypeError::UnsupportedFeature {
+                        feature: "borrowing non-place expressions is not yet supported"
+                            .to_string(),
+                        span: place.1,
+                    });
+                }
+            };
+
+            let (tplace, place_ty) = synth_expr(ctx, place)?;
+            let exposed_place_ty = match ctx.lookup_var(place_name) {
+                Some(VarBinding::Immutable(ty)) => borrow_exposed_type(&ty),
+                Some(VarBinding::Mutable(binding)) => borrow_exposed_type(&binding.master_type),
+                None => borrow_exposed_type(&place_ty),
+            };
+
+            if matches!(place_ty, IType::Ref(_) | IType::RefMut(_)) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "reborrowing references is not yet supported".to_string(),
+                    span: place.1,
+                });
+            }
+
+            if kind.is_mutable() {
+                match ctx.lookup_var(place_name) {
+                    Some(VarBinding::Mutable(_)) => {}
+                    Some(VarBinding::Immutable(_)) => {
+                        return Err(TypeError::NotMutable {
+                            name: place_name.to_string(),
+                            span: place.1,
+                        });
+                    }
+                    None if ctx.is_moved(place_name) => {
+                        return Err(TypeError::UseAfterMove {
+                            name: place_name.to_string(),
+                            span: place.1,
+                        });
+                    }
+                    None => {
+                        return Err(TypeError::UndefinedVariable {
+                            name: place_name.to_string(),
+                            span: place.1,
+                        });
+                    }
+                }
+            }
+
+            let borrow_ty = if kind.is_shared() {
+                IType::Ref(Arc::new(exposed_place_ty))
+            } else {
+                IType::RefMut(Arc::new(exposed_place_ty))
+            };
+
+            let texpr = TExpr::Borrow {
+                kind: *kind,
+                expr: Box::new(tplace),
+                ty: borrow_ty.clone(),
+            };
+            Ok(((texpr, span), borrow_ty))
         }
 
         // BINOP-ARITH: Arithmetic operations with SMT synthesis

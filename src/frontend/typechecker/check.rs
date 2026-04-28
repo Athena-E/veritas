@@ -54,6 +54,20 @@ fn resolve_array_reads_in_expr<'src>(
                 (expr.clone(), false)
             }
         }
+        Expr::Borrow { kind, expr: borrowed } => {
+            let (new_borrowed, resolved) = resolve_array_reads_in_expr(ctx, &borrowed.0);
+            if resolved {
+                (
+                    Expr::Borrow {
+                        kind: *kind,
+                        expr: Box::new((new_borrowed, borrowed.1)),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
         Expr::Call { func_name, args } => {
             let mut any_resolved = false;
             let mut new_args = Vec::new();
@@ -113,6 +127,14 @@ pub fn check_stmt<'src>(
 
             // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
+
+            if array_contains_reference_type(&ann_ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "storing references inside arrays is not yet supported".to_string(),
+                    span: ty.1,
+                });
+            }
 
             // Check value type is subtype of annotation
             if !is_subtype(ctx, &value_ty, &ann_ty) {
@@ -185,6 +207,14 @@ pub fn check_stmt<'src>(
 
             // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
+
+            if array_contains_reference_type(&ann_ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "storing references inside arrays is not yet supported".to_string(),
+                    span: ty.1,
+                });
+            }
 
             // Check value type is subtype of annotation
             if !is_subtype(ctx, &value_ty, &ann_ty) {
@@ -1112,10 +1142,25 @@ pub fn check_function<'src>(
 
     let return_type = ast_type_to_itype(&func_inner.return_type)?;
 
+    if matches!(return_type, IType::Ref(_) | IType::RefMut(_)) {
+        return Err(TypeError::UnsupportedFeature {
+            feature: "returning references is not yet supported".to_string(),
+            span: func_inner.return_type.1,
+        });
+    }
+
     // Create context with parameters and expected return type
     let mut func_ctx = global_ctx.clone();
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
+
+        if array_contains_reference_type(ty) {
+            return Err(TypeError::UnsupportedFeature {
+                feature:
+                    "storing references inside arrays is not yet supported".to_string(),
+                span: spanned_param.1,
+            });
+        }
 
         // Reject nested arrays with a symbolic inner dimension. The backend
         // needs a concrete stride to flatten multi-dim access, so only the
@@ -1314,11 +1359,31 @@ fn check_program_with_options<'src>(
         for spanned_param in &func.parameters {
             let param = &spanned_param.0;
             let ty = ast_type_to_itype(&param.ty)?;
+            if array_contains_reference_type(&ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "storing references inside arrays is not yet supported".to_string(),
+                    span: spanned_param.1,
+                });
+            }
             parameters.push((param.name.to_string(), ty));
         }
 
         // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
+        if matches!(return_type, IType::Ref(_) | IType::RefMut(_)) {
+            return Err(TypeError::UnsupportedFeature {
+                feature: "returning references is not yet supported".to_string(),
+                span: func.return_type.1,
+            });
+        }
+        if array_contains_reference_type(&return_type) {
+            return Err(TypeError::UnsupportedFeature {
+                feature:
+                    "storing references inside arrays is not yet supported".to_string(),
+                span: func.return_type.1,
+            });
+        }
         let returns_owned =
             !bare_metal && contains_array_type(&return_type) && func.name != "main";
         let return_ownership = if returns_owned {
@@ -1768,6 +1833,17 @@ fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
     }
 }
 
+fn array_contains_reference_type<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { element_type, .. } => {
+            matches!(element_type.as_ref(), IType::Ref(_) | IType::RefMut(_))
+                || array_contains_reference_type(element_type)
+        }
+        IType::RefinedInt { base, .. } => array_contains_reference_type(base),
+        _ => false,
+    }
+}
+
 fn source_type_contains_array<'src>(ty: &AstType<'src>) -> bool {
     match ty {
         AstType::Array { .. } => true,
@@ -1788,6 +1864,11 @@ fn infer_parameter_kinds<'src>(func: &Function<'src>) -> Vec<ParameterKind> {
     func.parameters
         .iter()
         .map(|param| {
+            match &param.0.ty.0 {
+                AstType::Ref(_) => return ParameterKind::SharedBorrow,
+                AstType::RefMut(_) => return ParameterKind::MutableBorrow,
+                _ => {}
+            }
             if !source_type_contains_array(&param.0.ty.0) {
                 return ParameterKind::PlainValue;
             }
@@ -1857,6 +1938,7 @@ fn expr_mentions_var<'src>(expr: &Expr<'src>, name: &str) -> bool {
             expr_mentions_var(&lhs.0, name) || expr_mentions_var(&rhs.0, name)
         }
         Expr::UnaryOp { cond, .. } => expr_mentions_var(&cond.0, name),
+        Expr::Borrow { expr, .. } => expr_mentions_var(&expr.0, name),
         Expr::Index { base, index } => {
             expr_mentions_var(&base.0, name) || expr_mentions_var(&index.0, name)
         }
@@ -1985,6 +2067,7 @@ fn apply_call_argument_moves<'src>(
             apply_call_argument_moves(&after_lhs, &rhs.0)
         }
         Expr::UnaryOp { cond, .. } => apply_call_argument_moves(ctx, &cond.0),
+        Expr::Borrow { expr, .. } => apply_call_argument_moves(ctx, &expr.0),
         Expr::Index { base, index } => {
             let after_base = apply_call_argument_moves(ctx, &base.0);
             apply_call_argument_moves(&after_base, &index.0)
@@ -2037,6 +2120,7 @@ fn expr_depends_on_region_local_array<'src>(
                 || expr_depends_on_region_local_array(ctx, &rhs.0)
         }
         Expr::UnaryOp { cond, .. } => expr_depends_on_region_local_array(ctx, &cond.0),
+        Expr::Borrow { expr, .. } => expr_depends_on_region_local_array(ctx, &expr.0),
         Expr::Call { args, .. } => args
             .0
             .iter()
@@ -2154,6 +2238,13 @@ pub(super) fn substitute_var_with_literal<'src>(
             cond: Box::new((
                 substitute_var_with_literal(&cond.0, var_name, value),
                 cond.1,
+            )),
+        },
+        Expr::Borrow { kind, expr } => Expr::Borrow {
+            kind: *kind,
+            expr: Box::new((
+                substitute_var_with_literal(&expr.0, var_name, value),
+                expr.1,
             )),
         },
         Expr::Call { func_name, args } => Expr::Call {
@@ -2552,6 +2643,7 @@ fn find_invalid_free_var<'src>(
         Expr::BinOp { lhs, rhs, .. } => find_invalid_free_var(&lhs.0, allowed)
             .or_else(|| find_invalid_free_var(&rhs.0, allowed)),
         Expr::UnaryOp { cond, .. } => find_invalid_free_var(&cond.0, allowed),
+        Expr::Borrow { expr, .. } => find_invalid_free_var(&expr.0, allowed),
         Expr::Index { base, index } => find_invalid_free_var(&base.0, allowed)
             .or_else(|| find_invalid_free_var(&index.0, allowed)),
         Expr::Call { args, .. } => args

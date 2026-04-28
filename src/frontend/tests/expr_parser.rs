@@ -1,5 +1,6 @@
 use super::common::parse_tokens;
 use crate::common::ast::{Expr, Literal};
+use crate::common::ownership::BorrowKind;
 use crate::frontend::parser::expr_parser_for_types;
 use chumsky::prelude::*;
 
@@ -227,6 +228,52 @@ fn test_expr_parser_double_negation() {
         )
         .into_result();
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_expr_parser_shared_borrow() {
+    let src = "&x";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        match expr {
+            Expr::Borrow { kind, expr } => {
+                assert_eq!(kind, BorrowKind::Shared);
+                assert!(matches!(expr.0, Expr::Variable("x")));
+            }
+            other => panic!("Expected Borrow expression, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_expr_parser_mutable_borrow() {
+    let src = "&mut arr";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        match expr {
+            Expr::Borrow { kind, expr } => {
+                assert_eq!(kind, BorrowKind::Mutable);
+                assert!(matches!(expr.0, Expr::Variable("arr")));
+            }
+            other => panic!("Expected Borrow expression, got {:?}", other),
+        }
+    }
 }
 
 #[test]
