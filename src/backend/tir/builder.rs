@@ -8,7 +8,7 @@ use crate::backend::tir::instr::{Terminator, TirInstr};
 use crate::backend::tir::phi::PhiNode;
 use crate::backend::tir::program::{BasicBlock, TirFunction};
 use crate::backend::tir::types::{BinaryOp, BlockId, BlockIdAllocator, RegisterState};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::ParameterKind;
 use crate::common::types::IType;
 use std::collections::HashMap;
 
@@ -103,7 +103,7 @@ impl<'src> TirBuilder<'src> {
         self,
         name: String,
         params: Vec<(VirtualReg, IType<'src>)>,
-        parameter_ownerships: Vec<OwnershipMode>,
+        parameter_kinds: Vec<ParameterKind>,
         param_names: Vec<String>,
         return_type: IType<'src>,
         returns_owned: bool,
@@ -114,7 +114,7 @@ impl<'src> TirBuilder<'src> {
         TirFunction {
             name,
             params,
-            parameter_ownerships,
+            parameter_kinds,
             param_names,
             return_type,
             returns_owned,

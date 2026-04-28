@@ -1175,7 +1175,7 @@ mod tests {
         let func = DtalFunction {
             name: "add".to_string(),
             params: vec![],
-            parameter_ownerships: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -1233,7 +1233,7 @@ mod tests {
         let func = DtalFunction {
             name: "branch_test".to_string(),
             params: vec![],
-            parameter_ownerships: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

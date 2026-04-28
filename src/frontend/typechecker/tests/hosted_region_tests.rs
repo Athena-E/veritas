@@ -1,7 +1,7 @@
 use crate::backend::lower::lower_program;
 use crate::backend::tir::{Terminator, TirInstr};
 use crate::common::ast::{Expr, Stmt};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::types::{FunctionSignature, IType, IValue};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
@@ -267,7 +267,7 @@ fn consuming_signature_marks_call_argument_as_consumed() {
     let sig = FunctionSignature {
         name: "take_arr".to_string(),
         parameters: vec![("arr".to_string(), array_ty.clone())],
-        parameter_ownerships: vec![OwnershipMode::Consume],
+        parameter_kinds: vec![ParameterKind::OwnedValue],
         return_type: IType::Int,
         return_ownership: OwnershipMode::Plain,
         returns_owned: false,
@@ -345,13 +345,13 @@ fn hosted_owned_moves_lower_to_explicit_tir_moves() {
         .find_map(|instr| match instr {
             TirInstr::Call {
                 func,
-                arg_ownerships,
+                arg_kinds,
                 ..
-            } if func == "consume" => Some(arg_ownerships.clone()),
+            } if func == "consume" => Some(arg_kinds.clone()),
             _ => None,
         })
         .expect("main should contain a call to consume");
-    assert_eq!(call, vec![OwnershipMode::Plain]);
+    assert_eq!(call, vec![ParameterKind::SharedBorrow]);
 }
 
 #[test]

@@ -5,7 +5,7 @@
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::ParameterKind;
 use crate::common::types::IType;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -285,7 +285,7 @@ impl<'src> LoweringContext<'src> {
         self,
         name: String,
         params: Vec<(VirtualReg, IType<'src>)>,
-        parameter_ownerships: Vec<OwnershipMode>,
+        parameter_kinds: Vec<ParameterKind>,
         param_names: Vec<String>,
         return_type: IType<'src>,
         returns_owned: bool,
@@ -296,7 +296,7 @@ impl<'src> LoweringContext<'src> {
         self.builder.build(
             name,
             params,
-            parameter_ownerships,
+            parameter_kinds,
             param_names,
             return_type,
             returns_owned,

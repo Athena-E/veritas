@@ -1,7 +1,7 @@
 // Statement and program type checking
 
 use crate::common::ast::{Block, Expr, Function, Program, Stmt, Type as AstType};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
@@ -1257,10 +1257,10 @@ pub fn check_function<'src>(
     let tfunc = TFunction {
         name: func_inner.name.to_string(),
         parameters: tparams,
-        parameter_ownerships: global_ctx
+        parameter_kinds: global_ctx
             .lookup_function(func_inner.name)
-            .map(|sig| sig.parameter_ownerships.clone())
-            .unwrap_or_else(|| vec![OwnershipMode::Plain; func_inner.parameters.len()]),
+            .map(|sig| sig.parameter_kinds.clone())
+            .unwrap_or_else(|| vec![ParameterKind::PlainValue; func_inner.parameters.len()]),
         return_type,
         returns_owned: global_ctx
             .lookup_function(func_inner.name)
@@ -1376,12 +1376,12 @@ fn check_program_with_options<'src>(
             }
         }
 
-        let parameter_ownerships = infer_parameter_ownerships(&func);
+        let parameter_kinds = infer_parameter_kinds(&func);
 
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
-            parameter_ownerships,
+            parameter_kinds,
             return_type,
             return_ownership,
             returns_owned,
@@ -1403,7 +1403,7 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "print_int".into(),
                 parameters: vec![("n".into(), IType::Int)],
-                parameter_ownerships: vec![OwnershipMode::Plain],
+                parameter_kinds: vec![ParameterKind::PlainValue],
                 return_type: IType::Unit,
                 return_ownership: OwnershipMode::Plain,
                 returns_owned: false,
@@ -1417,7 +1417,7 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "print_char".into(),
                 parameters: vec![("c".into(), IType::Int)],
-                parameter_ownerships: vec![OwnershipMode::Plain],
+                parameter_kinds: vec![ParameterKind::PlainValue],
                 return_type: IType::Unit,
                 return_ownership: OwnershipMode::Plain,
                 returns_owned: false,
@@ -1431,7 +1431,7 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "read_int".into(),
                 parameters: vec![],
-                parameter_ownerships: vec![],
+                parameter_kinds: vec![],
                 return_type: IType::Int,
                 return_ownership: OwnershipMode::Plain,
                 returns_owned: false,
@@ -1448,7 +1448,7 @@ fn check_program_with_options<'src>(
         FunctionSignature {
             name: "port_in".into(),
             parameters: vec![("port".into(), IType::Int)],
-            parameter_ownerships: vec![OwnershipMode::Plain],
+            parameter_kinds: vec![ParameterKind::PlainValue],
             return_type: IType::Int,
             return_ownership: OwnershipMode::Plain,
             returns_owned: false,
@@ -1462,7 +1462,7 @@ fn check_program_with_options<'src>(
         FunctionSignature {
             name: "port_out".into(),
             parameters: vec![("port".into(), IType::Int), ("value".into(), IType::Int)],
-            parameter_ownerships: vec![OwnershipMode::Plain, OwnershipMode::Plain],
+            parameter_kinds: vec![ParameterKind::PlainValue, ParameterKind::PlainValue],
             return_type: IType::Unit,
             return_ownership: OwnershipMode::Plain,
             returns_owned: false,
@@ -1784,12 +1784,12 @@ fn source_type_contains_array<'src>(ty: &AstType<'src>) -> bool {
     }
 }
 
-fn infer_parameter_ownerships<'src>(func: &Function<'src>) -> Vec<OwnershipMode> {
+fn infer_parameter_kinds<'src>(func: &Function<'src>) -> Vec<ParameterKind> {
     func.parameters
         .iter()
         .map(|param| {
             if !source_type_contains_array(&param.0.ty.0) {
-                return OwnershipMode::Plain;
+                return ParameterKind::PlainValue;
             }
             if block_consumes_variable(&func.body, param.0.name)
                 || func
@@ -1798,9 +1798,9 @@ fn infer_parameter_ownerships<'src>(func: &Function<'src>) -> Vec<OwnershipMode>
                     .as_ref()
                     .is_some_and(|expr| expr_is_whole_value_variable(&expr.0, param.0.name))
             {
-                OwnershipMode::Consume
+                ParameterKind::OwnedValue
             } else {
-                OwnershipMode::Plain
+                ParameterKind::SharedBorrow
             }
         })
         .collect()
@@ -1962,14 +1962,14 @@ fn apply_call_argument_moves<'src>(
         Expr::Call { func_name, args } => {
             let mut new_ctx = ctx.clone();
             if let Some(sig) = ctx.lookup_function(func_name) {
-                for (((arg_expr, _), (_param_name, param_ty)), arg_ownership) in args
+                for (((arg_expr, _), (_param_name, param_ty)), arg_kind) in args
                     .0
                     .iter()
                     .zip(sig.parameters.iter())
-                    .zip(sig.parameter_ownerships.iter())
+                    .zip(sig.parameter_kinds.iter())
                 {
                     new_ctx = apply_call_argument_moves(&new_ctx, arg_expr);
-                    if arg_ownership.consumes_input()
+                    if arg_kind.is_owned_value()
                         && !new_ctx.bare_metal
                         && contains_array_type(param_ty)
                         && let Expr::Variable(name) = arg_expr

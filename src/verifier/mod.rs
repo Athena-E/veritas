@@ -514,11 +514,12 @@ mod tests {
         return_type: DtalType,
         blocks: Vec<DtalBlock>,
     ) -> DtalFunction {
-        let parameter_ownerships = vec![crate::common::ownership::OwnershipMode::Plain; params.len()];
+        let parameter_kinds =
+            vec![crate::common::ownership::ParameterKind::PlainValue; params.len()];
         DtalFunction {
             name: name.to_string(),
             params,
-            parameter_ownerships,
+            parameter_kinds,
             return_type,
             precondition: None,
             postcondition: None,
@@ -541,11 +542,12 @@ mod tests {
         entry_state: TypeState,
         instructions: Vec<DtalInstr>,
     ) -> DtalFunction {
-        let parameter_ownerships = vec![crate::common::ownership::OwnershipMode::Plain; params.len()];
+        let parameter_kinds =
+            vec![crate::common::ownership::ParameterKind::PlainValue; params.len()];
         DtalFunction {
             name: name.to_string(),
             params,
-            parameter_ownerships,
+            parameter_kinds,
             return_type,
             precondition: None,
             postcondition: None,
@@ -615,7 +617,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "owned_ops".to_string(),
             params: vec![],
-            parameter_ownerships: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -630,7 +632,7 @@ mod tests {
                     },
                     DtalInstr::Call {
                         target: "owned_callee".to_string(),
-                        arg_ownerships: vec![crate::common::ownership::OwnershipMode::Plain],
+                        arg_kinds: vec![],
                         return_ty: array_ty.clone(),
                         ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                     },
@@ -655,10 +657,10 @@ mod tests {
         assert!(matches!(
             &block.instructions[1],
             DtalInstr::Call {
-                arg_ownerships,
+                arg_kinds,
                 ownership: crate::common::ownership::OwnershipMode::FreshOwned,
                 ..
-            } if arg_ownerships == &vec![crate::common::ownership::OwnershipMode::Plain]
+            } if arg_kinds.is_empty()
         ));
         assert!(matches!(
             &block.instructions[2],
@@ -679,7 +681,7 @@ mod tests {
         verify_instruction(
             &DtalInstr::Call {
                 target: "owned_callee".to_string(),
-                arg_ownerships: vec![],
+                arg_kinds: vec![],
                 return_ty: array_ty,
                 ownership: crate::common::ownership::OwnershipMode::FreshOwned,
             },
@@ -717,9 +719,9 @@ mod tests {
         verify_instruction(
             &DtalInstr::Call {
                 target: "consume_arr".to_string(),
-                arg_ownerships: vec![
-                    crate::common::ownership::OwnershipMode::Plain,
-                    crate::common::ownership::OwnershipMode::Consume,
+                arg_kinds: vec![
+                    crate::common::ownership::ParameterKind::PlainValue,
+                    crate::common::ownership::ParameterKind::OwnedValue,
                 ],
                 return_ty: DtalType::Unit,
                 ownership: crate::common::ownership::OwnershipMode::Plain,
@@ -1203,7 +1205,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "main".to_string(),
             params: vec![(v(0), array_ty.clone())],
-            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -1262,7 +1264,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "main".to_string(),
             params: vec![(v(0), array_ty.clone())],
-            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -1328,7 +1330,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "main".to_string(),
             params: vec![(v(0), array_ty.clone())],
-            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -1391,7 +1393,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "main".to_string(),
             params: vec![(v(0), array_ty.clone())],
-            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
             return_type: DtalType::Unit,
             precondition: None,
             postcondition: None,
@@ -1466,7 +1468,7 @@ mod tests {
                         },
                         DtalInstr::Call {
                             target: "f".to_string(),
-                            arg_ownerships: vec![crate::common::ownership::OwnershipMode::Consume],
+                            arg_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
                             return_ty: DtalType::Unit,
                             ownership: crate::common::ownership::OwnershipMode::Plain,
                         },
@@ -2205,7 +2207,7 @@ mod tests {
                 vec![
                     DtalInstr::Call {
                         target: "requires_positive".to_string(),
-                        arg_ownerships: vec![],
+                        arg_kinds: vec![],
                         return_ty: DtalType::Int,
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
@@ -2498,7 +2500,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "ok".to_string(),
             params: vec![(v(0), DtalType::Int)],
-            parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Plain],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -2534,7 +2536,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "ok".to_string(),
             params: vec![],
-            parameter_ownerships: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -2580,7 +2582,7 @@ mod tests {
         let program = make_program(vec![DtalFunction {
             name: "bad".to_string(),
             params: vec![],
-            parameter_ownerships: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -2803,7 +2805,7 @@ mod tests {
                 vec![
                     DtalInstr::Call {
                         target: "returns_bool".to_string(),
-                        arg_ownerships: vec![],
+                        arg_kinds: vec![],
                         return_ty: DtalType::Int, // wrong annotation — signature says Bool
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
@@ -2849,7 +2851,7 @@ mod tests {
                 vec![
                     DtalInstr::Call {
                         target: "returns_bool".to_string(),
-                        arg_ownerships: vec![],
+                        arg_kinds: vec![],
                         return_ty: DtalType::Int, // annotation lies: says Int
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },
@@ -3218,7 +3220,7 @@ mod tests {
                     },
                     DtalInstr::Call {
                         target: "get_value".to_string(),
-                        arg_ownerships: vec![],
+                        arg_kinds: vec![],
                         return_ty: DtalType::Int,
                         ownership: crate::common::ownership::OwnershipMode::Plain,
                     },

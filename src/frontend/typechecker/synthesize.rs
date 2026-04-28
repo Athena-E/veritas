@@ -378,12 +378,12 @@ pub fn synth_expr<'src>(
             // Synth and check each argument
             let mut typed_args = Vec::new();
             let mut arg_types = Vec::new();
-            let mut arg_ownerships = Vec::new();
-            for ((arg, (_param_name, param_ty)), arg_ownership) in args
+            let mut arg_kinds = Vec::new();
+            for ((arg, (_param_name, param_ty)), arg_kind) in args
                 .0
                 .iter()
                 .zip(sig.parameters.iter())
-                .zip(sig.parameter_ownerships.iter())
+                .zip(sig.parameter_kinds.iter())
             {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
@@ -397,7 +397,7 @@ pub fn synth_expr<'src>(
 
                 typed_args.push(targ);
                 arg_types.push(arg_ty);
-                arg_ownerships.push(*arg_ownership);
+                arg_kinds.push(*arg_kind);
             }
 
             // Check precondition if present
@@ -427,7 +427,7 @@ pub fn synth_expr<'src>(
             let texpr = TExpr::Call {
                 func_name: func_name.to_string(),
                 args: typed_args,
-                arg_ownerships,
+                arg_kinds,
                 ownership: sig.return_ownership,
                 ty: ret_ty.clone(),
             };

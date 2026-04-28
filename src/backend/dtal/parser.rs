@@ -9,7 +9,7 @@ use crate::backend::dtal::instr::{
 };
 use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
 use crate::backend::dtal::types::DtalType;
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use std::sync::Arc;
 
 /// Parse error for DTAL text
@@ -193,7 +193,7 @@ impl<'a> DtalParser<'a> {
 
         Ok(DtalFunction {
             name,
-            parameter_ownerships: vec![OwnershipMode::Plain; params.len()],
+            parameter_kinds: vec![ParameterKind::PlainValue; params.len()],
             params,
             return_type,
             precondition,
@@ -901,7 +901,7 @@ impl<'a> DtalParser<'a> {
 
         Ok(Some(DtalInstr::Call {
             target: tokens[1].to_string(),
-            arg_ownerships: tokens
+            arg_kinds: tokens
                 .get(2)
                 .and_then(|token| token.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')))
                 .map(|effects| {
@@ -911,11 +911,12 @@ impl<'a> DtalParser<'a> {
                         effects
                             .split(',')
                             .map(|effect| match effect {
-                                "plain" => Ok(OwnershipMode::Plain),
-                                "consume" => Ok(OwnershipMode::Consume),
-                                "fresh" => Ok(OwnershipMode::FreshOwned),
+                                "value" => Ok(ParameterKind::PlainValue),
+                                "owned" => Ok(ParameterKind::OwnedValue),
+                                "shared" => Ok(ParameterKind::SharedBorrow),
+                                "mutable" => Ok(ParameterKind::MutableBorrow),
                                 other => Err(self.err(format!(
-                                    "invalid call ownership effect '{}'",
+                                    "invalid call parameter kind '{}'",
                                     other
                                 ))),
                             })
@@ -1624,7 +1625,7 @@ add:
             functions: vec![DtalFunction {
                 name: "test".to_string(),
                 params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
-                parameter_ownerships: vec![],
+                parameter_kinds: vec![],
                 return_type: DtalType::Int,
                 precondition: None,
                 postcondition: None,

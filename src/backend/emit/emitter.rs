@@ -318,7 +318,7 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
 
         DtalInstr::Call {
             target,
-            arg_ownerships,
+            arg_kinds,
             return_ty,
             ownership,
         } => {
@@ -327,15 +327,16 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
                 crate::common::ownership::OwnershipMode::Consume => "call_consume",
                 crate::common::ownership::OwnershipMode::FreshOwned => "call_owned",
             };
-            let arg_suffix = if arg_ownerships.is_empty() {
+            let arg_suffix = if arg_kinds.is_empty() {
                 String::new()
             } else {
-                let effects = arg_ownerships
+                let effects = arg_kinds
                     .iter()
-                    .map(|mode| match mode {
-                        crate::common::ownership::OwnershipMode::Plain => "plain",
-                        crate::common::ownership::OwnershipMode::Consume => "consume",
-                        crate::common::ownership::OwnershipMode::FreshOwned => "fresh",
+                    .map(|kind| match kind {
+                        crate::common::ownership::ParameterKind::PlainValue => "value",
+                        crate::common::ownership::ParameterKind::OwnedValue => "owned",
+                        crate::common::ownership::ParameterKind::SharedBorrow => "shared",
+                        crate::common::ownership::ParameterKind::MutableBorrow => "mutable",
                     })
                     .collect::<Vec<_>>()
                     .join(",");
@@ -519,7 +520,7 @@ mod tests {
         let func = DtalFunction {
             name: "test".to_string(),
             params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
-            parameter_ownerships: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

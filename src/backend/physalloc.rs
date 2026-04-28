@@ -558,7 +558,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     DtalFunction {
         name: func.name.clone(),
         params: phys_params,
-        parameter_ownerships: func.parameter_ownerships.clone(),
+        parameter_kinds: func.parameter_kinds.clone(),
         return_type: func.return_type.clone(),
         precondition: phys_precond,
         postcondition: phys_postcond,
@@ -1085,7 +1085,7 @@ fn allocate_instruction(
 
         DtalInstr::Call {
             target,
-            arg_ownerships,
+            arg_kinds,
             return_ty,
             ownership,
         } => {
@@ -1155,7 +1155,7 @@ fn allocate_instruction(
             // Call
             instrs.push(DtalInstr::Call {
                 target: target.clone(),
-                arg_ownerships: arg_ownerships.clone(),
+                arg_kinds: arg_kinds.clone(),
                 return_ty: return_ty.clone(),
                 ownership: *ownership,
             });

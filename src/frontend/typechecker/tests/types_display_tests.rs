@@ -2,6 +2,7 @@
 
 use super::common::*;
 use crate::common::ast::BinOp;
+use crate::common::ownership::ParameterKind;
 use crate::common::types::{FunctionSignature, IType, IValue};
 use chumsky::prelude::SimpleSpan;
 use std::sync::Arc;
@@ -61,7 +62,7 @@ fn test_display_function_signature() {
     let sig = FunctionSignature {
         name: "foo".to_string(),
         parameters: vec![("x".to_string(), IType::Int)],
-        parameter_ownerships: vec![crate::common::ownership::OwnershipMode::Plain],
+        parameter_kinds: vec![crate::common::ownership::ParameterKind::PlainValue],
         return_type: IType::Bool,
         return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,
@@ -78,10 +79,10 @@ fn test_display_function_signature() {
             ("b".to_string(), IType::Bool),
             ("c".to_string(), IType::Unit),
         ],
-        parameter_ownerships: vec![
-            crate::common::ownership::OwnershipMode::Plain,
-            crate::common::ownership::OwnershipMode::Plain,
-            crate::common::ownership::OwnershipMode::Plain,
+        parameter_kinds: vec![
+            ParameterKind::PlainValue,
+            ParameterKind::PlainValue,
+            ParameterKind::PlainValue,
         ],
         return_type: IType::Int,
         return_ownership: crate::common::ownership::OwnershipMode::Plain,
@@ -98,7 +99,7 @@ fn test_display_function_signature() {
     let sig_no_params = FunctionSignature {
         name: "empty".to_string(),
         parameters: vec![],
-        parameter_ownerships: vec![],
+        parameter_kinds: vec![],
         return_type: IType::Bool,
         return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,

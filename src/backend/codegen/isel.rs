@@ -10,7 +10,7 @@ use crate::backend::dtal::regs::{PhysicalReg, Reg};
 use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 
 /// Lower a TIR instruction to DTAL instructions
 ///
@@ -134,7 +134,7 @@ pub fn lower_instruction<'src>(
             dst,
             func,
             args,
-            arg_ownerships,
+            arg_kinds,
             ownership,
             result_ty,
         } => {
@@ -143,7 +143,7 @@ pub fn lower_instruction<'src>(
                 dst.as_ref().copied(),
                 func,
                 args,
-                arg_ownerships,
+                arg_kinds,
                 *ownership,
                 result_ty,
             );
@@ -196,7 +196,7 @@ pub fn lower_instruction<'src>(
                 });
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
-                    arg_ownerships: vec![],
+                    arg_kinds: vec![],
                     return_ty: DtalType::Int,
                     ownership: OwnershipMode::FreshOwned,
                 });
@@ -216,7 +216,7 @@ pub fn lower_instruction<'src>(
             if !bare_metal {
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
-                    arg_ownerships: vec![],
+                    arg_kinds: vec![],
                     return_ty: DtalType::Int,
                     ownership: OwnershipMode::Plain,
                 });
@@ -237,7 +237,7 @@ pub fn lower_instruction<'src>(
                 });
                 instrs.push(DtalInstr::Call {
                     target: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
-                    arg_ownerships: vec![],
+                    arg_kinds: vec![],
                     return_ty: DtalType::Unit,
                     ownership: OwnershipMode::Plain,
                 });
@@ -471,7 +471,7 @@ fn lower_call<'src>(
     dst: Option<crate::backend::dtal::VirtualReg>,
     func: &str,
     args: &[crate::backend::dtal::VirtualReg],
-    arg_ownerships: &[OwnershipMode],
+    arg_kinds: &[ParameterKind],
     ownership: OwnershipMode,
     result_ty: &crate::common::types::IType<'src>,
 ) {
@@ -480,7 +480,7 @@ fn lower_call<'src>(
     let dtal_result_ty = DtalType::from_itype(result_ty);
 
     // Move arguments to parameter registers (r0, r1, r2, ...)
-    for (i, (arg, arg_ownership)) in args.iter().zip(arg_ownerships.iter()).enumerate() {
+    for (i, (arg, arg_kind)) in args.iter().zip(arg_kinds.iter()).enumerate() {
         if i < 8 {
             // Use physical parameter registers
             let param_reg = match i {
@@ -494,14 +494,26 @@ fn lower_call<'src>(
                 7 => PhysicalReg::R7,
                 _ => unreachable!(),
             };
-            if arg_ownership.consumes_input() {
+            if arg_kind.is_plain_value() {
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Physical(param_reg),
+                    src: Reg::Virtual(*arg),
+                    ty: DtalType::Int,
+                });
+            } else if arg_kind.is_owned_value() {
                 instrs.push(DtalInstr::MoveOwned {
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),
                     ty: DtalType::Int,
                 });
-            } else {
+            } else if arg_kind.is_shared_borrow() {
                 instrs.push(DtalInstr::AliasBorrow {
+                    dst: Reg::Physical(param_reg),
+                    src: Reg::Virtual(*arg),
+                    ty: DtalType::Int,
+                });
+            } else {
+                instrs.push(DtalInstr::BorrowMut {
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),
                     ty: DtalType::Int,
@@ -519,7 +531,7 @@ fn lower_call<'src>(
     // Emit call instruction
     instrs.push(DtalInstr::Call {
         target: func.to_string(),
-        arg_ownerships: arg_ownerships.to_vec(),
+        arg_kinds: arg_kinds.to_vec(),
         return_ty: dtal_result_ty.clone(),
         ownership,
     });

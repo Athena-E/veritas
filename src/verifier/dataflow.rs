@@ -41,20 +41,26 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
         let mut entry_state = TypeState::new();
 
         // Initialize with function parameters
-        for ((reg, ty), ownership) in func.params.iter().zip(func.parameter_ownerships.iter()) {
+        for ((reg, ty), param_kind) in func.params.iter().zip(func.parameter_kinds.iter()) {
             entry_state.register_types.insert(*reg, ty.clone());
-            if ownership.consumes_input() && matches!(ty, DtalType::Array { .. }) {
+            if param_kind.is_owned_value() && matches!(ty, DtalType::Array { .. }) {
                 let object_id = fresh_object_id(&mut entry_state);
                 entry_state.owned_registers.insert(*reg);
                 entry_state.owned_object_ids.insert(*reg, object_id);
                 entry_state.shared_borrow_object_ids.remove(reg);
                 entry_state.mutable_borrow_object_ids.remove(reg);
-            } else if matches!(ty, DtalType::Array { .. }) {
+            } else if param_kind.is_shared_borrow() && matches!(ty, DtalType::Array { .. }) {
                 let object_id = fresh_object_id(&mut entry_state);
                 entry_state.shared_borrow_object_ids.insert(*reg, object_id);
                 entry_state.owned_registers.remove(reg);
                 entry_state.owned_object_ids.remove(reg);
                 entry_state.mutable_borrow_object_ids.remove(reg);
+            } else if param_kind.is_mutable_borrow() && matches!(ty, DtalType::Array { .. }) {
+                let object_id = fresh_object_id(&mut entry_state);
+                entry_state.mutable_borrow_object_ids.insert(*reg, object_id);
+                entry_state.owned_registers.remove(reg);
+                entry_state.owned_object_ids.remove(reg);
+                entry_state.shared_borrow_object_ids.remove(reg);
             }
         }
 
@@ -1014,25 +1020,27 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Call {
-            arg_ownerships,
+            arg_kinds,
             return_ty,
             ownership,
             ..
         } => {
             use crate::backend::dtal::regs::PhysicalReg;
-            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
+            for (index, arg_kind) in arg_kinds.iter().enumerate() {
                 if let Some(param_reg) = crate::backend::dtal::regs::PhysicalReg::param_regs()
                     .get(index)
                     .copied()
                 {
                     let param_reg = Reg::Physical(param_reg);
-                    if arg_ownership.consumes_input() {
+                    if arg_kind.is_owned_value() {
                         state.owned_registers.remove(&param_reg);
                         state.owned_object_ids.remove(&param_reg);
                         state.shared_borrow_object_ids.remove(&param_reg);
                         state.mutable_borrow_object_ids.remove(&param_reg);
                         state.consumed_registers.insert(param_reg);
                     } else {
+                        state.owned_registers.remove(&param_reg);
+                        state.owned_object_ids.remove(&param_reg);
                         state.shared_borrow_object_ids.remove(&param_reg);
                         state.mutable_borrow_object_ids.remove(&param_reg);
                     }

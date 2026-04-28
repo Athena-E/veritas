@@ -1,5 +1,5 @@
 use crate::common::ast::{BinOp, Literal, UnaryOp};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::types::{IProposition, IType};
 
@@ -45,7 +45,7 @@ pub enum TExpr<'src> {
     Call {
         func_name: String,
         args: Vec<Spanned<Self>>,
-        arg_ownerships: Vec<OwnershipMode>,
+        arg_kinds: Vec<ParameterKind>,
         ownership: OwnershipMode,
         ty: IType<'src>,
     },
@@ -144,7 +144,7 @@ pub type TFunctionBody<'src> = TBlock<'src>;
 pub struct TFunction<'src> {
     pub name: String,
     pub parameters: Vec<TParameter<'src>>,
-    pub parameter_ownerships: Vec<OwnershipMode>,
+    pub parameter_kinds: Vec<ParameterKind>,
     pub return_type: IType<'src>,
     pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,

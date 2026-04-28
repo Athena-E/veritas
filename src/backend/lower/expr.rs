@@ -9,7 +9,7 @@ use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::backend::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
@@ -192,10 +192,10 @@ pub fn lower_expr<'src>(
         TExpr::Call {
             func_name,
             args,
-            arg_ownerships,
+            arg_kinds,
             ownership,
             ty,
-        } => lower_call(ctx, func_name, args, arg_ownerships, *ownership, ty),
+        } => lower_call(ctx, func_name, args, arg_kinds, *ownership, ty),
 
         TExpr::Index { base, index, ty } => lower_index(ctx, base, index, ty),
 
@@ -323,43 +323,57 @@ fn lower_call<'src>(
     ctx: &mut LoweringContext<'src>,
     func_name: &str,
     args: &[Spanned<TExpr<'src>>],
-    arg_ownerships: &[OwnershipMode],
+    arg_kinds: &[ParameterKind],
     ownership: OwnershipMode,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    fn should_borrow_shared<'src>(arg_ty: &IType<'src>, ownership: OwnershipMode) -> bool {
-        !ownership.consumes_input() && matches!(arg_ty, IType::Array { .. })
-    }
-
     // Lower all arguments
     let mut borrow_end_regs = Vec::new();
     let arg_regs: Vec<VirtualReg> = args
         .iter()
-        .zip(arg_ownerships.iter())
-        .map(|(arg, arg_ownership)| {
+        .zip(arg_kinds.iter())
+        .map(|(arg, arg_kind)| {
             let arg_reg = lower_expr(ctx, arg);
-            if arg_ownership.consumes_input() && matches!(&arg.0, TExpr::Variable { .. }) {
-                let moved_reg = ctx.fresh_reg();
-                ctx.emit(TirInstr::MoveOwned {
-                    dst: moved_reg,
-                    src: arg_reg,
-                    ty: arg.0.get_type().clone(),
-                });
-                if let TExpr::Variable { name, .. } = &arg.0 {
-                    ctx.mark_var_moved(name);
-                }
-                moved_reg
-            } else if should_borrow_shared(arg.0.get_type(), *arg_ownership) {
-                let borrowed_reg = ctx.fresh_reg();
-                ctx.emit(TirInstr::BorrowShared {
-                    dst: borrowed_reg,
-                    src: arg_reg,
-                    ty: arg.0.get_type().clone(),
-                });
-                borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
-                borrowed_reg
-            } else {
-                arg_reg
+            match arg_kind {
+                ParameterKind::PlainValue => arg_reg,
+                ParameterKind::OwnedValue => {
+                    if matches!(&arg.0, TExpr::Variable { .. })
+                        && matches!(arg.0.get_type(), IType::Array { .. })
+                    {
+                        let moved_reg = ctx.fresh_reg();
+                        ctx.emit(TirInstr::MoveOwned {
+                            dst: moved_reg,
+                            src: arg_reg,
+                            ty: arg.0.get_type().clone(),
+                        });
+                        if let TExpr::Variable { name, .. } = &arg.0 {
+                            ctx.mark_var_moved(name);
+                        }
+                        moved_reg
+                    } else {
+                        arg_reg
+                    }
+                },
+                ParameterKind::SharedBorrow => {
+                    let borrowed_reg = ctx.fresh_reg();
+                    ctx.emit(TirInstr::BorrowShared {
+                        dst: borrowed_reg,
+                        src: arg_reg,
+                        ty: arg.0.get_type().clone(),
+                    });
+                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
+                    borrowed_reg
+                },
+                ParameterKind::MutableBorrow => {
+                    let borrowed_reg = ctx.fresh_reg();
+                    ctx.emit(TirInstr::BorrowMut {
+                        dst: borrowed_reg,
+                        src: arg_reg,
+                        ty: arg.0.get_type().clone(),
+                    });
+                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
+                    borrowed_reg
+                },
             }
         })
         .collect();
@@ -370,7 +384,7 @@ fn lower_call<'src>(
             dst: None,
             func: func_name.to_string(),
             args: arg_regs,
-            arg_ownerships: arg_ownerships.to_vec(),
+            arg_kinds: arg_kinds.to_vec(),
             ownership,
             result_ty: ty.clone(),
         });
@@ -395,7 +409,7 @@ fn lower_call<'src>(
             dst: Some(dst),
             func: func_name.to_string(),
             args: arg_regs,
-            arg_ownerships: arg_ownerships.to_vec(),
+            arg_kinds: arg_kinds.to_vec(),
             ownership,
             result_ty: ty.clone(),
         });

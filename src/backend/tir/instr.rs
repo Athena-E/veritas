@@ -4,7 +4,7 @@
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::types::{BinaryOp, BlockId, UnaryOp};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::types::IType;
 
 /// TIR instructions (three-address code in SSA form)
@@ -96,7 +96,7 @@ pub enum TirInstr<'src> {
         dst: Option<VirtualReg>,
         func: String,
         args: Vec<VirtualReg>,
-        arg_ownerships: Vec<OwnershipMode>,
+        arg_kinds: Vec<ParameterKind>,
         ownership: OwnershipMode,
         result_ty: IType<'src>,
     },

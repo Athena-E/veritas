@@ -1,5 +1,5 @@
 use crate::common::ast::Expr;
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use std::fmt;
 use std::sync::Arc;
@@ -59,7 +59,7 @@ pub enum IType<'src> {
 pub struct FunctionSignature<'src> {
     pub name: String,
     pub parameters: Vec<(String, IType<'src>)>,
-    pub parameter_ownerships: Vec<OwnershipMode>,
+    pub parameter_kinds: Vec<ParameterKind>,
     pub return_type: IType<'src>,
     pub return_ownership: OwnershipMode,
     pub returns_owned: bool,

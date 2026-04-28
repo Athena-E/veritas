@@ -5,7 +5,7 @@
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -117,8 +117,8 @@ pub struct DtalFunction {
     pub name: String,
     /// Parameter registers with their types
     pub params: Vec<(Reg, DtalType)>,
-    /// Ownership effect for each parameter, parallel to `params`.
-    pub parameter_ownerships: Vec<OwnershipMode>,
+    /// Parameter passing kind for each parameter, parallel to `params`.
+    pub parameter_kinds: Vec<ParameterKind>,
     /// Return type
     pub return_type: DtalType,
     /// Precondition (if any)
@@ -289,7 +289,7 @@ pub enum DtalInstr {
     /// call function
     Call {
         target: String,
-        arg_ownerships: Vec<OwnershipMode>,
+        arg_kinds: Vec<ParameterKind>,
         return_ty: DtalType,
         ownership: OwnershipMode,
     },

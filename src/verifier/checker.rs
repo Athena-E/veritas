@@ -241,7 +241,7 @@ pub fn verify_instruction(
         // Call: derive return type from callee's declared signature
         DtalInstr::Call {
             target,
-            arg_ownerships,
+            arg_kinds,
             ownership,
             ..
         } => {
@@ -308,11 +308,13 @@ pub fn verify_instruction(
                 });
             };
 
-            for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
-            if !arg_ownership.consumes_input() {
+            for (index, arg_kind) in arg_kinds.iter().enumerate() {
+            if !arg_kind.is_owned_value() {
                 if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
-                    clear_shared_borrow(Reg::Physical(param_reg), state);
-                    clear_mutable_borrow(Reg::Physical(param_reg), state);
+                    let param_reg = Reg::Physical(param_reg);
+                    clear_owned(param_reg, state);
+                    clear_shared_borrow(param_reg, state);
+                    clear_mutable_borrow(param_reg, state);
                 }
                 continue;
             }
