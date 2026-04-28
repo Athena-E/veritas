@@ -21,32 +21,49 @@ pub fn verify_instruction(
         DtalInstr::MovImm { dst, imm, ty } => {
             verify_mov_imm(*dst, *imm, ty, state, block_label)?;
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
         DtalInstr::MovReg { dst, src, ty } => {
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
             verify_plain_mov_does_not_duplicate_owned(*src, *dst, state, block_label)?;
+            verify_plain_mov_does_not_duplicate_mutable_borrow(*src, *dst, state, block_label)?;
             preserve_plain_mov_alias_ownership(*src, *dst, state);
             preserve_plain_mov_shared_borrow(*src, *dst, state);
+            preserve_plain_mov_mutable_borrow(*src, *dst, state);
             clear_consumed(*dst, state);
         }
 
         DtalInstr::AliasBorrow { dst, src, ty } => {
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "alias_borrow")?;
             clear_owned(*dst, state);
             assign_shared_borrow_from(*src, *dst, state);
             clear_consumed(*dst, state);
         }
 
+        DtalInstr::BorrowMut { dst, src, ty } => {
+            verify_owned_available(*src, state, block_label, "borrow_mut")?;
+            verify_object_not_shared_borrowed(*src, state, block_label, "borrow_mut")?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "borrow_mut")?;
+            verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            assign_mutable_borrow_from(*src, *dst, state);
+            clear_consumed(*dst, state);
+        }
+
         DtalInstr::BorrowEnd { src, .. } => {
-            verify_shared_borrow_available(*src, state, block_label, "borrow_end")?;
+            verify_borrow_available(*src, state, block_label, "borrow_end")?;
             clear_shared_borrow(*src, state);
+            clear_mutable_borrow(*src, state);
         }
 
         DtalInstr::MoveOwned { dst, src, ty } => {
             verify_owned_available(*src, state, block_label, "move_owned")?;
             verify_object_not_shared_borrowed(*src, state, block_label, "move_owned")?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "move_owned")?;
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
             transfer_owned(*src, *dst, state);
             consume_reg(*src, state);
@@ -63,6 +80,7 @@ pub fn verify_instruction(
             verify_binop(*op, *dst, *lhs, *rhs, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -70,6 +88,7 @@ pub fn verify_instruction(
             verify_add_imm(*dst, *src, *imm, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -82,6 +101,7 @@ pub fn verify_instruction(
             verify_load(*dst, *base, *offset, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -96,6 +116,7 @@ pub fn verify_instruction(
             verify_load_op(*dst, *base, *offset, *other, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -116,6 +137,7 @@ pub fn verify_instruction(
             state.register_types.insert(*dst, DtalType::Bool);
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -123,6 +145,7 @@ pub fn verify_instruction(
             verify_not(*dst, *src, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -130,6 +153,7 @@ pub fn verify_instruction(
             verify_neg(*dst, *src, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -137,6 +161,7 @@ pub fn verify_instruction(
             verify_shift_imm(*dst, *src, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
 
@@ -159,6 +184,9 @@ pub fn verify_instruction(
             state
                 .shared_borrow_stack_object_ids
                 .push(state.shared_borrow_object_ids.get(src).copied());
+            state
+                .mutable_borrow_stack_object_ids
+                .push(state.mutable_borrow_object_ids.get(src).copied());
         }
 
         DtalInstr::Pop { dst, ty: _ } => {
@@ -180,6 +208,11 @@ pub fn verify_instruction(
                 assign_shared_borrow_object(*dst, object_id, state);
             } else {
                 clear_shared_borrow(*dst, state);
+            }
+            if let Some(object_id) = state.mutable_borrow_stack_object_ids.pop().unwrap_or(None) {
+                assign_mutable_borrow_object(*dst, object_id, state);
+            } else {
+                clear_mutable_borrow(*dst, state);
             }
             clear_consumed(*dst, state);
         }
@@ -276,12 +309,13 @@ pub fn verify_instruction(
             };
 
             for (index, arg_ownership) in arg_ownerships.iter().enumerate() {
-                if !arg_ownership.consumes_input() {
-                    if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
-                        clear_shared_borrow(Reg::Physical(param_reg), state);
-                    }
-                    continue;
+            if !arg_ownership.consumes_input() {
+                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                    clear_shared_borrow(Reg::Physical(param_reg), state);
+                    clear_mutable_borrow(Reg::Physical(param_reg), state);
                 }
+                continue;
+            }
                 if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
                     let param_reg = Reg::Physical(param_reg);
                         verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
@@ -293,6 +327,7 @@ pub fn verify_instruction(
                         )?;
                         clear_owned(param_reg, state);
                         clear_shared_borrow(param_reg, state);
+                        clear_mutable_borrow(param_reg, state);
                         consume_reg(param_reg, state);
                 }
             }
@@ -349,6 +384,7 @@ pub fn verify_instruction(
             state.register_types.insert(*dst, DtalType::Int);
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
             clear_consumed(*dst, state);
         }
         DtalInstr::PortOut { port, value } => {
@@ -398,6 +434,8 @@ pub fn verify_instruction(
             clear_owned(rdx, state);
             clear_shared_borrow(rax, state);
             clear_shared_borrow(rdx, state);
+            clear_mutable_borrow(rax, state);
+            clear_mutable_borrow(rdx, state);
             clear_consumed(rax, state);
             clear_consumed(rdx, state);
         }
@@ -417,6 +455,11 @@ pub fn verify_instruction(
                 state.shared_borrow_spill_object_ids.insert(*offset, object_id);
             } else {
                 state.shared_borrow_spill_object_ids.remove(offset);
+            }
+            if let Some(object_id) = state.mutable_borrow_object_ids.get(src).copied() {
+                state.mutable_borrow_spill_object_ids.insert(*offset, object_id);
+            } else {
+                state.mutable_borrow_spill_object_ids.remove(offset);
             }
         }
 
@@ -442,6 +485,11 @@ pub fn verify_instruction(
                 assign_shared_borrow_object(*dst, object_id, state);
             } else {
                 clear_shared_borrow(*dst, state);
+            }
+            if let Some(object_id) = state.mutable_borrow_spill_object_ids.get(offset).copied() {
+                assign_mutable_borrow_object(*dst, object_id, state);
+            } else {
+                clear_mutable_borrow(*dst, state);
             }
             clear_consumed(*dst, state);
         }
@@ -477,6 +525,7 @@ pub fn verify_instruction(
                     .register_types
                     .entry(Reg::Physical(*preg))
                     .or_insert(DtalType::Int);
+                clear_mutable_borrow(Reg::Physical(*preg), state);
                 clear_consumed(Reg::Physical(*preg), state);
             }
         }
@@ -488,6 +537,7 @@ pub fn verify_instruction(
         DtalInstr::DropOwned { src, .. } => {
             verify_owned_available(*src, state, block_label, "drop_owned")?;
             verify_object_not_shared_borrowed(*src, state, block_label, "drop_owned")?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "drop_owned")?;
             let object_id = state.owned_object_ids.get(src).copied();
             clear_owned_alias_group(*src, object_id, state);
             consume_owned_alias_group(*src, object_id, state);
@@ -508,20 +558,26 @@ fn clear_shared_borrow(reg: Reg, state: &mut TypeState) {
     state.shared_borrow_object_ids.remove(&reg);
 }
 
-fn verify_shared_borrow_available(
+fn clear_mutable_borrow(reg: Reg, state: &mut TypeState) {
+    state.mutable_borrow_object_ids.remove(&reg);
+}
+
+fn verify_borrow_available(
     reg: Reg,
     state: &TypeState,
     block_label: &str,
     instr_desc: &str,
 ) -> Result<(), VerifyError> {
-    if !state.shared_borrow_object_ids.contains_key(&reg) {
-        return Err(VerifyError::OwnershipViolation {
-            block: block_label.to_string(),
-            instr_desc: instr_desc.to_string(),
-            msg: format!("register {:?} does not currently hold a shared borrow", reg),
-        });
+    if state.shared_borrow_object_ids.contains_key(&reg)
+        || state.mutable_borrow_object_ids.contains_key(&reg)
+    {
+        return Ok(());
     }
-    Ok(())
+    Err(VerifyError::OwnershipViolation {
+        block: block_label.to_string(),
+        instr_desc: instr_desc.to_string(),
+        msg: format!("register {:?} does not currently hold a live borrow", reg),
+    })
 }
 
 fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
@@ -612,6 +668,18 @@ fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
     }
 }
 
+fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
+    if src == dst {
+        if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied() {
+            assign_mutable_borrow_object(dst, object_id, state);
+        } else {
+            clear_mutable_borrow(dst, state);
+        }
+    } else {
+        clear_mutable_borrow(dst, state);
+    }
+}
+
 fn assign_shared_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
     if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
         assign_shared_borrow_object(dst, object_id, state);
@@ -624,7 +692,22 @@ fn assign_shared_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
 
 fn assign_shared_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
     clear_owned(reg, state);
+    clear_mutable_borrow(reg, state);
     state.shared_borrow_object_ids.insert(reg, object_id);
+}
+
+fn assign_mutable_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+    if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
+        assign_mutable_borrow_object(dst, object_id, state);
+    } else {
+        clear_mutable_borrow(dst, state);
+    }
+}
+
+fn assign_mutable_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+    clear_owned(reg, state);
+    clear_shared_borrow(reg, state);
+    state.mutable_borrow_object_ids.insert(reg, object_id);
 }
 
 fn set_owned_from_type(reg: Reg, ty: &DtalType, state: &mut TypeState, fresh: bool) {
@@ -638,6 +721,7 @@ fn set_owned_from_type(reg: Reg, ty: &DtalType, state: &mut TypeState, fresh: bo
     } else {
         clear_owned(reg, state);
         clear_shared_borrow(reg, state);
+        clear_mutable_borrow(reg, state);
     }
 }
 
@@ -685,6 +769,27 @@ fn verify_plain_mov_does_not_duplicate_owned(
     Ok(())
 }
 
+fn verify_plain_mov_does_not_duplicate_mutable_borrow(
+    src: Reg,
+    dst: Reg,
+    state: &TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied()
+        && src != dst
+    {
+        return Err(VerifyError::OwnershipViolation {
+            block: block_label.to_string(),
+            instr_desc: "mov".to_string(),
+            msg: format!(
+                "plain mov would duplicate mutable borrow of object o{} from {:?} to {:?}",
+                object_id, src, dst
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn fresh_object_id(state: &mut TypeState) -> u32 {
     let object_id = state.next_object_id;
     state.next_object_id += 1;
@@ -693,6 +798,7 @@ fn fresh_object_id(state: &mut TypeState) -> u32 {
 
 fn assign_owned_object(reg: Reg, object_id: u32, state: &mut TypeState) {
     clear_shared_borrow(reg, state);
+    clear_mutable_borrow(reg, state);
     state.owned_registers.insert(reg);
     state.owned_object_ids.insert(reg, object_id);
 }
@@ -728,6 +834,42 @@ fn verify_object_not_shared_borrowed(
         instr_desc: instr_desc.to_string(),
         msg: format!(
             "object o{} still has active shared borrows in {:?}",
+            object_id, active_borrowers
+        ),
+    })
+}
+
+fn verify_object_not_mutably_borrowed(
+    reg: Reg,
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    let Some(object_id) = state.owned_object_ids.get(&reg).copied() else {
+        return Ok(());
+    };
+
+    let active_borrowers: Vec<Reg> = state
+        .mutable_borrow_object_ids
+        .iter()
+        .filter_map(|(borrow_reg, borrowed_object)| {
+            if *borrowed_object == object_id {
+                Some(*borrow_reg)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if active_borrowers.is_empty() {
+        return Ok(());
+    }
+
+    Err(VerifyError::OwnershipViolation {
+        block: block_label.to_string(),
+        instr_desc: instr_desc.to_string(),
+        msg: format!(
+            "object o{} still has active mutable borrows in {:?}",
             object_id, active_borrowers
         ),
     })

@@ -145,6 +145,17 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
+        DtalInstr::BorrowMut { dst, src, ty } => {
+            writeln!(
+                output,
+                "    borrow_mut {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
         DtalInstr::BorrowEnd { src, ty } => {
             writeln!(output, "    borrow_end {}    : {}", emit_reg(src), emit_type(ty)).unwrap();
         }

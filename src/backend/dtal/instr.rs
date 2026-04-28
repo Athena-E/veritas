@@ -47,18 +47,24 @@ pub struct TypeState {
     pub owned_object_ids: HashMap<Reg, u32>,
     /// Registers currently holding shared borrows.
     pub shared_borrow_object_ids: HashMap<Reg, u32>,
+    /// Registers currently holding mutable borrows.
+    pub mutable_borrow_object_ids: HashMap<Reg, u32>,
     /// Ownership state for stack values tracked by `Push`/`Pop`.
     pub owned_stack: Vec<bool>,
     /// Object identities for stack values tracked by `Push`/`Pop`.
     pub owned_stack_object_ids: Vec<Option<u32>>,
     /// Shared-borrow object identities for stack values tracked by `Push`/`Pop`.
     pub shared_borrow_stack_object_ids: Vec<Option<u32>>,
+    /// Mutable-borrow object identities for stack values tracked by `Push`/`Pop`.
+    pub mutable_borrow_stack_object_ids: Vec<Option<u32>>,
     /// Stack spill slots currently holding owned values.
     pub owned_spills: HashSet<i32>,
     /// Object identities for owned spill slots.
     pub owned_spill_object_ids: HashMap<i32, u32>,
     /// Object identities for spill slots currently holding shared borrows.
     pub shared_borrow_spill_object_ids: HashMap<i32, u32>,
+    /// Object identities for spill slots currently holding mutable borrows.
+    pub mutable_borrow_spill_object_ids: HashMap<i32, u32>,
     /// Registers whose previously-owned value has been consumed by move/drop.
     pub consumed_registers: HashSet<Reg>,
     /// Fresh object id supply for ownership-capability tracking.
@@ -78,12 +84,15 @@ impl TypeState {
             owned_registers: HashSet::new(),
             owned_object_ids: HashMap::new(),
             shared_borrow_object_ids: HashMap::new(),
+            mutable_borrow_object_ids: HashMap::new(),
             owned_stack: Vec::new(),
             owned_stack_object_ids: Vec::new(),
             shared_borrow_stack_object_ids: Vec::new(),
+            mutable_borrow_stack_object_ids: Vec::new(),
             owned_spills: HashSet::new(),
             owned_spill_object_ids: HashMap::new(),
             shared_borrow_spill_object_ids: HashMap::new(),
+            mutable_borrow_spill_object_ids: HashMap::new(),
             consumed_registers: HashSet::new(),
             next_object_id: 0,
         }
@@ -201,6 +210,8 @@ pub enum DtalInstr {
     MovReg { dst: Reg, src: Reg, ty: DtalType },
     /// alias_borrow rd, rs (shared borrow)
     AliasBorrow { dst: Reg, src: Reg, ty: DtalType },
+    /// borrow_mut rd, rs (mutable borrow)
+    BorrowMut { dst: Reg, src: Reg, ty: DtalType },
     /// borrow_end rs
     BorrowEnd { src: Reg, ty: DtalType },
     /// move_owned rd, rs

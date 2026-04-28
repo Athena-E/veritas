@@ -1083,6 +1083,118 @@ mod tests {
     }
 
     #[test]
+    fn borrow_mut_of_owned_value_is_allowed() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 61);
+        let program = make_program(vec![]);
+
+        verify_instruction(
+            &DtalInstr::BorrowMut {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap();
+
+        assert_eq!(state.mutable_borrow_object_ids.get(&v(1)).copied(), Some(61));
+        assert!(state.owned_registers.contains(&v(0)));
+    }
+
+    #[test]
+    fn borrow_mut_while_shared_borrow_live_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.register_types.insert(v(1), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 62);
+        state.shared_borrow_object_ids.insert(v(1), 62);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::BorrowMut {
+                dst: v(2),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn alias_borrow_while_mutable_borrow_live_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.register_types.insert(v(1), array_ty.clone());
+        state.owned_registers.insert(v(0));
+        state.owned_object_ids.insert(v(0), 63);
+        state.mutable_borrow_object_ids.insert(v(1), 63);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::AliasBorrow {
+                dst: v(2),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
+    fn plain_mov_of_mutable_borrow_is_rejected() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let mut state = TypeState::new();
+        state.register_types.insert(v(0), array_ty.clone());
+        state.mutable_borrow_object_ids.insert(v(0), 64);
+        let program = make_program(vec![]);
+
+        let err = verify_instruction(
+            &DtalInstr::MovReg {
+                dst: v(1),
+                src: v(0),
+                ty: array_ty,
+            },
+            &mut state,
+            ".entry",
+            &program,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+    }
+
+    #[test]
     fn alias_borrow_for_consuming_call_argument_is_rejected() {
         let program = make_program(vec![
             make_func(

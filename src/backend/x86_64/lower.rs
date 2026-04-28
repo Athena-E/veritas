@@ -112,6 +112,7 @@ fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
             }
             DtalInstr::MovReg { dst, src, .. }
             | DtalInstr::AliasBorrow { dst, src, .. }
+            | DtalInstr::BorrowMut { dst, src, .. }
             | DtalInstr::MoveOwned { dst, src, .. }
             | DtalInstr::Neg { dst, src, .. }
             | DtalInstr::Not { dst, src, .. } => {
@@ -389,6 +390,7 @@ impl<'a> FunctionLowerer<'a> {
 
             DtalInstr::MovReg { dst, src, .. }
             | DtalInstr::AliasBorrow { dst, src, .. }
+            | DtalInstr::BorrowMut { dst, src, .. }
             | DtalInstr::MoveOwned { dst, src, .. } => {
                 self.lower_mov_reg(*dst, *src);
             }

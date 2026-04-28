@@ -84,6 +84,7 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
     match instr {
         DtalInstr::MovReg { src, .. }
         | DtalInstr::AliasBorrow { src, .. }
+        | DtalInstr::BorrowMut { src, .. }
         | DtalInstr::BorrowEnd { src, .. }
         | DtalInstr::MoveOwned { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
@@ -175,6 +176,7 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
         | DtalInstr::AliasBorrow { dst, .. }
+        | DtalInstr::BorrowMut { dst, .. }
         | DtalInstr::MoveOwned { dst, .. }
         | DtalInstr::Load { dst, .. }
         | DtalInstr::LoadOp { dst, .. }
@@ -207,6 +209,11 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
     // Do not propagate physical-register sources: later backend passes rely on
     // these explicit materialisation moves to reason about ABI values.
     if let DtalInstr::MovReg {
+        dst: Reg::Virtual(dst_vreg),
+        src: Reg::Virtual(src_vreg),
+        ..
+    }
+    | DtalInstr::AliasBorrow {
         dst: Reg::Virtual(dst_vreg),
         src: Reg::Virtual(src_vreg),
         ..

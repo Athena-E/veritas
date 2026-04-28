@@ -44,6 +44,13 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
+    /// dst = mutable borrow src
+    BorrowMut {
+        dst: VirtualReg,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
     /// end shared borrow held in src
     BorrowEnd {
         src: VirtualReg,
@@ -128,6 +135,7 @@ impl<'src> TirInstr<'src> {
             TirInstr::MoveOwned { dst, .. } => Some(*dst),
             TirInstr::DropOwned { .. } => None,
             TirInstr::BorrowShared { dst, .. } => Some(*dst),
+            TirInstr::BorrowMut { dst, .. } => Some(*dst),
             TirInstr::BorrowEnd { .. } => None,
             TirInstr::BinOp { dst, .. } => Some(*dst),
             TirInstr::UnaryOp { dst, .. } => Some(*dst),
@@ -150,6 +158,7 @@ impl<'src> TirInstr<'src> {
             TirInstr::MoveOwned { ty, .. } => Some(ty),
             TirInstr::DropOwned { ty, .. } => Some(ty),
             TirInstr::BorrowShared { ty, .. } => Some(ty),
+            TirInstr::BorrowMut { ty, .. } => Some(ty),
             TirInstr::BorrowEnd { ty, .. } => Some(ty),
             TirInstr::BinOp { ty, .. } => Some(ty),
             TirInstr::UnaryOp { ty, .. } => Some(ty),

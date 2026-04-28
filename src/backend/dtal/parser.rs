@@ -383,6 +383,7 @@ impl<'a> DtalParser<'a> {
         match tokens[0] {
             "mov" => self.parse_mov(&tokens, ty_comment),
             "alias_borrow" => self.parse_alias_borrow(&tokens, ty_comment),
+            "borrow_mut" => self.parse_borrow_mut(&tokens, ty_comment),
             "move_owned" => self.parse_move_owned(&tokens, ty_comment),
             "borrow_end" => self.parse_borrow_end(&tokens, ty_comment),
             "load" => self.parse_load(&tokens, ty_comment),
@@ -576,6 +577,27 @@ impl<'a> DtalParser<'a> {
             .transpose()?
             .unwrap_or(DtalType::Int);
         Ok(Some(DtalInstr::AliasBorrow { dst, src, ty }))
+    }
+
+    fn parse_borrow_mut(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 3 {
+            return Err(self.err("borrow_mut requires 2 operands"));
+        }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2];
+        let dst =
+            parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::BorrowMut { dst, src, ty }))
     }
 
     fn parse_borrow_end(
