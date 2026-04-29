@@ -53,6 +53,17 @@ fn is_reference_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Ref(_) | IType::RefMut(_))
 }
 
+fn array_base_type<'src>(ty: &IType<'src>) -> Option<IType<'src>> {
+    match ty {
+        IType::Array { .. } => Some(ty.clone()),
+        IType::Ref(inner) | IType::RefMut(inner) => match inner.as_ref() {
+            IType::Array { .. } => Some(inner.as_ref().clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn reject_region_borrow_escape<'src>(
     ctx: &TypingContext<'src>,
     binding_name: &str,
@@ -589,24 +600,46 @@ pub fn check_stmt<'src>(
                         });
                     }
 
-                    // Check array type and extract element type
+                    // Check array/reference-to-array type and extract element type
                     let (elem_ty, array_size) = match &base_ty {
-                        IType::Array { element_type, size } => (element_type.as_ref(), size),
-                        _ => {
-                            return Err(TypeError::NotAnArray {
-                                found: base_ty,
+                        IType::Ref(_) => {
+                            let name = if let Expr::Variable(name) = &base.0 {
+                                name.to_string()
+                            } else {
+                                "<ref>".to_string()
+                            };
+                            return Err(TypeError::BorrowConflict {
+                                name,
+                                reason: "cannot assign through a shared reference".to_string(),
                                 span: base.1,
                             });
                         }
+                        _ => match array_base_type(&base_ty) {
+                            Some(IType::Array { element_type, size }) => {
+                                (element_type.as_ref().clone(), size.clone())
+                            }
+                            Some(other) => {
+                                return Err(TypeError::NotAnArray {
+                                    found: other,
+                                    span: base.1,
+                                });
+                            }
+                            None => {
+                                return Err(TypeError::NotAnArray {
+                                    found: base_ty,
+                                    span: base.1,
+                                });
+                            }
+                        },
                     };
 
                     // Check array bounds using the actual index expression
                     crate::frontend::typechecker::check_array_bounds_expr(
-                        ctx, &index.0, &index_ty, array_size, &base_ty, index.1,
+                        ctx, &index.0, &index_ty, &array_size, &base_ty, index.1,
                     )?;
 
                     // Check value type matches element type
-                    if !is_subtype(ctx, &rhs_ty, elem_ty) {
+                    if !is_subtype(ctx, &rhs_ty, &elem_ty) {
                         return Err(TypeError::TypeMismatch {
                             expected: elem_ty.clone(),
                             found: rhs_ty,

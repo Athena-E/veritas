@@ -26,6 +26,17 @@ fn borrow_exposed_type<'src>(ty: &IType<'src>) -> IType<'src> {
     }
 }
 
+fn array_base_type<'src>(ty: &IType<'src>) -> Option<IType<'src>> {
+    match ty {
+        IType::Array { .. } => Some(ty.clone()),
+        IType::Ref(inner) | IType::RefMut(inner) => match inner.as_ref() {
+            IType::Array { .. } => Some(inner.as_ref().clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
@@ -431,14 +442,21 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extract element type from array
-            match &base_ty {
-                IType::Array { element_type, size } => {
+            // Extract element type from arrays and references-to-arrays
+            match array_base_type(&base_ty) {
+                Some(IType::Array { element_type, size }) => {
                     // Check array bounds - returns error if cannot prove safe
                     // Use the actual index expression so SMT can use context propositions
-                    check_array_bounds_expr(ctx, &index.0, &index_ty, size, &base_ty, index.1)?;
+                    check_array_bounds_expr(
+                        ctx,
+                        &index.0,
+                        &index_ty,
+                        &size,
+                        &base_ty,
+                        index.1,
+                    )?;
 
-                    let elem_ty = (**element_type).clone();
+                    let elem_ty = (*element_type).clone();
                     let texpr = TExpr::Index {
                         base: Box::new(tbase),
                         index: Box::new(tindex),
@@ -446,7 +464,11 @@ pub fn synth_expr<'src>(
                     };
                     Ok(((texpr, span), elem_ty))
                 }
-                _ => Err(TypeError::NotAnArray {
+                Some(other) => Err(TypeError::NotAnArray {
+                    found: other,
+                    span: base.1,
+                }),
+                None => Err(TypeError::NotAnArray {
                     found: base_ty,
                     span: base.1,
                 }),

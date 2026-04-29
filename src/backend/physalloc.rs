@@ -1340,6 +1340,7 @@ mod tests {
     use super::*;
     use crate::backend::emit::emit_program;
     use crate::pipeline;
+    use crate::verifier::verify_dtal;
 
     #[test]
     fn test_physalloc_simple() {
@@ -1479,5 +1480,39 @@ fn main() -> int {
             "Expected exit code 6 (4+2), got {:?}",
             status.code()
         );
+    }
+
+    #[test]
+    fn test_physalloc_verify_shared_borrow_call() {
+        let source = r#"
+fn inspect(r: &[int; 1]) -> int {
+    7
+}
+
+fn main() -> int {
+    let arr: [int; 1] = [0; 1];
+    inspect(&arr)
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        verify_dtal(&physical).expect("physical shared-borrow program should verify");
+    }
+
+    #[test]
+    fn test_physalloc_verify_mutable_borrow_call() {
+        let source = r#"
+fn touch(r: &mut [int; 1]) -> int {
+    9
+}
+
+fn main() -> int {
+    let mut arr: [int; 1] = [0; 1];
+    touch(&mut arr)
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        verify_dtal(&physical).expect("physical mutable-borrow program should verify");
     }
 }

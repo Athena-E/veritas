@@ -3181,6 +3181,122 @@ mod tests {
     }
 
     #[test]
+    fn test_physical_shared_borrow_spill_store_load() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(1),
+        };
+        let ref_ty = DtalType::Ref(Arc::new(array_ty.clone()));
+        let program = make_program(vec![DtalFunction {
+            name: "spill_shared_borrow".to_string(),
+            params: vec![(r0(), array_ty)],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
+            return_type: DtalType::SingletonInt(IndexExpr::Const(0)),
+            precondition: None,
+            postcondition: None,
+            blocks: vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 8,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::AliasBorrow {
+                        dst: Reg::Physical(PhysicalReg::R1),
+                        src: r0(),
+                        ty: ref_ty.clone(),
+                    },
+                    DtalInstr::SpillStore {
+                        src: Reg::Physical(PhysicalReg::R1),
+                        offset: -8,
+                        ty: ref_ty.clone(),
+                    },
+                    DtalInstr::SpillLoad {
+                        dst: Reg::Physical(PhysicalReg::R3),
+                        offset: -8,
+                        ty: ref_ty.clone(),
+                    },
+                    DtalInstr::BorrowEnd {
+                        src: Reg::Physical(PhysicalReg::R3),
+                        ty: ref_ty,
+                    },
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 0,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(0)),
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        }]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Physical shared-borrow spill store/load should verify"
+        );
+    }
+
+    #[test]
+    fn test_physical_mutable_borrow_spill_store_load() {
+        let array_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(1),
+        };
+        let ref_mut_ty = DtalType::RefMut(Arc::new(array_ty.clone()));
+        let program = make_program(vec![DtalFunction {
+            name: "spill_mut_borrow".to_string(),
+            params: vec![(r0(), array_ty)],
+            parameter_kinds: vec![crate::common::ownership::ParameterKind::OwnedValue],
+            return_type: DtalType::SingletonInt(IndexExpr::Const(0)),
+            precondition: None,
+            postcondition: None,
+            blocks: vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 8,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::BorrowMut {
+                        dst: Reg::Physical(PhysicalReg::R1),
+                        src: r0(),
+                        ty: ref_mut_ty.clone(),
+                    },
+                    DtalInstr::SpillStore {
+                        src: Reg::Physical(PhysicalReg::R1),
+                        offset: -8,
+                        ty: ref_mut_ty.clone(),
+                    },
+                    DtalInstr::SpillLoad {
+                        dst: Reg::Physical(PhysicalReg::R3),
+                        offset: -8,
+                        ty: ref_mut_ty.clone(),
+                    },
+                    DtalInstr::BorrowEnd {
+                        src: Reg::Physical(PhysicalReg::R3),
+                        ty: ref_mut_ty,
+                    },
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 0,
+                        ty: DtalType::SingletonInt(IndexExpr::Const(0)),
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        }]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Physical mutable-borrow spill store/load should verify"
+        );
+    }
+
+    #[test]
     fn test_physical_call_sets_lr() {
         // After call, return value is in LR. Subsequent mov r0, lr
         // should propagate the type.

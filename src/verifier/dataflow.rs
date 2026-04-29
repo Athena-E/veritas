@@ -915,11 +915,16 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Load { dst, base, ty, .. } => {
-            // Derive element type from array base when available
-            let derived_ty = if let Some(base_ty) = state.register_types.get(base)
-                && let DtalType::Array { element_type, .. } = base_ty
-            {
-                element_type.as_ref().clone()
+            // Derive element type from array and ref-to-array bases when available.
+            let derived_ty = if let Some(base_ty) = state.register_types.get(base) {
+                match base_ty {
+                    DtalType::Array { element_type, .. } => element_type.as_ref().clone(),
+                    DtalType::Ref(inner) | DtalType::RefMut(inner) => match inner.as_ref() {
+                        DtalType::Array { element_type, .. } => element_type.as_ref().clone(),
+                        _ => ty.clone(),
+                    },
+                    _ => ty.clone(),
+                }
             } else {
                 ty.clone()
             };

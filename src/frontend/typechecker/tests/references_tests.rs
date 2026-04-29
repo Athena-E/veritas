@@ -435,3 +435,85 @@ fn shared_borrow_ends_at_if_block_exit() {
     check_program(&make_program(vec![func]))
         .expect("shared borrow should end when the if block scope exits");
 }
+
+#[test]
+fn shared_array_reference_indexing_typechecks() {
+    let inspect = Function {
+        name: "inspect",
+        parameters: vec![spanned(Parameter {
+            name: "r",
+            ty: spanned(Type::Ref(Box::new(int_array_type(1)))),
+        })],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![],
+            trailing_expr: Some(Box::new(spanned(Expr::Index {
+                base: Box::new(spanned(Expr::Variable("r"))),
+                index: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(0)))),
+            }))),
+        },
+    };
+
+    check_program(&make_program(vec![inspect]))
+        .expect("indexing through a shared array reference should typecheck");
+}
+
+#[test]
+fn mutable_array_reference_assignment_typechecks() {
+    let touch = Function {
+        name: "touch",
+        parameters: vec![spanned(Parameter {
+            name: "r",
+            ty: spanned(Type::RefMut(Box::new(int_array_type(1)))),
+        })],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![spanned(Stmt::Assignment {
+                lhs: spanned(Expr::Index {
+                    base: Box::new(spanned(Expr::Variable("r"))),
+                    index: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(0)))),
+                }),
+                rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(9))),
+            })],
+            trailing_expr: Some(Box::new(spanned(Expr::Index {
+                base: Box::new(spanned(Expr::Variable("r"))),
+                index: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(0)))),
+            }))),
+        },
+    };
+
+    check_program(&make_program(vec![touch]))
+        .expect("assignment through a mutable array reference should typecheck");
+}
+
+#[test]
+fn assignment_through_shared_array_reference_is_rejected() {
+    let touch = Function {
+        name: "touch",
+        parameters: vec![spanned(Parameter {
+            name: "r",
+            ty: spanned(Type::Ref(Box::new(int_array_type(1)))),
+        })],
+        return_type: spanned(Type::Unit),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![spanned(Stmt::Assignment {
+                lhs: spanned(Expr::Index {
+                    base: Box::new(spanned(Expr::Variable("r"))),
+                    index: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(0)))),
+                }),
+                rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(9))),
+            })],
+            trailing_expr: None,
+        },
+    };
+
+    let err = check_program(&make_program(vec![touch]))
+        .expect_err("assignment through a shared array reference should be rejected");
+    assert!(matches!(err, TypeError::BorrowConflict { .. }));
+}

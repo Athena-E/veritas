@@ -1160,13 +1160,28 @@ pub(crate) fn pointer_arithmetic_result_type(
     base_ty: &DtalType,
     annotated_ty: &DtalType,
 ) -> Option<DtalType> {
-    if let DtalType::Array { element_type, .. } = base_ty {
-        return Some(match annotated_ty {
+    match base_ty {
+        DtalType::Array { element_type, .. }
+        | DtalType::Ref(element_type)
+        | DtalType::RefMut(element_type)
+            if matches!(element_type.as_ref(), DtalType::Array { .. }) =>
+        {
+            let pointed_ty = element_type.as_ref();
+            if let DtalType::Array { element_type, .. } = pointed_ty {
+                Some(match annotated_ty {
+                    DtalType::Array { .. } => annotated_ty.clone(),
+                    _ => element_type.as_ref().clone(),
+                })
+            } else {
+                None
+            }
+        }
+        DtalType::Array { element_type, .. } => Some(match annotated_ty {
             DtalType::Array { .. } => annotated_ty.clone(),
             _ => element_type.as_ref().clone(),
-        });
+        }),
+        _ => None,
     }
-    None
 }
 
 /// Verify binary operation
@@ -1400,8 +1415,19 @@ fn verify_load(
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
-    // If base has an array type, derive element type and perform bounds checking
-    if let DtalType::Array { element_type, size } = &base_ty {
+    // If base has an array type, or a reference to an array, derive element
+    // type and perform bounds checking.
+    let array_view = match &base_ty {
+        DtalType::Array { element_type, size } => Some((element_type.as_ref().clone(), size.clone())),
+        DtalType::Ref(inner) | DtalType::RefMut(inner) => match inner.as_ref() {
+            DtalType::Array { element_type, size } => {
+                Some((element_type.as_ref().clone(), size.clone()))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some((derived_ty, size)) = array_view {
         let offset_expr = reg_to_index_expr(&offset);
 
         // Construct bounds constraint: 0 <= offset < size
@@ -1420,7 +1446,6 @@ fn verify_load(
         }
 
         // Derive element type from array base — don't trust annotation
-        let derived_ty = element_type.as_ref().clone();
         state.register_types.insert(dst, derived_ty);
 
         // Emit select constraint: dst == current_arr[offset]
@@ -1464,8 +1489,26 @@ fn verify_store(
     let _offset_ty = get_register_type(offset, state, block_label)?;
     let src_ty = get_register_type(src, state, block_label)?;
 
-    // If base has an array type, perform bounds checking and emit axioms
-    if let DtalType::Array { element_type, size } = &base_ty {
+    // If base has an array type, or a mutable reference to an array, perform
+    // bounds checking and emit axioms.
+    let array_view = match &base_ty {
+        DtalType::Array { element_type, size } => Some((element_type.as_ref().clone(), size.clone())),
+        DtalType::RefMut(inner) => match inner.as_ref() {
+            DtalType::Array { element_type, size } => {
+                Some((element_type.as_ref().clone(), size.clone()))
+            }
+            _ => None,
+        },
+        DtalType::Ref(_) => {
+            return Err(VerifyError::OwnershipViolation {
+                block: block_label.to_string(),
+                instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
+                msg: "cannot store through a shared reference".to_string(),
+            });
+        }
+        _ => None,
+    };
+    if let Some((element_type, size)) = array_view {
         let offset_expr = reg_to_index_expr(&offset);
 
         // Construct bounds constraint: 0 <= offset < size
@@ -1484,11 +1527,11 @@ fn verify_store(
         }
 
         // Check stored value type is compatible with array element type
-        if !types_compatible_with_constraints(&src_ty, element_type.as_ref(), &state.constraints) {
+        if !types_compatible_with_constraints(&src_ty, &element_type, &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
-                expected: element_type.as_ref().clone(),
+                expected: element_type.clone(),
                 actual: src_ty.clone(),
             });
         }

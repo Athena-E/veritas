@@ -104,6 +104,8 @@ verify_example!(e2e_sortedness, "sortedness.veri");
 verify_example!(e2e_29_i64_basic, "29_i64_basic.veri");
 verify_example!(e2e_30_i64_safe_midpoint, "30_i64_safe_midpoint.veri");
 verify_example!(e2e_31_u64_basic, "31_u64_basic.veri");
+verify_example!(e2e_32_shared_borrow, "32_shared_borrow.veri");
+verify_example!(e2e_33_mutable_borrow, "33_mutable_borrow.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation
