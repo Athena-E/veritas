@@ -17,6 +17,10 @@ fn is_owned_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Array { .. })
 }
 
+fn is_borrow_type<'src>(ty: &IType<'src>) -> bool {
+    matches!(ty, IType::Ref(_) | IType::RefMut(_))
+}
+
 /// Lower a statement to TIR
 ///
 /// This may emit instructions and/or create new basic blocks.
@@ -94,6 +98,10 @@ fn lower_let<'src>(
         .lookup_var(name)
         .zip(Some(ctx.lookup_var_type(name)))
         .filter(|(_, prior_ty)| is_owned_type(prior_ty));
+    let prior_borrow_binding = ctx
+        .lookup_var(name)
+        .zip(Some(ctx.lookup_var_type(name)))
+        .filter(|(_, prior_ty)| is_borrow_type(prior_ty));
 
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
@@ -124,6 +132,15 @@ fn lower_let<'src>(
             });
         }
     }
+    if let Some((prior_reg, prior_ty)) = prior_borrow_binding
+        && !matches!(&value.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name && is_borrow_type(&prior_ty))
+    {
+        ctx.emit(TirInstr::BorrowEnd {
+            src: prior_reg,
+            ty: prior_ty.clone(),
+        });
+        ctx.mark_borrow_ended(name);
+    }
 
     // Bind the variable name to this register with its type
     ctx.bind_var_typed(name, bound_reg, ty.clone());
@@ -148,23 +165,28 @@ fn lower_assignment<'src>(
 
             // Create a copy to a new register (SSA form)
             // Use the RHS type, not the LHS declared type (which may be a stale singleton)
-            let new_reg = ctx.fresh_reg();
-            if ownership.consumes_input() && matches!(&rhs.0, TExpr::Variable { .. }) {
-                ctx.emit(TirInstr::MoveOwned {
-                    dst: new_reg,
-                    src: rhs_reg,
-                    ty: rhs.0.get_type().clone(),
-                });
-                if let TExpr::Variable { name: rhs_name, .. } = &rhs.0 {
-                    ctx.mark_var_moved(rhs_name);
-                }
+            let new_reg = if matches!(&rhs.0, TExpr::Borrow { .. }) {
+                rhs_reg
             } else {
-                ctx.emit(TirInstr::Copy {
-                    dst: new_reg,
-                    src: rhs_reg,
-                    ty: rhs.0.get_type().clone(),
-                });
-            }
+                let new_reg = ctx.fresh_reg();
+                if ownership.consumes_input() && matches!(&rhs.0, TExpr::Variable { .. }) {
+                    ctx.emit(TirInstr::MoveOwned {
+                        dst: new_reg,
+                        src: rhs_reg,
+                        ty: rhs.0.get_type().clone(),
+                    });
+                    if let TExpr::Variable { name: rhs_name, .. } = &rhs.0 {
+                        ctx.mark_var_moved(rhs_name);
+                    }
+                } else {
+                    ctx.emit(TirInstr::Copy {
+                        dst: new_reg,
+                        src: rhs_reg,
+                        ty: rhs.0.get_type().clone(),
+                    });
+                }
+                new_reg
+            };
 
             if let Some(prior_reg) = prior_reg
                 && is_owned_type(&prior_ty)
@@ -172,8 +194,18 @@ fn lower_assignment<'src>(
             {
                 ctx.emit(TirInstr::DropOwned {
                     src: prior_reg,
-                    ty: prior_ty,
+                    ty: prior_ty.clone(),
                 });
+            }
+            if let Some(prior_reg) = prior_reg
+                && is_borrow_type(&prior_ty)
+                && !self_assignment
+            {
+                ctx.emit(TirInstr::BorrowEnd {
+                    src: prior_reg,
+                    ty: prior_ty.clone(),
+                });
+                ctx.mark_borrow_ended(name);
             }
 
             // Update the variable binding with the RHS type

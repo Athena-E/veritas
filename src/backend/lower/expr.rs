@@ -189,9 +189,7 @@ pub fn lower_expr<'src>(
 
         TExpr::UnaryOp { op, operand, ty } => lower_unaryop(ctx, *op, operand, ty),
 
-        TExpr::Borrow { .. } => {
-            panic!("reference lowering is not implemented yet")
-        }
+        TExpr::Borrow { kind, expr: place, ty } => lower_borrow_expr(ctx, *kind, place, ty),
 
         TExpr::Call {
             func_name,
@@ -359,6 +357,12 @@ fn lower_call<'src>(
                     }
                 },
                 ParameterKind::SharedBorrow => {
+                    if matches!(arg.0.get_type(), IType::Ref(_) | IType::RefMut(_)) {
+                        if matches!(&arg.0, TExpr::Borrow { .. }) {
+                            borrow_end_regs.push((arg_reg, arg.0.get_type().clone()));
+                        }
+                        return arg_reg;
+                    }
                     let borrowed_reg = ctx.fresh_reg();
                     ctx.emit(TirInstr::BorrowShared {
                         dst: borrowed_reg,
@@ -369,6 +373,12 @@ fn lower_call<'src>(
                     borrowed_reg
                 },
                 ParameterKind::MutableBorrow => {
+                    if matches!(arg.0.get_type(), IType::RefMut(_)) {
+                        if matches!(&arg.0, TExpr::Borrow { .. }) {
+                            borrow_end_regs.push((arg_reg, arg.0.get_type().clone()));
+                        }
+                        return arg_reg;
+                    }
                     let borrowed_reg = ctx.fresh_reg();
                     ctx.emit(TirInstr::BorrowMut {
                         dst: borrowed_reg,
@@ -425,6 +435,33 @@ fn lower_call<'src>(
         }
         dst
     }
+}
+
+fn lower_borrow_expr<'src>(
+    ctx: &mut LoweringContext<'src>,
+    kind: crate::common::ownership::BorrowKind,
+    place: &Spanned<TExpr<'src>>,
+    ty: &IType<'src>,
+) -> VirtualReg {
+    let place_reg = lower_expr(ctx, place);
+    let dst = ctx.fresh_reg();
+    match kind {
+        crate::common::ownership::BorrowKind::Shared => {
+            ctx.emit(TirInstr::BorrowShared {
+                dst,
+                src: place_reg,
+                ty: ty.clone(),
+            });
+        }
+        crate::common::ownership::BorrowKind::Mutable => {
+            ctx.emit(TirInstr::BorrowMut {
+                dst,
+                src: place_reg,
+                ty: ty.clone(),
+            });
+        }
+    }
+    dst
 }
 
 /// Flattened element count of a (possibly nested) array type.

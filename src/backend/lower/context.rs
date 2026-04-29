@@ -34,6 +34,9 @@ pub struct LoweringContext<'src> {
     /// Whether the current binding for a variable still owns its value.
     owned_live_map: BTreeMap<String, bool>,
 
+    /// Whether the current binding for a variable is a live borrow value.
+    borrow_live_map: BTreeMap<String, bool>,
+
     /// Current nested lexical region handle, if any.
     current_region: Option<VirtualReg>,
 
@@ -45,6 +48,7 @@ struct ScopeSnapshot<'src> {
     var_map: BTreeMap<String, VirtualReg>,
     var_type_map: BTreeMap<String, IType<'src>>,
     owned_live_map: BTreeMap<String, bool>,
+    borrow_live_map: BTreeMap<String, bool>,
     declared_names: BTreeSet<String>,
 }
 
@@ -57,6 +61,7 @@ impl<'src> LoweringContext<'src> {
             var_type_map: BTreeMap::new(),
             scope_stack: Vec::new(),
             owned_live_map: BTreeMap::new(),
+            borrow_live_map: BTreeMap::new(),
             current_region: None,
             region_stack: Vec::new(),
         }
@@ -86,6 +91,8 @@ impl<'src> LoweringContext<'src> {
         self.var_type_map.insert(name.to_string(), ty);
         self.owned_live_map
             .insert(name.to_string(), is_owned_type(&self.lookup_var_type(name)));
+        self.borrow_live_map
+            .insert(name.to_string(), is_borrow_type(&self.lookup_var_type(name)));
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.declared_names.insert(name.to_string());
         }
@@ -116,6 +123,16 @@ impl<'src> LoweringContext<'src> {
     pub fn mark_var_moved(&mut self, name: &str) {
         if self.var_map.contains_key(name) {
             self.owned_live_map.insert(name.to_string(), false);
+        }
+    }
+
+    pub fn is_borrow_live(&self, name: &str) -> bool {
+        self.borrow_live_map.get(name).copied().unwrap_or(false)
+    }
+
+    pub fn mark_borrow_ended(&mut self, name: &str) {
+        if self.var_map.contains_key(name) {
+            self.borrow_live_map.insert(name.to_string(), false);
         }
     }
 
@@ -169,6 +186,7 @@ impl<'src> LoweringContext<'src> {
             var_map: self.var_map.clone(),
             var_type_map: self.var_type_map.clone(),
             owned_live_map: self.owned_live_map.clone(),
+            borrow_live_map: self.borrow_live_map.clone(),
             declared_names: BTreeSet::new(),
         });
     }
@@ -179,6 +197,7 @@ impl<'src> LoweringContext<'src> {
             return;
         };
         let mut drops = Vec::new();
+        let mut borrow_ends = Vec::new();
         for name in &scope.declared_names {
             if self.is_owned_live(name)
                 && let Some(reg) = self.lookup_var(name)
@@ -188,11 +207,23 @@ impl<'src> LoweringContext<'src> {
                     drops.push((name.clone(), reg, ty));
                 }
             }
+            if self.is_borrow_live(name)
+                && let Some(reg) = self.lookup_var(name)
+            {
+                let ty = self.lookup_var_type(name);
+                if is_borrow_type(&ty) {
+                    borrow_ends.push((name.clone(), reg, ty));
+                }
+            }
         }
 
         for (name, reg, ty) in drops {
             self.emit(TirInstr::DropOwned { src: reg, ty });
             self.owned_live_map.insert(name, false);
+        }
+        for (name, reg, ty) in borrow_ends {
+            self.emit(TirInstr::BorrowEnd { src: reg, ty });
+            self.borrow_live_map.insert(name, false);
         }
     }
 
@@ -202,6 +233,7 @@ impl<'src> LoweringContext<'src> {
             self.var_map = snapshot.var_map;
             self.var_type_map = snapshot.var_type_map;
             self.owned_live_map = snapshot.owned_live_map;
+            self.borrow_live_map = snapshot.borrow_live_map;
         }
     }
 
@@ -309,6 +341,10 @@ impl<'src> LoweringContext<'src> {
 
 fn is_owned_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Array { .. })
+}
+
+fn is_borrow_type<'src>(ty: &IType<'src>) -> bool {
+    matches!(ty, IType::Ref(_) | IType::RefMut(_))
 }
 
 impl<'src> Default for LoweringContext<'src> {

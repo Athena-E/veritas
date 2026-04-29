@@ -3,6 +3,7 @@
 use crate::backend::lower::lower_function;
 use crate::backend::tir::{Terminator, TirInstr};
 use crate::common::ast::Literal;
+use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TStmt};
 use crate::common::types::IType;
@@ -313,4 +314,126 @@ fn test_lower_function_without_postcondition() {
         tir_func.postcondition.is_none(),
         "Expected no postcondition"
     );
+}
+
+#[test]
+fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
+    let func = TFunction {
+        name: "borrow_local".to_string(),
+        parameters: vec![TParameter {
+            name: "x".to_string(),
+            ty: IType::Int,
+        }],
+        parameter_kinds: vec![ParameterKind::PlainValue],
+        return_type: IType::Unit,
+        returns_owned: false,
+        precondition: None,
+        postcondition: None,
+        body: TFunctionBody {
+            statements: vec![spanned(TStmt::Let {
+                is_mut: false,
+                name: "rx".to_string(),
+                declared_ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                value: spanned(TExpr::Borrow {
+                    kind: BorrowKind::Shared,
+                    expr: Box::new(spanned(TExpr::Variable {
+                        name: "x".to_string(),
+                        ty: IType::Int,
+                    })),
+                    ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                }),
+                checked_ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                ownership: OwnershipMode::Plain,
+            })],
+            trailing_expr: None,
+        },
+        span: Span::new(0, 0),
+    };
+
+    let tir_func = lower_function(&func);
+    let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
+    assert!(entry_block
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::BorrowShared { .. })));
+    assert!(entry_block
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. })));
+}
+
+#[test]
+fn test_lower_direct_borrow_call_reuses_borrow_and_ends_it_after_call() {
+    let callee = TFunction {
+        name: "inspect".to_string(),
+        parameters: vec![TParameter {
+            name: "r".to_string(),
+            ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+        }],
+        parameter_kinds: vec![ParameterKind::SharedBorrow],
+        return_type: IType::Unit,
+        returns_owned: false,
+        precondition: None,
+        postcondition: None,
+        body: TFunctionBody {
+            statements: vec![],
+            trailing_expr: None,
+        },
+        span: Span::new(0, 0),
+    };
+
+    let caller = TFunction {
+        name: "caller".to_string(),
+        parameters: vec![TParameter {
+            name: "x".to_string(),
+            ty: IType::Int,
+        }],
+        parameter_kinds: vec![ParameterKind::PlainValue],
+        return_type: IType::Unit,
+        returns_owned: false,
+        precondition: None,
+        postcondition: None,
+        body: TFunctionBody {
+            statements: vec![spanned(TStmt::Expr(spanned(TExpr::Call {
+                func_name: "inspect".to_string(),
+                args: vec![spanned(TExpr::Borrow {
+                    kind: BorrowKind::Shared,
+                    expr: Box::new(spanned(TExpr::Variable {
+                        name: "x".to_string(),
+                        ty: IType::Int,
+                    })),
+                    ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                })],
+                arg_kinds: vec![ParameterKind::SharedBorrow],
+                ownership: OwnershipMode::Plain,
+                ty: IType::Unit,
+            })))],
+            trailing_expr: None,
+        },
+        span: Span::new(0, 0),
+    };
+
+    let _ = lower_function(&callee);
+    let tir_func = lower_function(&caller);
+    let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
+    let borrow_shared_count = entry_block
+        .instructions
+        .iter()
+        .filter(|instr| matches!(instr, TirInstr::BorrowShared { .. }))
+        .count();
+    let borrow_end_count = entry_block
+        .instructions
+        .iter()
+        .filter(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
+        .count();
+    assert_eq!(borrow_shared_count, 1);
+    assert_eq!(borrow_end_count, 1);
+    assert!(entry_block.instructions.iter().any(|instr| matches!(
+        instr,
+        TirInstr::Call {
+            arg_kinds,
+            func,
+            ..
+        } if func == "inspect" && arg_kinds == &vec![ParameterKind::SharedBorrow]
+    )));
 }
