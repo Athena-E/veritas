@@ -1,4 +1,5 @@
 use crate::common::ast::{BinOp, Literal, UnaryOp};
+use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::types::{IProposition, IType};
 
@@ -41,9 +42,24 @@ pub enum TExpr<'src> {
         ty: IType<'src>,
     },
 
+    Deref {
+        expr: Box<Spanned<Self>>,
+        owner: Option<String>,
+        kind: BorrowKind,
+        ty: IType<'src>,
+    },
+
+    Borrow {
+        kind: BorrowKind,
+        expr: Box<Spanned<Self>>,
+        ty: IType<'src>,
+    },
+
     Call {
         func_name: String,
         args: Vec<Spanned<Self>>,
+        arg_kinds: Vec<ParameterKind>,
+        ownership: OwnershipMode,
         ty: IType<'src>,
     },
 
@@ -75,6 +91,8 @@ impl<'src> TExpr<'src> {
             TExpr::Variable { ty, .. } => ty,
             TExpr::BinOp { ty, .. } => ty,
             TExpr::UnaryOp { ty, .. } => ty,
+            TExpr::Deref { ty, .. } => ty,
+            TExpr::Borrow { ty, .. } => ty,
             TExpr::Call { ty, .. } => ty,
             TExpr::Index { ty, .. } => ty,
             TExpr::ArrayInit { ty, .. } => ty,
@@ -91,15 +109,18 @@ pub enum TStmt<'src> {
         declared_ty: IType<'src>,
         value: Spanned<TExpr<'src>>,
         checked_ty: IType<'src>,
+        ownership: OwnershipMode,
     },
 
     Assignment {
         lhs: Spanned<TExpr<'src>>,
         rhs: Spanned<TExpr<'src>>,
+        ownership: OwnershipMode,
     },
 
     Return {
         expr: Box<Spanned<TExpr<'src>>>,
+        ownership: OwnershipMode,
     },
 
     Expr(Spanned<TExpr<'src>>),
@@ -118,6 +139,10 @@ pub enum TStmt<'src> {
         invariant: Option<crate::backend::dtal::constraints::Constraint>,
         body: TBlock<'src>,
     },
+
+    Region {
+        body: TBlock<'src>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -134,7 +159,9 @@ pub type TFunctionBody<'src> = TBlock<'src>;
 pub struct TFunction<'src> {
     pub name: String,
     pub parameters: Vec<TParameter<'src>>,
+    pub parameter_kinds: Vec<ParameterKind>,
     pub return_type: IType<'src>,
+    pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,
     pub postcondition: Option<IProposition<'src>>,
     pub body: TFunctionBody<'src>,

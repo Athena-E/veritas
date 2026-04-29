@@ -1,4 +1,5 @@
 use crate::common::ast::Expr;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use std::fmt;
 use std::sync::Arc;
@@ -58,7 +59,10 @@ pub enum IType<'src> {
 pub struct FunctionSignature<'src> {
     pub name: String,
     pub parameters: Vec<(String, IType<'src>)>,
+    pub parameter_kinds: Vec<ParameterKind>,
     pub return_type: IType<'src>,
+    pub return_ownership: OwnershipMode,
+    pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,
     pub postcondition: Option<IProposition<'src>>,
     #[allow(dead_code)]
@@ -102,8 +106,13 @@ fn fmt_expr(expr: &Expr) -> String {
             let op_str = match op {
                 UnaryOp::Not => "!",
                 UnaryOp::Neg => "-",
+                UnaryOp::Deref => "*",
             };
             format!("{}{}", op_str, fmt_expr(&cond.0))
+        }
+        Expr::Borrow { kind, expr } => {
+            let prefix = if kind.is_shared() { "&" } else { "&mut " };
+            format!("{}{}", prefix, fmt_expr(&expr.0))
         }
         Expr::Call { func_name, args } => {
             let args_str = args

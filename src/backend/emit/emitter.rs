@@ -87,6 +87,18 @@ fn emit_block(output: &mut String, block: &DtalBlock) {
         }
         writeln!(output, "}}").unwrap();
     }
+    if !block.entry_state.owned_registers.is_empty() {
+        let mut regs: Vec<_> = block.entry_state.owned_registers.iter().collect();
+        regs.sort_by_key(|reg| emit_reg(reg));
+        write!(output, "    .owned {{").unwrap();
+        for (i, reg) in regs.iter().enumerate() {
+            if i > 0 {
+                write!(output, ", ").unwrap();
+            }
+            write!(output, "{}", emit_reg(reg)).unwrap();
+        }
+        writeln!(output, "}}").unwrap();
+    }
     for constraint in &block.entry_state.constraints {
         writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
     }
@@ -115,6 +127,43 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             writeln!(
                 output,
                 "    mov {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::AliasBorrow { dst, src, ty } => {
+            writeln!(
+                output,
+                "    alias_borrow {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::BorrowMut { dst, src, ty } => {
+            writeln!(
+                output,
+                "    borrow_mut {}, {}    : {}",
+                emit_reg(dst),
+                emit_reg(src),
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::BorrowEnd { src, ty } => {
+            writeln!(output, "    borrow_end {}    : {}", emit_reg(src), emit_type(ty)).unwrap();
+        }
+
+        DtalInstr::MoveOwned { dst, src, ty } => {
+            writeln!(
+                output,
+                "    move_owned {}, {}    : {}",
                 emit_reg(dst),
                 emit_reg(src),
                 emit_type(ty)
@@ -267,8 +316,41 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             writeln!(output, "    b{} {}", emit_cmpop(cond), target).unwrap();
         }
 
-        DtalInstr::Call { target, return_ty } => {
-            writeln!(output, "    call {}    : {}", target, emit_type(return_ty)).unwrap();
+        DtalInstr::Call {
+            target,
+            arg_kinds,
+            return_ty,
+            ownership,
+        } => {
+            let mnemonic = match ownership {
+                crate::common::ownership::OwnershipMode::Plain => "call",
+                crate::common::ownership::OwnershipMode::Consume => "call_consume",
+                crate::common::ownership::OwnershipMode::FreshOwned => "call_owned",
+            };
+            let arg_suffix = if arg_kinds.is_empty() {
+                String::new()
+            } else {
+                let effects = arg_kinds
+                    .iter()
+                    .map(|kind| match kind {
+                        crate::common::ownership::ParameterKind::PlainValue => "value",
+                        crate::common::ownership::ParameterKind::OwnedValue => "owned",
+                        crate::common::ownership::ParameterKind::SharedBorrow => "shared",
+                        crate::common::ownership::ParameterKind::MutableBorrow => "mutable",
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(" [{}]", effects)
+            };
+            writeln!(
+                output,
+                "    {} {}{}    : {}",
+                mnemonic,
+                target,
+                arg_suffix,
+                emit_type(return_ty)
+            )
+            .unwrap();
         }
 
         DtalInstr::Ret => {
@@ -289,6 +371,16 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
                 "    alloca {}, {}    : {}",
                 emit_reg(dst),
                 size,
+                emit_type(ty)
+            )
+            .unwrap();
+        }
+
+        DtalInstr::DropOwned { src, ty } => {
+            writeln!(
+                output,
+                "    drop_owned {}    : {}",
+                emit_reg(src),
                 emit_type(ty)
             )
             .unwrap();
@@ -428,6 +520,7 @@ mod tests {
         let func = DtalFunction {
             name: "test".to_string(),
             params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

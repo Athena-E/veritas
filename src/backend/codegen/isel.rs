@@ -6,16 +6,17 @@
 
 use crate::backend::dtal::constraints::IndexExpr;
 use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
-use crate::backend::dtal::regs::Reg;
+use crate::backend::dtal::regs::{PhysicalReg, Reg};
 use crate::backend::dtal::types::DtalType;
 use crate::backend::tir::instr::TirInstr;
 use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 
 /// Lower a TIR instruction to DTAL instructions
 ///
 /// May emit multiple DTAL instructions for a single TIR instruction.
-/// `bare_metal` selects between heap allocation (hosted, via `__rt_alloc`)
-/// and stack allocation (bare-metal, via `Alloca`) for arrays.
+/// `bare_metal` selects between hosted function-local region allocation and
+/// stack allocation (bare-metal, via `Alloca`) for arrays.
 pub fn lower_instruction<'src>(
     instrs: &mut Vec<DtalInstr>,
     tir_instr: &TirInstr<'src>,
@@ -33,6 +34,44 @@ pub fn lower_instruction<'src>(
         TirInstr::Copy { dst, src, ty } => {
             instrs.push(DtalInstr::MovReg {
                 dst: Reg::Virtual(*dst),
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
+        TirInstr::MoveOwned { dst, src, ty } => {
+            instrs.push(DtalInstr::MoveOwned {
+                dst: Reg::Virtual(*dst),
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
+        TirInstr::DropOwned { src, ty } => {
+            instrs.push(DtalInstr::DropOwned {
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
+        TirInstr::BorrowShared { dst, src, ty } => {
+            instrs.push(DtalInstr::AliasBorrow {
+                dst: Reg::Virtual(*dst),
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
+        TirInstr::BorrowMut { dst, src, ty } => {
+            instrs.push(DtalInstr::BorrowMut {
+                dst: Reg::Virtual(*dst),
+                src: Reg::Virtual(*src),
+                ty: DtalType::from_itype(ty),
+            });
+        }
+
+        TirInstr::BorrowEnd { src, ty } => {
+            instrs.push(DtalInstr::BorrowEnd {
                 src: Reg::Virtual(*src),
                 ty: DtalType::from_itype(ty),
             });
@@ -95,15 +134,28 @@ pub fn lower_instruction<'src>(
             dst,
             func,
             args,
+            arg_types,
+            arg_kinds,
+            ownership,
             result_ty,
         } => {
-            lower_call(instrs, dst.as_ref().copied(), func, args, result_ty);
+            lower_call(
+                instrs,
+                dst.as_ref().copied(),
+                func,
+                args,
+                arg_types,
+                arg_kinds,
+                *ownership,
+                result_ty,
+            );
         }
 
         TirInstr::AllocArray {
             dst,
             element_ty,
             size,
+            region,
         } => {
             use crate::backend::dtal::regs::PhysicalReg;
             use std::sync::Arc;
@@ -129,21 +181,67 @@ pub fn lower_instruction<'src>(
                     ty: array_ty,
                 });
             } else {
-                // Hosted Linux: heap-allocate via the `__rt_alloc` runtime
-                // helper (mmap-backed). Pass size in r0; result returns in r0.
+                // Hosted Linux: allocate from the current function-local region.
+                // Pass region in r0 and size in r1; result returns in r0.
                 instrs.push(DtalInstr::MovImm {
-                    dst: Reg::Physical(PhysicalReg::R0),
+                    dst: Reg::Physical(PhysicalReg::R1),
                     imm: total_size as i128,
                     ty: DtalType::Int,
                 });
+                let region_src = region
+                    .map(Reg::Virtual)
+                    .unwrap_or(Reg::Physical(PhysicalReg::R12));
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Physical(PhysicalReg::R0),
+                    src: region_src,
+                    ty: DtalType::Int,
+                });
                 instrs.push(DtalInstr::Call {
-                    target: crate::backend::runtime::RT_ALLOC.to_string(),
+                    target: crate::backend::runtime::RT_REGION_ALLOC.to_string(),
+                    arg_kinds: vec![],
                     return_ty: DtalType::Int,
+                    ownership: OwnershipMode::FreshOwned,
+                });
+                instrs.push(DtalInstr::MoveOwned {
+                    dst: Reg::Virtual(*dst),
+                    src: Reg::Physical(PhysicalReg::R0),
+                    ty: array_ty.clone(),
+                });
+                instrs.push(DtalInstr::TypeAnnotation {
+                    reg: Reg::Virtual(*dst),
+                    ty: array_ty,
+                });
+            }
+        }
+
+        TirInstr::RegionEnter { dst } => {
+            if !bare_metal {
+                instrs.push(DtalInstr::Call {
+                    target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
+                    arg_kinds: vec![],
+                    return_ty: DtalType::Int,
+                    ownership: OwnershipMode::Plain,
                 });
                 instrs.push(DtalInstr::MovReg {
                     dst: Reg::Virtual(*dst),
                     src: Reg::Physical(PhysicalReg::R0),
-                    ty: array_ty,
+                    ty: DtalType::Int,
+                });
+            }
+        }
+
+        TirInstr::RegionLeave { region } => {
+            if !bare_metal {
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Physical(PhysicalReg::R0),
+                    src: Reg::Virtual(*region),
+                    ty: DtalType::Int,
+                });
+                instrs.push(DtalInstr::Call {
+                    target: crate::backend::runtime::RT_REGION_LEAVE.to_string(),
+                    arg_kinds: vec![],
+                    return_ty: DtalType::Unit,
+                    ownership: OwnershipMode::Plain,
                 });
             }
         }
@@ -375,6 +473,9 @@ fn lower_call<'src>(
     dst: Option<crate::backend::dtal::VirtualReg>,
     func: &str,
     args: &[crate::backend::dtal::VirtualReg],
+    arg_types: &[crate::common::types::IType<'src>],
+    arg_kinds: &[ParameterKind],
+    ownership: OwnershipMode,
     result_ty: &crate::common::types::IType<'src>,
 ) {
     use crate::backend::dtal::regs::PhysicalReg;
@@ -382,7 +483,12 @@ fn lower_call<'src>(
     let dtal_result_ty = DtalType::from_itype(result_ty);
 
     // Move arguments to parameter registers (r0, r1, r2, ...)
-    for (i, arg) in args.iter().enumerate() {
+    for (i, ((arg, arg_ty), arg_kind)) in args
+        .iter()
+        .zip(arg_types.iter())
+        .zip(arg_kinds.iter())
+        .enumerate()
+    {
         if i < 8 {
             // Use physical parameter registers
             let param_reg = match i {
@@ -396,11 +502,47 @@ fn lower_call<'src>(
                 7 => PhysicalReg::R7,
                 _ => unreachable!(),
             };
-            instrs.push(DtalInstr::MovReg {
-                dst: Reg::Physical(param_reg),
-                src: Reg::Virtual(*arg),
-                ty: DtalType::Int, // TODO: track actual argument types
-            });
+            if arg_kind.is_plain_value() {
+                instrs.push(DtalInstr::MovReg {
+                    dst: Reg::Physical(param_reg),
+                    src: Reg::Virtual(*arg),
+                    ty: DtalType::Int,
+                });
+            } else if arg_kind.is_owned_value() {
+                instrs.push(DtalInstr::MoveOwned {
+                    dst: Reg::Physical(param_reg),
+                    src: Reg::Virtual(*arg),
+                    ty: DtalType::Int,
+                });
+            } else if arg_kind.is_shared_borrow() {
+                if matches!(arg_ty, crate::common::types::IType::Ref(_)) {
+                    instrs.push(DtalInstr::MovReg {
+                        dst: Reg::Physical(param_reg),
+                        src: Reg::Virtual(*arg),
+                        ty: DtalType::Int,
+                    });
+                    continue;
+                }
+                instrs.push(DtalInstr::AliasBorrow {
+                    dst: Reg::Physical(param_reg),
+                    src: Reg::Virtual(*arg),
+                    ty: DtalType::Int,
+                });
+            } else {
+                if matches!(arg_ty, crate::common::types::IType::RefMut(_)) {
+                    instrs.push(DtalInstr::MovReg {
+                        dst: Reg::Physical(param_reg),
+                        src: Reg::Virtual(*arg),
+                        ty: DtalType::Int,
+                    });
+                    continue;
+                }
+                instrs.push(DtalInstr::BorrowMut {
+                    dst: Reg::Physical(param_reg),
+                    src: Reg::Virtual(*arg),
+                    ty: DtalType::Int,
+                });
+            }
         } else {
             // Push extra arguments onto stack (not implemented yet)
             instrs.push(DtalInstr::Push {
@@ -413,16 +555,26 @@ fn lower_call<'src>(
     // Emit call instruction
     instrs.push(DtalInstr::Call {
         target: func.to_string(),
+        arg_kinds: arg_kinds.to_vec(),
         return_ty: dtal_result_ty.clone(),
+        ownership,
     });
 
     // Move result from r0 to destination
     if let Some(dst_reg) = dst {
-        instrs.push(DtalInstr::MovReg {
-            dst: Reg::Virtual(dst_reg),
-            src: Reg::Physical(PhysicalReg::R0),
-            ty: dtal_result_ty,
-        });
+        if ownership.produces_owned_output() {
+            instrs.push(DtalInstr::MoveOwned {
+                dst: Reg::Virtual(dst_reg),
+                src: Reg::Physical(PhysicalReg::R0),
+                ty: dtal_result_ty,
+            });
+        } else {
+            instrs.push(DtalInstr::MovReg {
+                dst: Reg::Virtual(dst_reg),
+                src: Reg::Physical(PhysicalReg::R0),
+                ty: dtal_result_ty,
+            });
+        }
     }
 }
 

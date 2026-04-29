@@ -20,10 +20,54 @@ pub fn verify_instruction(
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
             verify_mov_imm(*dst, *imm, ty, state, block_label)?;
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::MovReg { dst, src, ty } => {
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            verify_plain_mov_does_not_duplicate_owned(*src, *dst, state, block_label)?;
+            verify_plain_mov_does_not_duplicate_mutable_borrow(*src, *dst, state, block_label)?;
+            preserve_plain_mov_alias_ownership(*src, *dst, state);
+            preserve_plain_mov_shared_borrow(*src, *dst, state);
+            preserve_plain_mov_mutable_borrow(*src, *dst, state);
+            clear_consumed(*dst, state);
+        }
+
+        DtalInstr::AliasBorrow { dst, src, ty } => {
+            verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "alias_borrow")?;
+            clear_owned(*dst, state);
+            assign_shared_borrow_from(*src, *dst, state);
+            clear_consumed(*dst, state);
+        }
+
+        DtalInstr::BorrowMut { dst, src, ty } => {
+            verify_owned_available(*src, state, block_label, "borrow_mut")?;
+            verify_object_not_shared_borrowed(*src, state, block_label, "borrow_mut")?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "borrow_mut")?;
+            verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            assign_mutable_borrow_from(*src, *dst, state);
+            clear_consumed(*dst, state);
+        }
+
+        DtalInstr::BorrowEnd { src, .. } => {
+            verify_borrow_available(*src, state, block_label, "borrow_end")?;
+            clear_shared_borrow(*src, state);
+            clear_mutable_borrow(*src, state);
+        }
+
+        DtalInstr::MoveOwned { dst, src, ty } => {
+            verify_owned_available(*src, state, block_label, "move_owned")?;
+            verify_object_not_shared_borrowed(*src, state, block_label, "move_owned")?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "move_owned")?;
+            verify_mov_reg(*dst, *src, ty, state, block_label)?;
+            transfer_owned(*src, *dst, state);
+            consume_reg(*src, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::BinOp {
@@ -34,10 +78,18 @@ pub fn verify_instruction(
             ty,
         } => {
             verify_binop(*op, *dst, *lhs, *rhs, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::AddImm { dst, src, imm, ty } => {
             verify_add_imm(*dst, *src, *imm, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Load {
@@ -47,6 +99,10 @@ pub fn verify_instruction(
             ty,
         } => {
             verify_load(*dst, *base, *offset, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::LoadOp {
@@ -58,6 +114,10 @@ pub fn verify_instruction(
             ..
         } => {
             verify_load_op(*dst, *base, *offset, *other, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Store { base, offset, src } => {
@@ -75,18 +135,34 @@ pub fn verify_instruction(
         DtalInstr::SetCC { dst, cond: _ } => {
             // SetCC defines dst as Bool (0 or 1)
             state.register_types.insert(*dst, DtalType::Bool);
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Not { dst, src, ty } => {
             verify_not(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Neg { dst, src, ty } => {
             verify_neg(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::ShlImm { dst, src, ty, .. } | DtalInstr::ShrImm { dst, src, ty, .. } => {
             verify_shift_imm(*dst, *src, ty, state, block_label)?;
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::TypeAnnotation { reg, ty } => {
@@ -101,6 +177,16 @@ pub fn verify_instruction(
             // Xi & Harper's type-push: push the source register's type onto the stack
             let src_ty = get_register_type(*src, state, block_label)?;
             state.stack.push(src_ty);
+            state.owned_stack.push(state.owned_registers.contains(src));
+            state
+                .owned_stack_object_ids
+                .push(state.owned_object_ids.get(src).copied());
+            state
+                .shared_borrow_stack_object_ids
+                .push(state.shared_borrow_object_ids.get(src).copied());
+            state
+                .mutable_borrow_stack_object_ids
+                .push(state.mutable_borrow_object_ids.get(src).copied());
         }
 
         DtalInstr::Pop { dst, ty: _ } => {
@@ -108,10 +194,33 @@ pub fn verify_instruction(
             // If the stack is empty, this is an error
             let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, popped_ty);
+            if state.owned_stack.pop().unwrap_or(false) {
+                if let Some(object_id) = state.owned_stack_object_ids.pop().unwrap_or(None) {
+                    assign_owned_object(*dst, object_id, state);
+                } else {
+                    state.owned_registers.insert(*dst);
+                }
+            } else {
+                clear_owned(*dst, state);
+                let _ = state.owned_stack_object_ids.pop();
+            }
+            if let Some(object_id) = state.shared_borrow_stack_object_ids.pop().unwrap_or(None) {
+                assign_shared_borrow_object(*dst, object_id, state);
+            } else {
+                clear_shared_borrow(*dst, state);
+            }
+            if let Some(object_id) = state.mutable_borrow_stack_object_ids.pop().unwrap_or(None) {
+                assign_mutable_borrow_object(*dst, object_id, state);
+            } else {
+                clear_mutable_borrow(*dst, state);
+            }
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Alloca { dst, size: _, ty } => {
             state.register_types.insert(*dst, ty.clone());
+            set_owned_from_type(*dst, ty, state, true);
+            clear_consumed(*dst, state);
             // For array allocations, emit zero-initialization axioms:
             // forall k in 0..size { arr_0[k] == 0 }
             if let DtalType::Array { size, .. } = ty {
@@ -130,7 +239,12 @@ pub fn verify_instruction(
         }
 
         // Call: derive return type from callee's declared signature
-        DtalInstr::Call { target, .. } => {
+        DtalInstr::Call {
+            target,
+            arg_kinds,
+            ownership,
+            ..
+        } => {
             use crate::backend::dtal::regs::PhysicalReg;
 
             let derived_return_ty = if let Some(callee) =
@@ -194,21 +308,61 @@ pub fn verify_instruction(
                 });
             };
 
+            for (index, arg_kind) in arg_kinds.iter().enumerate() {
+            if !arg_kind.is_owned_value() {
+                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                    let param_reg = Reg::Physical(param_reg);
+                    clear_owned(param_reg, state);
+                    clear_shared_borrow(param_reg, state);
+                    clear_mutable_borrow(param_reg, state);
+                }
+                continue;
+            }
+                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                    let param_reg = Reg::Physical(param_reg);
+                        verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
+                        verify_object_not_shared_borrowed(
+                            param_reg,
+                            state,
+                            block_label,
+                            "call_consume_arg",
+                        )?;
+                        clear_owned(param_reg, state);
+                        clear_shared_borrow(param_reg, state);
+                        clear_mutable_borrow(param_reg, state);
+                        consume_reg(param_reg, state);
+                }
+            }
+
             // Set return type in both R0 and LR:
             // - Virtual DTAL reads the return value from R0 (`mov vN, r0`)
             // - Physical DTAL reads it from LR (`mov r0, lr`)
             //
-            // Setting both is safe because:
-            // - In virtual DTAL, R0 is the designated return register
-            // - In physical DTAL, R0 (rdi) is caller-saved and the
-            //   call-clobber-aware allocator guarantees no live value
-            //   is in a caller-saved register across a call
+            // This must happen after consuming call arguments because the first
+            // consuming argument also lives in R0.
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty.clone());
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::LR), derived_return_ty);
+            set_reg_owned(
+                Reg::Physical(PhysicalReg::R0),
+                ownership.produces_owned_output(),
+                state,
+            );
+            set_reg_owned(
+                Reg::Physical(PhysicalReg::LR),
+                ownership.produces_owned_output(),
+                state,
+            );
+            if ownership.produces_owned_output() {
+                let object_id = fresh_object_id(state);
+                assign_owned_object(Reg::Physical(PhysicalReg::R0), object_id, state);
+                assign_owned_object(Reg::Physical(PhysicalReg::LR), object_id, state);
+            }
+            clear_consumed(Reg::Physical(PhysicalReg::R0), state);
+            clear_consumed(Reg::Physical(PhysicalReg::LR), state);
         }
 
         DtalInstr::Branch { cond, .. } => {
@@ -230,6 +384,10 @@ pub fn verify_instruction(
             check_register_defined(*port, state, block_label)?;
             // Port read returns an int (byte value 0-255)
             state.register_types.insert(*dst, DtalType::Int);
+            clear_owned(*dst, state);
+            clear_shared_borrow(*dst, state);
+            clear_mutable_borrow(*dst, state);
+            clear_consumed(*dst, state);
         }
         DtalInstr::PortOut { port, value } => {
             check_register_defined(*port, state, block_label)?;
@@ -249,6 +407,16 @@ pub fn verify_instruction(
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R2), rax_ty); // R2 maps to rdx
+            if let Some(object_id) = state.owned_object_ids.get(&rax).copied() {
+                assign_owned_object(Reg::Physical(PhysicalReg::R2), object_id, state);
+            } else {
+                state.owned_registers.remove(&Reg::Physical(PhysicalReg::R2));
+                state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::R2));
+                state
+                    .shared_borrow_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::R2));
+            }
+            clear_consumed(Reg::Physical(PhysicalReg::R2), state);
         }
 
         DtalInstr::Idiv { src } => {
@@ -264,12 +432,37 @@ pub fn verify_instruction(
             // Both rax and rdx get new values
             state.register_types.insert(rax, DtalType::Int);
             state.register_types.insert(rdx, DtalType::Int);
+            clear_owned(rax, state);
+            clear_owned(rdx, state);
+            clear_shared_borrow(rax, state);
+            clear_shared_borrow(rdx, state);
+            clear_mutable_borrow(rax, state);
+            clear_mutable_borrow(rdx, state);
+            clear_consumed(rax, state);
+            clear_consumed(rdx, state);
         }
 
         DtalInstr::SpillStore { src, offset, ty } => {
             check_register_defined(*src, state, block_label)?;
             // Track the type stored at this stack offset
             state.spill_types.insert(*offset, ty.clone());
+            if let Some(object_id) = state.owned_object_ids.get(src).copied() {
+                state.owned_spills.insert(*offset);
+                state.owned_spill_object_ids.insert(*offset, object_id);
+            } else {
+                state.owned_spills.remove(offset);
+                state.owned_spill_object_ids.remove(offset);
+            }
+            if let Some(object_id) = state.shared_borrow_object_ids.get(src).copied() {
+                state.shared_borrow_spill_object_ids.insert(*offset, object_id);
+            } else {
+                state.shared_borrow_spill_object_ids.remove(offset);
+            }
+            if let Some(object_id) = state.mutable_borrow_object_ids.get(src).copied() {
+                state.mutable_borrow_spill_object_ids.insert(*offset, object_id);
+            } else {
+                state.mutable_borrow_spill_object_ids.remove(offset);
+            }
         }
 
         DtalInstr::SpillLoad { dst, offset, ty } => {
@@ -285,6 +478,22 @@ pub fn verify_instruction(
                 });
             }
             state.register_types.insert(*dst, ty.clone());
+            if let Some(object_id) = state.owned_spill_object_ids.get(offset).copied() {
+                assign_owned_object(*dst, object_id, state);
+            } else {
+                clear_owned(*dst, state);
+            }
+            if let Some(object_id) = state.shared_borrow_spill_object_ids.get(offset).copied() {
+                assign_shared_borrow_object(*dst, object_id, state);
+            } else {
+                clear_shared_borrow(*dst, state);
+            }
+            if let Some(object_id) = state.mutable_borrow_spill_object_ids.get(offset).copied() {
+                assign_mutable_borrow_object(*dst, object_id, state);
+            } else {
+                clear_mutable_borrow(*dst, state);
+            }
+            clear_consumed(*dst, state);
         }
 
         DtalInstr::Prologue { .. } => {
@@ -316,12 +525,395 @@ pub fn verify_instruction(
             ] {
                 state
                     .register_types
-                    .insert(Reg::Physical(*preg), DtalType::Int);
+                    .entry(Reg::Physical(*preg))
+                    .or_insert(DtalType::Int);
+                clear_mutable_borrow(Reg::Physical(*preg), state);
+                clear_consumed(Reg::Physical(*preg), state);
             }
         }
 
         DtalInstr::Epilogue { .. } => {
             // Structural marker
+        }
+
+        DtalInstr::DropOwned { src, .. } => {
+            verify_owned_available(*src, state, block_label, "drop_owned")?;
+            verify_object_not_shared_borrowed(*src, state, block_label, "drop_owned")?;
+            verify_object_not_mutably_borrowed(*src, state, block_label, "drop_owned")?;
+            let object_id = state.owned_object_ids.get(src).copied();
+            clear_owned_alias_group(*src, object_id, state);
+            consume_owned_alias_group(*src, object_id, state);
+        }
+    }
+
+    verify_unique_owned_objects(state, block_label, "state update")?;
+
+    Ok(())
+}
+
+fn clear_owned(reg: Reg, state: &mut TypeState) {
+    state.owned_registers.remove(&reg);
+    state.owned_object_ids.remove(&reg);
+}
+
+fn clear_shared_borrow(reg: Reg, state: &mut TypeState) {
+    state.shared_borrow_object_ids.remove(&reg);
+}
+
+fn clear_mutable_borrow(reg: Reg, state: &mut TypeState) {
+    state.mutable_borrow_object_ids.remove(&reg);
+}
+
+fn verify_borrow_available(
+    reg: Reg,
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    if state.shared_borrow_object_ids.contains_key(&reg)
+        || state.mutable_borrow_object_ids.contains_key(&reg)
+    {
+        return Ok(());
+    }
+    Err(VerifyError::OwnershipViolation {
+        block: block_label.to_string(),
+        instr_desc: instr_desc.to_string(),
+        msg: format!("register {:?} does not currently hold a live borrow", reg),
+    })
+}
+
+fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
+    match reg {
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => Some(Reg::Physical(
+            crate::backend::dtal::regs::PhysicalReg::LR,
+        )),
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => Some(Reg::Physical(
+            crate::backend::dtal::regs::PhysicalReg::R0,
+        )),
+        _ => None,
+    }
+}
+
+fn clear_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
+    clear_owned(reg, state);
+    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
+        let same_object = object_id
+            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
+        if same_object {
+            clear_owned(counterpart, state);
+        }
+    }
+}
+
+fn consume_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
+    consume_reg(reg, state);
+    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
+        let same_object = object_id
+            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
+        if same_object {
+            consume_reg(counterpart, state);
+        }
+    }
+}
+
+fn consume_reg(reg: Reg, state: &mut TypeState) {
+    state.consumed_registers.insert(reg);
+}
+
+fn clear_consumed(reg: Reg, state: &mut TypeState) {
+    state.consumed_registers.remove(&reg);
+}
+
+fn set_reg_owned(reg: Reg, owned: bool, state: &mut TypeState) {
+    if owned {
+        state.owned_registers.insert(reg);
+    } else {
+        clear_owned(reg, state);
+    }
+}
+
+fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
+    let object_id = state.owned_object_ids.get(&src).copied();
+    clear_owned_alias_group(src, object_id, state);
+    if let Some(object_id) = object_id {
+        assign_owned_object(dst, object_id, state);
+    } else {
+        clear_owned(dst, state);
+    }
+}
+
+fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState) {
+    let is_abi_return_alias = matches!(
+        (src, dst),
+        (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+        ) | (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+        )
+    );
+    if is_abi_return_alias
+        && let Some(object_id) = state.owned_object_ids.get(&src).copied()
+    {
+        assign_owned_object(dst, object_id, state);
+    } else {
+        clear_owned(dst, state);
+    }
+}
+
+fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
+    if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
+        assign_shared_borrow_object(dst, object_id, state);
+    } else {
+        clear_shared_borrow(dst, state);
+    }
+}
+
+fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
+    if src == dst {
+        if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied() {
+            assign_mutable_borrow_object(dst, object_id, state);
+        } else {
+            clear_mutable_borrow(dst, state);
+        }
+    } else {
+        clear_mutable_borrow(dst, state);
+    }
+}
+
+fn assign_shared_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+    if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
+        assign_shared_borrow_object(dst, object_id, state);
+    } else if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
+        assign_shared_borrow_object(dst, object_id, state);
+    } else {
+        clear_shared_borrow(dst, state);
+    }
+}
+
+fn assign_shared_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+    clear_owned(reg, state);
+    clear_mutable_borrow(reg, state);
+    state.shared_borrow_object_ids.insert(reg, object_id);
+}
+
+fn assign_mutable_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+    if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
+        assign_mutable_borrow_object(dst, object_id, state);
+    } else {
+        clear_mutable_borrow(dst, state);
+    }
+}
+
+fn assign_mutable_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+    clear_owned(reg, state);
+    clear_shared_borrow(reg, state);
+    state.mutable_borrow_object_ids.insert(reg, object_id);
+}
+
+fn set_owned_from_type(reg: Reg, ty: &DtalType, state: &mut TypeState, fresh: bool) {
+    if matches!(ty, DtalType::Array { .. }) {
+        let object_id = if fresh {
+            fresh_object_id(state)
+        } else {
+            state.owned_object_ids.get(&reg).copied().unwrap_or_else(|| fresh_object_id(state))
+        };
+        assign_owned_object(reg, object_id, state);
+    } else {
+        clear_owned(reg, state);
+        clear_shared_borrow(reg, state);
+        clear_mutable_borrow(reg, state);
+    }
+}
+
+fn verify_owned_available(
+    reg: Reg,
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    check_register_defined(reg, state, block_label)?;
+    if !state.owned_registers.contains(&reg) {
+        return Err(VerifyError::OwnershipViolation {
+            block: block_label.to_string(),
+            instr_desc: instr_desc.to_string(),
+            msg: format!("register {:?} does not currently own a value", reg),
+        });
+    }
+    Ok(())
+}
+
+fn verify_plain_mov_does_not_duplicate_owned(
+    src: Reg,
+    dst: Reg,
+    state: &TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
+        let same_alias_pair = matches!(
+            (src, dst),
+            (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
+                | (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
+        ) && state.owned_object_ids.get(&dst).copied() == Some(object_id);
+        let same_register = src == dst;
+        if !same_alias_pair && !same_register {
+            return Err(VerifyError::OwnershipViolation {
+                block: block_label.to_string(),
+                instr_desc: "mov".to_string(),
+                msg: format!(
+                    "plain mov would duplicate ownership of object o{} from {:?} to {:?}",
+                    object_id, src, dst
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn verify_plain_mov_does_not_duplicate_mutable_borrow(
+    src: Reg,
+    dst: Reg,
+    state: &TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied()
+        && src != dst
+    {
+        return Err(VerifyError::OwnershipViolation {
+            block: block_label.to_string(),
+            instr_desc: "mov".to_string(),
+            msg: format!(
+                "plain mov would duplicate mutable borrow of object o{} from {:?} to {:?}",
+                object_id, src, dst
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn fresh_object_id(state: &mut TypeState) -> u32 {
+    let object_id = state.next_object_id;
+    state.next_object_id += 1;
+    object_id
+}
+
+fn assign_owned_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+    clear_shared_borrow(reg, state);
+    clear_mutable_borrow(reg, state);
+    state.owned_registers.insert(reg);
+    state.owned_object_ids.insert(reg, object_id);
+}
+
+fn verify_object_not_shared_borrowed(
+    reg: Reg,
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    let Some(object_id) = state.owned_object_ids.get(&reg).copied() else {
+        return Ok(());
+    };
+
+    let active_borrowers: Vec<Reg> = state
+        .shared_borrow_object_ids
+        .iter()
+        .filter_map(|(borrow_reg, borrowed_object)| {
+            if *borrowed_object == object_id {
+                Some(*borrow_reg)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if active_borrowers.is_empty() {
+        return Ok(());
+    }
+
+    Err(VerifyError::OwnershipViolation {
+        block: block_label.to_string(),
+        instr_desc: instr_desc.to_string(),
+        msg: format!(
+            "object o{} still has active shared borrows in {:?}",
+            object_id, active_borrowers
+        ),
+    })
+}
+
+fn verify_object_not_mutably_borrowed(
+    reg: Reg,
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    let Some(object_id) = state.owned_object_ids.get(&reg).copied() else {
+        return Ok(());
+    };
+
+    let active_borrowers: Vec<Reg> = state
+        .mutable_borrow_object_ids
+        .iter()
+        .filter_map(|(borrow_reg, borrowed_object)| {
+            if *borrowed_object == object_id {
+                Some(*borrow_reg)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if active_borrowers.is_empty() {
+        return Ok(());
+    }
+
+    Err(VerifyError::OwnershipViolation {
+        block: block_label.to_string(),
+        instr_desc: instr_desc.to_string(),
+        msg: format!(
+            "object o{} still has active mutable borrows in {:?}",
+            object_id, active_borrowers
+        ),
+    })
+}
+
+pub(crate) fn is_allowed_owned_alias_pair(lhs: Reg, rhs: Reg) -> bool {
+    matches!(
+        (lhs, rhs),
+        (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+        ) | (
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+        )
+    )
+}
+
+pub(crate) fn verify_unique_owned_objects(
+    state: &TypeState,
+    block_label: &str,
+    instr_desc: &str,
+) -> Result<(), VerifyError> {
+    let mut regs: Vec<(Reg, u32)> = state
+        .owned_object_ids
+        .iter()
+        .map(|(reg, object_id)| (*reg, *object_id))
+        .collect();
+    regs.sort_by_key(|(reg, object_id)| (format!("{:?}", reg), *object_id));
+
+    for (idx, (lhs_reg, lhs_object)) in regs.iter().enumerate() {
+        for (rhs_reg, rhs_object) in regs.iter().skip(idx + 1) {
+            if lhs_object == rhs_object && !is_allowed_owned_alias_pair(*lhs_reg, *rhs_reg) {
+                return Err(VerifyError::OwnershipViolation {
+                    block: block_label.to_string(),
+                    instr_desc: instr_desc.to_string(),
+                    msg: format!(
+                        "object o{} has multiple live owners: {:?} and {:?}",
+                        lhs_object, lhs_reg, rhs_reg
+                    ),
+                });
+            }
         }
     }
 
@@ -568,13 +1160,28 @@ pub(crate) fn pointer_arithmetic_result_type(
     base_ty: &DtalType,
     annotated_ty: &DtalType,
 ) -> Option<DtalType> {
-    if let DtalType::Array { element_type, .. } = base_ty {
-        return Some(match annotated_ty {
+    match base_ty {
+        DtalType::Array { element_type, .. }
+        | DtalType::Ref(element_type)
+        | DtalType::RefMut(element_type)
+            if matches!(element_type.as_ref(), DtalType::Array { .. }) =>
+        {
+            let pointed_ty = element_type.as_ref();
+            if let DtalType::Array { element_type, .. } = pointed_ty {
+                Some(match annotated_ty {
+                    DtalType::Array { .. } => annotated_ty.clone(),
+                    _ => element_type.as_ref().clone(),
+                })
+            } else {
+                None
+            }
+        }
+        DtalType::Array { element_type, .. } => Some(match annotated_ty {
             DtalType::Array { .. } => annotated_ty.clone(),
             _ => element_type.as_ref().clone(),
-        });
+        }),
+        _ => None,
     }
-    None
 }
 
 /// Verify binary operation
@@ -808,8 +1415,19 @@ fn verify_load(
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
-    // If base has an array type, derive element type and perform bounds checking
-    if let DtalType::Array { element_type, size } = &base_ty {
+    // If base has an array type, or a reference to an array, derive element
+    // type and perform bounds checking.
+    let array_view = match &base_ty {
+        DtalType::Array { element_type, size } => Some((element_type.as_ref().clone(), size.clone())),
+        DtalType::Ref(inner) | DtalType::RefMut(inner) => match inner.as_ref() {
+            DtalType::Array { element_type, size } => {
+                Some((element_type.as_ref().clone(), size.clone()))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some((derived_ty, size)) = array_view {
         let offset_expr = reg_to_index_expr(&offset);
 
         // Construct bounds constraint: 0 <= offset < size
@@ -828,7 +1446,6 @@ fn verify_load(
         }
 
         // Derive element type from array base — don't trust annotation
-        let derived_ty = element_type.as_ref().clone();
         state.register_types.insert(dst, derived_ty);
 
         // Emit select constraint: dst == current_arr[offset]
@@ -872,8 +1489,26 @@ fn verify_store(
     let _offset_ty = get_register_type(offset, state, block_label)?;
     let src_ty = get_register_type(src, state, block_label)?;
 
-    // If base has an array type, perform bounds checking and emit axioms
-    if let DtalType::Array { element_type, size } = &base_ty {
+    // If base has an array type, or a mutable reference to an array, perform
+    // bounds checking and emit axioms.
+    let array_view = match &base_ty {
+        DtalType::Array { element_type, size } => Some((element_type.as_ref().clone(), size.clone())),
+        DtalType::RefMut(inner) => match inner.as_ref() {
+            DtalType::Array { element_type, size } => {
+                Some((element_type.as_ref().clone(), size.clone()))
+            }
+            _ => None,
+        },
+        DtalType::Ref(_) => {
+            return Err(VerifyError::OwnershipViolation {
+                block: block_label.to_string(),
+                instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
+                msg: "cannot store through a shared reference".to_string(),
+            });
+        }
+        _ => None,
+    };
+    if let Some((element_type, size)) = array_view {
         let offset_expr = reg_to_index_expr(&offset);
 
         // Construct bounds constraint: 0 <= offset < size
@@ -892,11 +1527,11 @@ fn verify_store(
         }
 
         // Check stored value type is compatible with array element type
-        if !types_compatible_with_constraints(&src_ty, element_type.as_ref(), &state.constraints) {
+        if !types_compatible_with_constraints(&src_ty, &element_type, &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
                 instr_desc: format!("store [{:?} + {:?}], {:?}", base, offset, src),
-                expected: element_type.as_ref().clone(),
+                expected: element_type.clone(),
                 actual: src_ty.clone(),
             });
         }
@@ -1030,11 +1665,22 @@ fn verify_type_annotation(
         // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
-        let is_prologue_refinement =
-            matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
-                && matches!(reg, Reg::Physical(_));
+        let is_pointer_refinement = matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
+            && matches!(
+                ty,
+                DtalType::Array { .. }
+                    | DtalType::Ref(_)
+                    | DtalType::RefMut(_)
+                    | DtalType::Master(_)
+            );
+
+        let is_prologue_refinement = matches!(
+            existing_ty,
+            DtalType::Int | DtalType::I64 | DtalType::U64 | DtalType::SingletonInt(_)
+        ) && matches!(reg, Reg::Physical(_));
 
         if !is_existential_narrowing
+            && !is_pointer_refinement
             && !is_prologue_refinement
             && !types_compatible_with_constraints(existing_ty, ty, &state.constraints)
         {
@@ -1100,6 +1746,7 @@ fn get_register_type(
     state: &TypeState,
     block_label: &str,
 ) -> Result<DtalType, VerifyError> {
+    check_register_defined(reg, state, block_label)?;
     state
         .register_types
         .get(&reg)
@@ -1115,6 +1762,12 @@ fn check_register_defined(
     state: &TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
+    if state.consumed_registers.contains(&reg) {
+        return Err(VerifyError::ConsumedRegister {
+            reg,
+            block: block_label.to_string(),
+        });
+    }
     if state.register_types.contains_key(&reg) {
         Ok(())
     } else {

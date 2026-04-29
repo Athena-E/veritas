@@ -82,7 +82,11 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
     let mut changed = false;
 
     match instr {
-        DtalInstr::MovReg { src, .. } => {
+        DtalInstr::MovReg { src, .. }
+        | DtalInstr::AliasBorrow { src, .. }
+        | DtalInstr::BorrowMut { src, .. }
+        | DtalInstr::BorrowEnd { src, .. }
+        | DtalInstr::MoveOwned { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
         DtalInstr::Load { base, offset, .. } => {
@@ -130,6 +134,7 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
         DtalInstr::MovImm { .. }
         | DtalInstr::Pop { .. }
         | DtalInstr::Alloca { .. }
+        | DtalInstr::DropOwned { .. }
         | DtalInstr::SetCC { .. }
         | DtalInstr::Jmp { .. }
         | DtalInstr::Branch { .. }
@@ -170,6 +175,9 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
     let def_reg = match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
+        | DtalInstr::AliasBorrow { dst, .. }
+        | DtalInstr::BorrowMut { dst, .. }
+        | DtalInstr::MoveOwned { dst, .. }
         | DtalInstr::Load { dst, .. }
         | DtalInstr::LoadOp { dst, .. }
         | DtalInstr::BinOp { dst, .. }
@@ -181,6 +189,7 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         | DtalInstr::Pop { dst, .. }
         | DtalInstr::Alloca { dst, .. }
         | DtalInstr::SetCC { dst, .. } => Some(*dst),
+        DtalInstr::BorrowEnd { .. } => None,
         _ => None,
     };
 
@@ -200,6 +209,16 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
     // Do not propagate physical-register sources: later backend passes rely on
     // these explicit materialisation moves to reason about ABI values.
     if let DtalInstr::MovReg {
+        dst: Reg::Virtual(dst_vreg),
+        src: Reg::Virtual(src_vreg),
+        ..
+    }
+    | DtalInstr::AliasBorrow {
+        dst: Reg::Virtual(dst_vreg),
+        src: Reg::Virtual(src_vreg),
+        ..
+    }
+    | DtalInstr::MoveOwned {
         dst: Reg::Virtual(dst_vreg),
         src: Reg::Virtual(src_vreg),
         ..

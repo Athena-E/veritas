@@ -2,6 +2,7 @@
 
 use super::common::*;
 use crate::common::ast::BinOp;
+use crate::common::ownership::ParameterKind;
 use crate::common::types::IValue;
 use crate::common::types::{FunctionSignature, IType};
 use crate::frontend::typechecker::{TypingContext, VarBinding};
@@ -110,7 +111,13 @@ fn test_context_with_function() {
             ("x".to_string(), IType::Int),
             ("y".to_string(), IType::Bool),
         ],
+        parameter_kinds: vec![
+            ParameterKind::PlainValue,
+            ParameterKind::PlainValue,
+        ],
         return_type: IType::Unit,
+        return_ownership: crate::common::ownership::OwnershipMode::Plain,
+        returns_owned: false,
         precondition: None,
         postcondition: None,
         span: SimpleSpan::new(0, 0),

@@ -12,6 +12,31 @@ use crate::frontend::typechecker::{
 };
 use std::sync::Arc;
 
+fn borrow_exposed_type<'src>(ty: &IType<'src>) -> IType<'src> {
+    match ty {
+        IType::SingletonInt(IValue::Int(_)) => IType::Int,
+        IType::SingletonInt(IValue::Bool(_)) => IType::Bool,
+        IType::RefinedInt { base, .. } => borrow_exposed_type(base),
+        IType::Array { element_type, size } => IType::Array {
+            element_type: Arc::new(borrow_exposed_type(element_type)),
+            size: size.clone(),
+        },
+        IType::Master(base) => borrow_exposed_type(base),
+        _ => ty.clone(),
+    }
+}
+
+fn array_base_type<'src>(ty: &IType<'src>) -> Option<IType<'src>> {
+    match ty {
+        IType::Array { .. } => Some(ty.clone()),
+        IType::Ref(inner) | IType::RefMut(inner) => match inner.as_ref() {
+            IType::Array { .. } => Some(inner.as_ref().clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Synthesize the type of an expression
 /// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
@@ -60,11 +85,147 @@ pub fn synth_expr<'src>(
                     };
                     Ok(((texpr, span), ty))
                 }
+                None if ctx.is_moved(name) => Err(TypeError::UseAfterMove {
+                    name: name.to_string(),
+                    span,
+                }),
                 None => Err(TypeError::UndefinedVariable {
                     name: name.to_string(),
                     span,
                 }),
             }
+        }
+
+        Expr::Borrow { kind, expr: place } => {
+            let place_name = match &place.0 {
+                Expr::Variable(name) => *name,
+                _ => {
+                    return Err(TypeError::UnsupportedFeature {
+                        feature: "borrowing non-place expressions is not yet supported"
+                            .to_string(),
+                        span: place.1,
+                    });
+                }
+            };
+
+            let (tplace, place_ty) = synth_expr(ctx, place)?;
+            let exposed_place_ty = match ctx.lookup_var(place_name) {
+                Some(VarBinding::Immutable(ty)) => borrow_exposed_type(&ty),
+                Some(VarBinding::Mutable(binding)) => borrow_exposed_type(&binding.master_type),
+                None => borrow_exposed_type(&place_ty),
+            };
+
+            if matches!(place_ty, IType::Ref(_) | IType::RefMut(_)) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "reborrowing references is not yet supported".to_string(),
+                    span: place.1,
+                });
+            }
+
+            if kind.is_shared() && ctx.has_mutable_borrow(place_name) {
+                return Err(TypeError::BorrowConflict {
+                    name: place_name.to_string(),
+                    reason: "cannot create a shared borrow while a mutable borrow is live"
+                        .to_string(),
+                    span: place.1,
+                });
+            }
+
+            if kind.is_mutable() {
+                match ctx.lookup_var(place_name) {
+                    Some(VarBinding::Mutable(_)) => {}
+                    Some(VarBinding::Immutable(_)) => {
+                        return Err(TypeError::NotMutable {
+                            name: place_name.to_string(),
+                            span: place.1,
+                        });
+                    }
+                    None if ctx.is_moved(place_name) => {
+                        return Err(TypeError::UseAfterMove {
+                            name: place_name.to_string(),
+                            span: place.1,
+                        });
+                    }
+                    None => {
+                        return Err(TypeError::UndefinedVariable {
+                            name: place_name.to_string(),
+                            span: place.1,
+                        });
+                    }
+                }
+
+                if ctx.is_borrowed(place_name) {
+                    return Err(TypeError::BorrowConflict {
+                        name: place_name.to_string(),
+                        reason:
+                            "cannot create a mutable borrow while another borrow is live"
+                                .to_string(),
+                        span: place.1,
+                    });
+                }
+            }
+
+            let borrow_ty = if kind.is_shared() {
+                IType::Ref(Arc::new(exposed_place_ty))
+            } else {
+                IType::RefMut(Arc::new(exposed_place_ty))
+            };
+
+            let texpr = TExpr::Borrow {
+                kind: *kind,
+                expr: Box::new(tplace),
+                ty: borrow_ty.clone(),
+            };
+            Ok(((texpr, span), borrow_ty))
+        }
+
+        Expr::UnaryOp {
+            op: UnaryOp::Deref,
+            cond,
+        } => {
+            let (tcond, cond_ty) = synth_expr(ctx, cond)?;
+            let ref_name = match &cond.0 {
+                Expr::Variable(name) => *name,
+                _ => {
+                    return Err(TypeError::UnsupportedFeature {
+                        feature:
+                            "dereferencing non-binding reference expressions is not yet supported"
+                                .to_string(),
+                        span: cond.1,
+                    });
+                }
+            };
+
+            let (kind, inner_ty) = match &cond_ty {
+                IType::Ref(inner) => (crate::common::ownership::BorrowKind::Shared, inner.as_ref().clone()),
+                IType::RefMut(inner) => {
+                    (crate::common::ownership::BorrowKind::Mutable, inner.as_ref().clone())
+                }
+                _ => {
+                    return Err(TypeError::InvalidOperation {
+                        operation: "deref".to_string(),
+                        operand_types: vec![cond_ty],
+                        span,
+                    });
+                }
+            };
+
+            if matches!(inner_ty, IType::Array { .. }) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "whole-array dereference is not yet supported; use indexing through the reference instead".to_string(),
+                    span,
+                });
+            }
+
+            let texpr = TExpr::Deref {
+                expr: Box::new(tcond),
+                owner: ctx
+                    .lookup_borrow_binding(ref_name)
+                    .map(|(owner_name, _)| owner_name.to_string()),
+                kind,
+                ty: inner_ty.clone(),
+            };
+            Ok(((texpr, span), inner_ty))
         }
 
         // BINOP-ARITH: Arithmetic operations with SMT synthesis
@@ -330,14 +491,21 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extract element type from array
-            match &base_ty {
-                IType::Array { element_type, size } => {
+            // Extract element type from arrays and references-to-arrays
+            match array_base_type(&base_ty) {
+                Some(IType::Array { element_type, size }) => {
                     // Check array bounds - returns error if cannot prove safe
                     // Use the actual index expression so SMT can use context propositions
-                    check_array_bounds_expr(ctx, &index.0, &index_ty, size, &base_ty, index.1)?;
+                    check_array_bounds_expr(
+                        ctx,
+                        &index.0,
+                        &index_ty,
+                        &size,
+                        &base_ty,
+                        index.1,
+                    )?;
 
-                    let elem_ty = (**element_type).clone();
+                    let elem_ty = (*element_type).clone();
                     let texpr = TExpr::Index {
                         base: Box::new(tbase),
                         index: Box::new(tindex),
@@ -345,7 +513,11 @@ pub fn synth_expr<'src>(
                     };
                     Ok(((texpr, span), elem_ty))
                 }
-                _ => Err(TypeError::NotAnArray {
+                Some(other) => Err(TypeError::NotAnArray {
+                    found: other,
+                    span: base.1,
+                }),
+                None => Err(TypeError::NotAnArray {
                     found: base_ty,
                     span: base.1,
                 }),
@@ -374,7 +546,13 @@ pub fn synth_expr<'src>(
             // Synth and check each argument
             let mut typed_args = Vec::new();
             let mut arg_types = Vec::new();
-            for (arg, (_param_name, param_ty)) in args.0.iter().zip(sig.parameters.iter()) {
+            let mut arg_kinds = Vec::new();
+            for ((arg, (_param_name, param_ty)), arg_kind) in args
+                .0
+                .iter()
+                .zip(sig.parameters.iter())
+                .zip(sig.parameter_kinds.iter())
+            {
                 let (targ, arg_ty) = synth_expr(ctx, arg)?;
 
                 if !is_subtype(ctx, &arg_ty, param_ty) {
@@ -387,6 +565,7 @@ pub fn synth_expr<'src>(
 
                 typed_args.push(targ);
                 arg_types.push(arg_ty);
+                arg_kinds.push(*arg_kind);
             }
 
             // Check precondition if present
@@ -416,6 +595,8 @@ pub fn synth_expr<'src>(
             let texpr = TExpr::Call {
                 func_name: func_name.to_string(),
                 args: typed_args,
+                arg_kinds,
+                ownership: sig.return_ownership,
                 ty: ret_ty.clone(),
             };
             Ok(((texpr, span), ret_ty))
@@ -467,16 +648,17 @@ pub fn synth_expr<'src>(
             if let Some(prop) = extract_proposition(&cond.0) {
                 then_ctx = then_ctx.with_proposition(prop);
             }
+            then_ctx = then_ctx.enter_borrow_scope();
 
             // Check then block statements, then handle trailing expression
             let (tthen_stmts, then_ctx_out) = check_stmts(&then_ctx, &then_block.statements)?;
-            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr
-            {
+            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr {
                 let (texpr, ty) = synth_expr(&then_ctx_out, trailing)?;
                 (Some(Box::new(texpr)), Some(ty))
             } else {
                 (None, None)
             };
+            let then_ctx_out = then_ctx_out.exit_borrow_scope();
 
             let tthen_block = TBlock {
                 statements: tthen_stmts,
@@ -491,6 +673,7 @@ pub fn synth_expr<'src>(
                     let neg_prop = negate_proposition(&prop);
                     else_ctx = else_ctx.with_proposition(neg_prop);
                 }
+                else_ctx = else_ctx.enter_borrow_scope();
 
                 let (telse_stmts, else_ctx_out) = check_stmts(&else_ctx, &else_stmts.statements)?;
                 let (else_trailing, else_result_ty) =
@@ -500,6 +683,7 @@ pub fn synth_expr<'src>(
                     } else {
                         (None, None)
                     };
+                let _else_ctx_out = else_ctx_out.exit_borrow_scope();
 
                 let telse_block_val = TBlock {
                     statements: telse_stmts,

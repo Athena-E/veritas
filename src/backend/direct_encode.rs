@@ -102,7 +102,10 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             });
         }
 
-        DtalInstr::MovReg { dst, src, .. } => {
+        DtalInstr::MovReg { dst, src, .. }
+        | DtalInstr::AliasBorrow { dst, src, .. }
+        | DtalInstr::BorrowMut { dst, src, .. }
+        | DtalInstr::MoveOwned { dst, src, .. } => {
             let d = reg_to_x86(dst);
             let s = reg_to_x86(src);
             if d != s {
@@ -355,6 +358,9 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             out.push(X86Instr::Pop { dst: X86Reg::Rbp });
         }
 
-        DtalInstr::TypeAnnotation { .. } | DtalInstr::ConstraintAssert { .. } => {}
+        DtalInstr::TypeAnnotation { .. }
+        | DtalInstr::ConstraintAssert { .. }
+        | DtalInstr::DropOwned { .. }
+        | DtalInstr::BorrowEnd { .. } => {}
     }
 }

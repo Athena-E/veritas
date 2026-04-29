@@ -9,6 +9,7 @@ use crate::backend::dtal::instr::{
 };
 use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
 use crate::backend::dtal::types::DtalType;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use std::sync::Arc;
 
 /// Parse error for DTAL text
@@ -192,6 +193,7 @@ impl<'a> DtalParser<'a> {
 
         Ok(DtalFunction {
             name,
+            parameter_kinds: vec![ParameterKind::PlainValue; params.len()],
             params,
             return_type,
             precondition,
@@ -262,6 +264,24 @@ impl<'a> DtalParser<'a> {
                             entry_state.register_types.insert(reg, ty);
                         }
                     }
+                }
+                self.advance();
+                continue;
+            }
+            if let Some(content) = trimmed.strip_prefix(".owned ") {
+                if let Some(inner) = content.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    for reg_str in split_top_level(inner, ',') {
+                        let reg_str = reg_str.trim();
+                        if reg_str.is_empty() {
+                            continue;
+                        }
+                        let reg = parse_reg(reg_str).ok_or_else(|| {
+                            self.err(format!("bad register in .owned: '{}'", reg_str))
+                        })?;
+                        entry_state.owned_registers.insert(reg);
+                    }
+                } else {
+                    return Err(self.err("expected braces in .owned directive"));
                 }
                 self.advance();
                 continue;
@@ -362,6 +382,10 @@ impl<'a> DtalParser<'a> {
 
         match tokens[0] {
             "mov" => self.parse_mov(&tokens, ty_comment),
+            "alias_borrow" => self.parse_alias_borrow(&tokens, ty_comment),
+            "borrow_mut" => self.parse_borrow_mut(&tokens, ty_comment),
+            "move_owned" => self.parse_move_owned(&tokens, ty_comment),
+            "borrow_end" => self.parse_borrow_end(&tokens, ty_comment),
             "load" => self.parse_load(&tokens, ty_comment),
             "store" => self.parse_store(&tokens),
             "add" | "sub" | "mul" | "div" | "and" | "or" => self.parse_binop(&tokens, ty_comment),
@@ -372,11 +396,12 @@ impl<'a> DtalParser<'a> {
             "shli" => self.parse_shli(&tokens, ty_comment),
             "shri" => self.parse_shri(&tokens, ty_comment),
             "jmp" => self.parse_jmp(&tokens),
-            "call" => self.parse_call(&tokens, ty_comment),
+            "call" | "call_owned" | "call_consume" => self.parse_call(&tokens, ty_comment),
             "ret" => Ok(Some(DtalInstr::Ret)),
             "push" => self.parse_push(&tokens, ty_comment),
             "pop" => self.parse_pop(&tokens, ty_comment),
             "alloca" => self.parse_alloca(&tokens, ty_comment),
+            "drop_owned" => self.parse_drop_owned(&tokens, ty_comment),
             _ if tokens[0].starts_with("set") => self.parse_setcc(&tokens),
             _ if tokens[0].starts_with('b') && tokens.len() >= 2 => self.parse_branch(&tokens),
             _ => Ok(None), // Unknown instruction, skip
@@ -510,6 +535,86 @@ impl<'a> DtalParser<'a> {
             offset,
             ty,
         }))
+    }
+
+    fn parse_move_owned(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 3 {
+            return Err(self.err("move_owned requires 2 operands"));
+        }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2].trim_end_matches(',');
+        let dst =
+            parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::MoveOwned { dst, src, ty }))
+    }
+
+    fn parse_alias_borrow(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 3 {
+            return Err(self.err("alias_borrow requires 2 operands"));
+        }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2];
+        let dst =
+            parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::AliasBorrow { dst, src, ty }))
+    }
+
+    fn parse_borrow_mut(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 3 {
+            return Err(self.err("borrow_mut requires 2 operands"));
+        }
+        let dst_str = tokens[1].trim_end_matches(',');
+        let src_str = tokens[2];
+        let dst =
+            parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::BorrowMut { dst, src, ty }))
+    }
+
+    fn parse_borrow_end(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() != 2 {
+            return Err(self.err("borrow_end requires exactly 1 operand"));
+        }
+        let src = parse_reg(tokens[1].trim_end_matches(','))
+            .ok_or_else(|| self.err("invalid source register"))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::BorrowEnd { src, ty }))
     }
 
     fn parse_store(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {
@@ -796,7 +901,38 @@ impl<'a> DtalParser<'a> {
 
         Ok(Some(DtalInstr::Call {
             target: tokens[1].to_string(),
+            arg_kinds: tokens
+                .get(2)
+                .and_then(|token| token.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')))
+                .map(|effects| {
+                    if effects.is_empty() {
+                        Ok(Vec::new())
+                    } else {
+                        effects
+                            .split(',')
+                            .map(|effect| match effect {
+                                "value" => Ok(ParameterKind::PlainValue),
+                                "owned" => Ok(ParameterKind::OwnedValue),
+                                "shared" => Ok(ParameterKind::SharedBorrow),
+                                "mutable" => Ok(ParameterKind::MutableBorrow),
+                                other => Err(self.err(format!(
+                                    "invalid call parameter kind '{}'",
+                                    other
+                                ))),
+                            })
+                            .collect()
+                    }
+                })
+                .transpose()?
+                .unwrap_or_default(),
             return_ty,
+            ownership: if tokens[0] == "call_owned" {
+                OwnershipMode::FreshOwned
+            } else if tokens[0] == "call_consume" {
+                OwnershipMode::Consume
+            } else {
+                OwnershipMode::Plain
+            },
         }))
     }
 
@@ -860,6 +996,24 @@ impl<'a> DtalParser<'a> {
             .unwrap_or(DtalType::Int);
 
         Ok(Some(DtalInstr::Alloca { dst, size, ty }))
+    }
+
+    fn parse_drop_owned(
+        &self,
+        tokens: &[&str],
+        ty_comment: Option<&str>,
+    ) -> Result<Option<DtalInstr>, DtalParseError> {
+        if tokens.len() < 2 {
+            return Err(self.err("drop_owned requires 1 operand"));
+        }
+        let src_str = tokens[1].trim_end_matches(',');
+        let src =
+            parse_reg(src_str).ok_or_else(|| self.err(format!("invalid src '{}'", src_str)))?;
+        let ty = ty_comment
+            .map(parse_type_str)
+            .transpose()?
+            .unwrap_or(DtalType::Int);
+        Ok(Some(DtalInstr::DropOwned { src, ty }))
     }
 }
 
@@ -1471,6 +1625,7 @@ add:
             functions: vec![DtalFunction {
                 name: "test".to_string(),
                 params: vec![(Reg::Virtual(VirtualReg(0)), DtalType::Int)],
+                parameter_kinds: vec![],
                 return_type: DtalType::Int,
                 precondition: None,
                 postcondition: None,

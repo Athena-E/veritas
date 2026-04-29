@@ -1,0 +1,8 @@
+fn inspect(r: &[int; 1]) -> int {
+    r[0]
+}
+
+fn main() -> int {
+    let arr: [int; 1] = [7; 1];
+    inspect(&arr)
+}

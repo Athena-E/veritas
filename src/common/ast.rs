@@ -1,4 +1,5 @@
 use super::span::Spanned;
+use crate::common::ownership::BorrowKind;
 use std::fmt;
 
 // Token definition
@@ -24,6 +25,7 @@ pub enum Token<'src> {
     Forall,
     Exists,
     Const,
+    Region,
     // Type keywords
     Int,
     I64,
@@ -55,6 +57,7 @@ impl fmt::Display for Token<'_> {
             Token::Forall => write!(f, "forall"),
             Token::Exists => write!(f, "exists"),
             Token::Const => write!(f, "const"),
+            Token::Region => write!(f, "region"),
             Token::Int => write!(f, "int"),
             Token::I64 => write!(f, "i64"),
             Token::U64 => write!(f, "u64"),
@@ -120,6 +123,7 @@ pub enum BinOp {
 pub enum UnaryOp {
     Not,
     Neg,
+    Deref,
 }
 
 // Literals
@@ -172,6 +176,10 @@ pub enum Expr<'src> {
     UnaryOp {
         op: UnaryOp,
         cond: Box<Spanned<Self>>,
+    },
+    Borrow {
+        kind: BorrowKind,
+        expr: Box<Spanned<Self>>,
     },
     Call {
         func_name: &'src str,
@@ -240,6 +248,9 @@ pub enum Stmt<'src> {
     While {
         condition: Box<Spanned<Expr<'src>>>,
         invariant: Option<Spanned<Expr<'src>>>,
+        body: Block<'src>,
+    },
+    Region {
         body: Block<'src>,
     },
 }

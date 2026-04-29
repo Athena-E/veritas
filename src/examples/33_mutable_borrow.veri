@@ -1,0 +1,9 @@
+fn touch(r: &mut [int; 1]) -> int {
+    r[0] = 9;
+    r[0]
+}
+
+fn main() -> int {
+    let mut arr: [int; 1] = [0; 1];
+    touch(&mut arr)
+}

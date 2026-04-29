@@ -141,6 +141,19 @@ where
                 )
             });
 
+        let region_stmt = just(Token::Region)
+            .ignore_then(
+                stmt.clone()
+                    .repeated()
+                    .collect::<Vec<_>>()
+                    .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')))
+                    .map(|stmts| Block {
+                        statements: stmts,
+                        trailing_expr: None,
+                    }),
+            )
+            .map_with(|body, e| (Stmt::Region { body }, e.span()));
+
         // Assignment statement
         let assign_stmt = expr
             .clone()
@@ -190,6 +203,7 @@ where
             return_stmt,
             for_stmt,
             while_stmt,
+            region_stmt,
             if_stmt,
             assign_stmt,
             expr_stmt,

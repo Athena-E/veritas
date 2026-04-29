@@ -73,8 +73,9 @@ impl SmtOracle {
                     let operand = Self::translate_expr(&cond.0)?;
                     Some(-operand)
                 }
-                UnaryOp::Not => None,
+                UnaryOp::Not | UnaryOp::Deref => None,
             },
+            Expr::Borrow { .. } => None,
 
             Expr::Index { .. } => {
                 // Encode (possibly nested) array indexing using Z3 array theory.
@@ -198,8 +199,9 @@ impl SmtOracle {
                     let operand = Self::translate_bool_expr(&cond.0)?;
                     Some(operand.not())
                 }
-                UnaryOp::Neg => None,
+                UnaryOp::Neg | UnaryOp::Deref => None,
             },
+            Expr::Borrow { .. } => None,
 
             Expr::Forall {
                 var,

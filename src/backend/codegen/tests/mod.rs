@@ -6,9 +6,11 @@ use crate::backend::codegen::codegen_program;
 use crate::backend::emit::emit_program;
 use crate::backend::lower::lower_program;
 use crate::common::ast::{BinOp, Literal};
+use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::IType;
+use crate::verifier::verify_dtal;
 
 /// Helper to create a spanned value with a dummy span
 fn spanned<T>(value: T) -> Spanned<T> {
@@ -26,7 +28,9 @@ fn test_pipeline_identity_function() {
                 name: "x".to_string(),
                 ty: IType::Int,
             }],
+            parameter_kinds: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -46,8 +50,8 @@ fn test_pipeline_identity_function() {
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
-    // 1 user function + 6 runtime stubs (including __rt_alloc)
-    assert_eq!(dtal.functions.len(), 7);
+    // 1 user function + 8 runtime stubs (including hosted region helpers)
+    assert_eq!(dtal.functions.len(), 9);
     assert_eq!(dtal.functions[0].name, "id");
 
     // Emit text
@@ -76,7 +80,9 @@ fn test_pipeline_add_function() {
                     ty: IType::Int,
                 },
             ],
+            parameter_kinds: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -97,6 +103,7 @@ fn test_pipeline_add_function() {
                         ty: IType::Int,
                     }),
                     checked_ty: IType::Int,
+                    ownership: OwnershipMode::Plain,
                 })],
                 trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                     name: "z".to_string(),
@@ -130,7 +137,9 @@ fn test_pipeline_constant_function() {
         functions: vec![TFunction {
             name: "const_five".to_string(),
             parameters: vec![],
+            parameter_kinds: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -167,7 +176,9 @@ fn test_pipeline_conditional_function() {
                 name: "x".to_string(),
                 ty: IType::Int,
             }],
+            parameter_kinds: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             body: TFunctionBody {
@@ -250,7 +261,9 @@ fn test_pipeline_multi_function_program() {
                     name: "n".to_string(),
                     ty: IType::Int,
                 }],
+                parameter_kinds: vec![],
                 return_type: IType::Int,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 body: TFunctionBody {
@@ -273,7 +286,9 @@ fn test_pipeline_multi_function_program() {
             TFunction {
                 name: "main".to_string(),
                 parameters: vec![],
+                parameter_kinds: vec![],
                 return_type: IType::Int,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 body: TFunctionBody {
@@ -287,9 +302,12 @@ fn test_pipeline_multi_function_program() {
                                 value: Literal::Int(21),
                                 ty: IType::Int,
                             })],
+                            arg_kinds: vec![crate::common::ownership::ParameterKind::PlainValue],
+                            ownership: OwnershipMode::Plain,
                             ty: IType::Int,
                         }),
                         checked_ty: IType::Int,
+                        ownership: OwnershipMode::Plain,
                     })],
                     trailing_expr: Some(Box::new(spanned(TExpr::Variable {
                         name: "result".to_string(),
@@ -305,8 +323,8 @@ fn test_pipeline_multi_function_program() {
     assert_eq!(tir.functions.len(), 2);
 
     let dtal = codegen_program(&tir);
-    // 2 user functions + 6 runtime stubs (including __rt_alloc)
-    assert_eq!(dtal.functions.len(), 8);
+    // 2 user functions + 8 runtime stubs (including hosted region helpers)
+    assert_eq!(dtal.functions.len(), 10);
 
     let output = emit_program(&dtal);
     assert!(output.contains(".function helper"));
@@ -341,7 +359,9 @@ fn test_pipeline_function_with_postcondition() {
         functions: vec![TFunction {
             name: "five".to_string(),
             parameters: vec![],
+            parameter_kinds: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: Some(postcondition),
             body: TFunctionBody {
@@ -365,8 +385,8 @@ fn test_pipeline_function_with_postcondition() {
 
     // Generate DTAL
     let dtal = codegen_program(&tir);
-    // 1 user function + 6 runtime stubs (including __rt_alloc)
-    assert_eq!(dtal.functions.len(), 7);
+    // 1 user function + 8 runtime stubs (including hosted region helpers)
+    assert_eq!(dtal.functions.len(), 9);
     assert!(
         dtal.functions[0].postcondition.is_some(),
         "DTAL should have postcondition"
@@ -408,7 +428,9 @@ fn test_pipeline_function_with_inequality_postcondition() {
         functions: vec![TFunction {
             name: "positive".to_string(),
             parameters: vec![],
+            parameter_kinds: vec![],
             return_type: IType::Int,
+            returns_owned: false,
             precondition: None,
             postcondition: Some(postcondition),
             body: TFunctionBody {
@@ -440,4 +462,174 @@ fn test_pipeline_function_with_inequality_postcondition() {
         "=== Function with Inequality Postcondition DTAL ===\n{}",
         output
     );
+}
+
+#[test]
+fn test_pipeline_shared_borrow_survives_to_dtal_and_verifies() {
+    use std::sync::Arc;
+    let array_ty = IType::Array {
+        element_type: Arc::new(IType::Int),
+        size: crate::common::types::IValue::Int(1),
+    };
+
+    let program = TProgram {
+        functions: vec![
+            TFunction {
+                name: "inspect".to_string(),
+                parameters: vec![TParameter {
+                    name: "r".to_string(),
+                    ty: IType::Ref(Arc::new(array_ty.clone())),
+                }],
+                parameter_kinds: vec![ParameterKind::SharedBorrow],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+            TFunction {
+                name: "main".to_string(),
+                parameters: vec![],
+                parameter_kinds: vec![],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![
+                        spanned(TStmt::Let {
+                            is_mut: false,
+                            name: "x".to_string(),
+                            declared_ty: array_ty.clone(),
+                            value: spanned(TExpr::ArrayInit {
+                                value: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                length: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                ty: array_ty.clone(),
+                            }),
+                            checked_ty: array_ty.clone(),
+                            ownership: OwnershipMode::FreshOwned,
+                        }),
+                        spanned(TStmt::Expr(spanned(TExpr::Call {
+                            func_name: "inspect".to_string(),
+                            args: vec![spanned(TExpr::Borrow {
+                                kind: BorrowKind::Shared,
+                                expr: Box::new(spanned(TExpr::Variable {
+                                    name: "x".to_string(),
+                                    ty: array_ty.clone(),
+                                })),
+                                ty: IType::Ref(Arc::new(array_ty.clone())),
+                            })],
+                            arg_kinds: vec![ParameterKind::SharedBorrow],
+                            ownership: OwnershipMode::Plain,
+                            ty: IType::Unit,
+                        }))),
+                    ],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+        ],
+    };
+
+    let tir = lower_program(&program);
+    let dtal = codegen_program(&tir);
+    verify_dtal(&dtal).expect("shared borrow pipeline should verify");
+
+    let output = emit_program(&dtal);
+    assert!(output.contains("alias_borrow"));
+}
+
+#[test]
+fn test_pipeline_mutable_borrow_survives_to_dtal_and_verifies() {
+    use std::sync::Arc;
+    let array_ty = IType::Array {
+        element_type: Arc::new(IType::Int),
+        size: crate::common::types::IValue::Int(1),
+    };
+
+    let program = TProgram {
+        functions: vec![
+            TFunction {
+                name: "touch".to_string(),
+                parameters: vec![TParameter {
+                    name: "r".to_string(),
+                    ty: IType::RefMut(Arc::new(array_ty.clone())),
+                }],
+                parameter_kinds: vec![ParameterKind::MutableBorrow],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+            TFunction {
+                name: "main".to_string(),
+                parameters: vec![],
+                parameter_kinds: vec![],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![
+                        spanned(TStmt::Let {
+                            is_mut: true,
+                            name: "x".to_string(),
+                            declared_ty: array_ty.clone(),
+                            value: spanned(TExpr::ArrayInit {
+                                value: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                length: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                ty: array_ty.clone(),
+                            }),
+                            checked_ty: array_ty.clone(),
+                            ownership: OwnershipMode::FreshOwned,
+                        }),
+                        spanned(TStmt::Expr(spanned(TExpr::Call {
+                            func_name: "touch".to_string(),
+                            args: vec![spanned(TExpr::Borrow {
+                                kind: BorrowKind::Mutable,
+                                expr: Box::new(spanned(TExpr::Variable {
+                                    name: "x".to_string(),
+                                    ty: array_ty.clone(),
+                                })),
+                                ty: IType::RefMut(Arc::new(array_ty.clone())),
+                            })],
+                            arg_kinds: vec![ParameterKind::MutableBorrow],
+                            ownership: OwnershipMode::Plain,
+                            ty: IType::Unit,
+                        }))),
+                    ],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+        ],
+    };
+
+    let tir = lower_program(&program);
+    let dtal = codegen_program(&tir);
+    verify_dtal(&dtal).expect("mutable borrow pipeline should verify");
+
+    let output = emit_program(&dtal);
+    assert!(output.contains("borrow_mut"));
 }

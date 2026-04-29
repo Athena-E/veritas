@@ -635,6 +635,10 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
             op: *op,
             cond: Box::new((rename_expr_var(&cond.0, old, new), cond.1)),
         },
+        Expr::Borrow { kind, expr } => Expr::Borrow {
+            kind: *kind,
+            expr: Box::new((rename_expr_var(&expr.0, old, new), expr.1)),
+        },
         Expr::Call { func_name, args } => Expr::Call {
             func_name,
             args: (
@@ -757,6 +761,10 @@ pub fn substitute_expr_for_var<'src>(
         Expr::UnaryOp { op, cond } => Expr::UnaryOp {
             op: *op,
             cond: Box::new((substitute_expr_for_var(&cond.0, var, replacement), cond.1)),
+        },
+        Expr::Borrow { kind, expr } => Expr::Borrow {
+            kind: *kind,
+            expr: Box::new((substitute_expr_for_var(&expr.0, var, replacement), expr.1)),
         },
         Expr::Index { base, index } => Expr::Index {
             base: Box::new((substitute_expr_for_var(&base.0, var, replacement), base.1)),
@@ -893,6 +901,19 @@ fn rename_stmt_var<'src>(
             invariant: invariant
                 .as_ref()
                 .map(|inv| (rename_expr_var(&inv.0, old, new), inv.1)),
+            body: Block {
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|s| (rename_stmt_var(&s.0, old, new), s.1))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((rename_expr_var(&e.0, old, new), e.1))),
+            },
+        },
+        Stmt::Region { body } => Stmt::Region {
             body: Block {
                 statements: body
                     .statements

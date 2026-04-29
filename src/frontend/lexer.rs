@@ -99,6 +99,7 @@ pub fn lexer<'src>()
             "forall" => Token::Forall,
             "exists" => Token::Exists,
             "const" => Token::Const,
+            "region" => Token::Region,
             "int" => Token::Int,
             "i64" => Token::I64,
             "u64" => Token::U64,

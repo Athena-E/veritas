@@ -9,10 +9,12 @@ use crate::backend::lower::widen_itype;
 use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::backend::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
 use crate::common::types::IValue;
+use crate::frontend::typechecker::context::join_types as join_branch_types;
 
 /// Convert a typed expression to an IndexExpr for constraints.
 /// Returns None if the expression cannot be represented in the constraint domain.
@@ -76,6 +78,10 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
                 None
             }
         }
+
+        TExpr::Deref {
+            owner: Some(owner), ..
+        } => Some(IndexExpr::Var(owner.clone())),
 
         _ => None,
     }
@@ -187,11 +193,37 @@ pub fn lower_expr<'src>(
 
         TExpr::UnaryOp { op, operand, ty } => lower_unaryop(ctx, *op, operand, ty),
 
+        TExpr::Deref { expr, ty, .. } => {
+            if matches!(ty, IType::Array { .. }) {
+                panic!("whole-array dereference should not reach lowering");
+            }
+            let base_reg = lower_expr(ctx, expr);
+            let index_reg = ctx.fresh_reg();
+            ctx.emit(TirInstr::LoadImm {
+                dst: index_reg,
+                value: 0,
+                ty: IType::Int,
+            });
+            let dst = ctx.fresh_reg();
+            ctx.emit(TirInstr::ArrayLoad {
+                dst,
+                base: base_reg,
+                index: index_reg,
+                element_ty: ty.clone(),
+                bounds_constraint: Constraint::True,
+            });
+            dst
+        }
+
+        TExpr::Borrow { kind, expr: place, ty } => lower_borrow_expr(ctx, *kind, place, ty),
+
         TExpr::Call {
             func_name,
             args,
+            arg_kinds,
+            ownership,
             ty,
-        } => lower_call(ctx, func_name, args, ty),
+        } => lower_call(ctx, func_name, args, arg_kinds, *ownership, ty),
 
         TExpr::Index { base, index, ty } => lower_index(ctx, base, index, ty),
 
@@ -291,6 +323,7 @@ fn convert_unaryop(op: AstUnaryOp) -> UnaryOp {
     match op {
         AstUnaryOp::Not => UnaryOp::Not,
         AstUnaryOp::Neg => UnaryOp::Neg,
+        AstUnaryOp::Deref => panic!("deref is lowered structurally, not as a unary op"),
     }
 }
 
@@ -319,10 +352,119 @@ fn lower_call<'src>(
     ctx: &mut LoweringContext<'src>,
     func_name: &str,
     args: &[Spanned<TExpr<'src>>],
+    arg_kinds: &[ParameterKind],
+    ownership: OwnershipMode,
     ty: &IType<'src>,
 ) -> VirtualReg {
     // Lower all arguments
-    let arg_regs: Vec<VirtualReg> = args.iter().map(|arg| lower_expr(ctx, arg)).collect();
+    let mut borrow_end_regs = Vec::new();
+    let lowered_args: Vec<(VirtualReg, IType<'src>)> = args
+        .iter()
+        .zip(arg_kinds.iter())
+        .map(|(arg, arg_kind)| {
+            match arg_kind {
+                ParameterKind::PlainValue => (lower_expr(ctx, arg), arg.0.get_type().clone()),
+                ParameterKind::OwnedValue => {
+                    let arg_reg = lower_expr(ctx, arg);
+                    if matches!(&arg.0, TExpr::Variable { .. })
+                        && matches!(arg.0.get_type(), IType::Array { .. })
+                    {
+                        let moved_reg = ctx.fresh_reg();
+                        ctx.emit(TirInstr::MoveOwned {
+                            dst: moved_reg,
+                            src: arg_reg,
+                            ty: arg.0.get_type().clone(),
+                        });
+                        if let TExpr::Variable { name, .. } = &arg.0 {
+                            ctx.mark_var_moved(name);
+                        }
+                        (moved_reg, arg.0.get_type().clone())
+                    } else {
+                        (arg_reg, arg.0.get_type().clone())
+                    }
+                }
+                ParameterKind::SharedBorrow => {
+                    if let TExpr::Borrow {
+                        kind: crate::common::ownership::BorrowKind::Shared,
+                        expr: place,
+                        ..
+                    } = &arg.0
+                    {
+                        if matches!(place.0.get_type(), IType::Array { .. }) {
+                            return (lower_expr(ctx, place), place.0.get_type().clone());
+                        }
+                        if let TExpr::Variable { name, .. } = &place.0 {
+                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                                panic!(
+                                    "Undefined scalar borrow owner during call lowering: {}",
+                                    name
+                                )
+                            });
+                            let (borrow_reg, _cell_reg, lowered_ref_ty) =
+                                ctx.create_scalar_borrow_value(
+                                    owner_reg,
+                                    place.0.get_type().clone(),
+                                    crate::common::ownership::BorrowKind::Shared,
+                                );
+                            borrow_end_regs.push((borrow_reg, lowered_ref_ty.clone(), None));
+                            return (borrow_reg, lowered_ref_ty);
+                        }
+                    }
+                    let arg_reg = lower_expr(ctx, arg);
+                    let borrowed_reg = ctx.fresh_reg();
+                    ctx.emit(TirInstr::BorrowShared {
+                        dst: borrowed_reg,
+                        src: arg_reg,
+                        ty: arg.0.get_type().clone(),
+                    });
+                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
+                    (borrowed_reg, arg.0.get_type().clone())
+                }
+                ParameterKind::MutableBorrow => {
+                    if let TExpr::Borrow {
+                        kind: crate::common::ownership::BorrowKind::Mutable,
+                        expr: place,
+                        ..
+                    } = &arg.0
+                    {
+                        if matches!(place.0.get_type(), IType::Array { .. }) {
+                            return (lower_expr(ctx, place), place.0.get_type().clone());
+                        }
+                        if let TExpr::Variable { name, .. } = &place.0 {
+                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                                panic!(
+                                    "Undefined scalar mutable borrow owner during call lowering: {}",
+                                    name
+                                )
+                            });
+                            let (borrow_reg, cell_reg, lowered_ref_ty) =
+                                ctx.create_scalar_borrow_value(
+                                    owner_reg,
+                                    place.0.get_type().clone(),
+                                    crate::common::ownership::BorrowKind::Mutable,
+                                );
+                            borrow_end_regs.push((
+                                borrow_reg,
+                                lowered_ref_ty.clone(),
+                                Some((name.clone(), cell_reg, place.0.get_type().clone())),
+                            ));
+                            return (borrow_reg, lowered_ref_ty);
+                        }
+                    }
+                    let arg_reg = lower_expr(ctx, arg);
+                    let borrowed_reg = ctx.fresh_reg();
+                    ctx.emit(TirInstr::BorrowMut {
+                        dst: borrowed_reg,
+                        src: arg_reg,
+                        ty: arg.0.get_type().clone(),
+                    });
+                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
+                    (borrowed_reg, arg.0.get_type().clone())
+                }
+            }
+        })
+        .collect();
+    let (arg_regs, arg_types): (Vec<VirtualReg>, Vec<IType<'src>>) = lowered_args.into_iter().unzip();
 
     // For unit-returning functions, don't try to capture the return value
     if matches!(ty, IType::Unit) {
@@ -330,8 +472,20 @@ fn lower_call<'src>(
             dst: None,
             func: func_name.to_string(),
             args: arg_regs,
+            arg_types,
+            arg_kinds: arg_kinds.to_vec(),
+            ownership,
             result_ty: ty.clone(),
         });
+        for (borrow_reg, borrow_ty, sync_back) in borrow_end_regs {
+            if let Some((owner_name, cell_reg, pointee_ty)) = sync_back {
+                ctx.sync_scalar_borrow_owner(&owner_name, cell_reg, pointee_ty);
+            }
+            ctx.emit(TirInstr::BorrowEnd {
+                src: borrow_reg,
+                ty: borrow_ty,
+            });
+        }
 
         // Return a dummy unit value
         let dst = ctx.fresh_reg();
@@ -347,10 +501,59 @@ fn lower_call<'src>(
             dst: Some(dst),
             func: func_name.to_string(),
             args: arg_regs,
+            arg_types,
+            arg_kinds: arg_kinds.to_vec(),
+            ownership,
             result_ty: ty.clone(),
         });
+        for (borrow_reg, borrow_ty, sync_back) in borrow_end_regs {
+            if let Some((owner_name, cell_reg, pointee_ty)) = sync_back {
+                ctx.sync_scalar_borrow_owner(&owner_name, cell_reg, pointee_ty);
+            }
+            ctx.emit(TirInstr::BorrowEnd {
+                src: borrow_reg,
+                ty: borrow_ty,
+            });
+        }
         dst
     }
+}
+
+fn lower_borrow_expr<'src>(
+    ctx: &mut LoweringContext<'src>,
+    kind: crate::common::ownership::BorrowKind,
+    place: &Spanned<TExpr<'src>>,
+    ty: &IType<'src>,
+) -> VirtualReg {
+    if !matches!(place.0.get_type(), IType::Array { .. })
+        && let TExpr::Variable { name, .. } = &place.0
+    {
+        let owner_reg = ctx
+            .lookup_var(name)
+            .unwrap_or_else(|| panic!("Undefined scalar borrow owner during lowering: {}", name));
+        let (borrow_reg, _, _) =
+            ctx.create_scalar_borrow_value(owner_reg, place.0.get_type().clone(), kind);
+        return borrow_reg;
+    }
+    let place_reg = lower_expr(ctx, place);
+    let dst = ctx.fresh_reg();
+    match kind {
+        crate::common::ownership::BorrowKind::Shared => {
+            ctx.emit(TirInstr::BorrowShared {
+                dst,
+                src: place_reg,
+                ty: ty.clone(),
+            });
+        }
+        crate::common::ownership::BorrowKind::Mutable => {
+            ctx.emit(TirInstr::BorrowMut {
+                dst,
+                src: place_reg,
+                ty: ty.clone(),
+            });
+        }
+    }
+    dst
 }
 
 /// Flattened element count of a (possibly nested) array type.
@@ -471,6 +674,7 @@ fn lower_array_init<'src>(
         dst: arr_reg,
         element_ty: scalar_ty,
         size: total_flat,
+        region: ctx.current_region(),
     });
 
     // Zero-init fast path: hosted `__rt_alloc` (mmap) returns zero-filled
@@ -575,6 +779,7 @@ pub fn lower_if_expr<'src>(
 
     // Snapshot variable state before then branch
     let vars_before_then = ctx.snapshot_var_map();
+    let var_types_before_then = ctx.snapshot_var_type_map();
 
     // Lower the then block and get its result
     let then_result = lower_block_with_result(ctx, then_block, ty);
@@ -582,6 +787,7 @@ pub fn lower_if_expr<'src>(
     // Record then block's end for phi
     let then_end_block = ctx.current_block().expect("Should be in then block");
     let vars_after_then = ctx.snapshot_var_map();
+    let var_types_after_then = ctx.snapshot_var_type_map();
 
     // Jump to merge
     ctx.finish_block(
@@ -598,6 +804,7 @@ pub fn lower_if_expr<'src>(
     // The else branch should see variables as they were BEFORE the then branch,
     // not after. This ensures proper phi node creation at the merge point.
     ctx.restore_var_map(vars_before_then.clone());
+    ctx.restore_var_type_map(var_types_before_then.clone());
 
     let else_result = if let Some(else_block_ref) = else_block {
         lower_block_with_result(ctx, else_block_ref, ty)
@@ -616,6 +823,7 @@ pub fn lower_if_expr<'src>(
 
     let else_end_block = ctx.current_block().expect("Should be in else block");
     let vars_after_else = ctx.snapshot_var_map();
+    let var_types_after_else = ctx.snapshot_var_type_map();
 
     // Jump to merge
     ctx.finish_block(
@@ -628,15 +836,6 @@ pub fn lower_if_expr<'src>(
     // 6. Create merge block with phi nodes
     ctx.start_block(merge_block);
 
-    // Create phi node for the result value.
-    // Widen the type for join points (e.g., Unit → Int when branches
-    // produce different value types).
-    let result_reg = ctx.fresh_reg();
-    let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
-    result_phi.add_incoming(then_end_block, then_result);
-    result_phi.add_incoming(else_end_block, else_result);
-    ctx.emit_phi(result_phi);
-
     // Create phi nodes for any variables modified in either branch
     // Compare vars_after_then and vars_after_else with vars_before_then
     create_phi_nodes_for_modified_vars(
@@ -644,11 +843,30 @@ pub fn lower_if_expr<'src>(
         &vars_before_then,
         &vars_after_then,
         &vars_after_else,
+        &var_types_before_then,
+        &var_types_after_then,
+        &var_types_after_else,
         then_end_block,
         else_end_block,
     );
 
-    result_reg
+    if matches!(ty, IType::Unit) {
+        let result_reg = ctx.fresh_reg();
+        ctx.emit(TirInstr::LoadImm {
+            dst: result_reg,
+            value: 0,
+            ty: IType::Unit,
+        });
+        result_reg
+    } else {
+        // Create phi node for the result value.
+        let result_reg = ctx.fresh_reg();
+        let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
+        result_phi.add_incoming(then_end_block, then_result);
+        result_phi.add_incoming(else_end_block, else_result);
+        ctx.emit_phi(result_phi);
+        result_reg
+    }
 }
 
 /// Lower a block and return the result register
@@ -663,6 +881,8 @@ fn lower_block_with_result<'src>(
 ) -> VirtualReg {
     use crate::backend::lower::stmt::lower_stmt;
 
+    ctx.enter_scope();
+
     // Lower all statements
     for stmt in &block.statements {
         lower_stmt(ctx, stmt);
@@ -670,7 +890,10 @@ fn lower_block_with_result<'src>(
 
     // If there's a trailing expression, that's the block's value
     if let Some(trailing) = &block.trailing_expr {
-        return lower_expr(ctx, trailing);
+        let result = lower_expr(ctx, trailing);
+        ctx.emit_scope_exit_drops();
+        ctx.exit_scope();
+        return result;
     }
 
     // No trailing expression - check if last statement is an expression whose
@@ -681,7 +904,10 @@ fn lower_block_with_result<'src>(
         && let Some(last) = block.statements.last()
         && let TStmt::Expr(expr) = &last.0
     {
-        return lower_expr(ctx, expr);
+        let result = lower_expr(ctx, expr);
+        ctx.emit_scope_exit_drops();
+        ctx.exit_scope();
+        return result;
     }
 
     // No value - emit default
@@ -691,6 +917,8 @@ fn lower_block_with_result<'src>(
         value: 0,
         ty: ty.clone(),
     });
+    ctx.emit_scope_exit_drops();
+    ctx.exit_scope();
     dst
 }
 
@@ -700,6 +928,9 @@ fn create_phi_nodes_for_modified_vars<'src>(
     vars_before: &std::collections::BTreeMap<String, VirtualReg>,
     vars_after_then: &std::collections::BTreeMap<String, VirtualReg>,
     vars_after_else: &std::collections::BTreeMap<String, VirtualReg>,
+    var_types_before: &std::collections::BTreeMap<String, IType<'src>>,
+    var_types_after_then: &std::collections::BTreeMap<String, IType<'src>>,
+    var_types_after_else: &std::collections::BTreeMap<String, IType<'src>>,
     then_block: BlockId,
     else_block: BlockId,
 ) {
@@ -712,7 +943,19 @@ fn create_phi_nodes_for_modified_vars<'src>(
         if then_reg != else_reg {
             // Need a phi node
             let phi_dst = ctx.fresh_reg();
-            let var_ty = widen_itype(ctx.lookup_var_type(name));
+            let before_ty = var_types_before
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ctx.lookup_var_type(name));
+            let then_ty = var_types_after_then
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| before_ty.clone());
+            let else_ty = var_types_after_else
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| before_ty.clone());
+            let var_ty = widen_itype(join_branch_types(&then_ty, &else_ty));
             let mut phi = PhiNode::new(phi_dst, var_ty.clone());
             phi.add_incoming(then_block, then_reg);
             phi.add_incoming(else_block, else_reg);
@@ -722,7 +965,10 @@ fn create_phi_nodes_for_modified_vars<'src>(
             ctx.bind_var_typed(name, phi_dst, var_ty);
         } else if then_reg != before_reg {
             // Both branches modified it the same way - just update binding
-            let var_ty = ctx.lookup_var_type(name);
+            let var_ty = var_types_after_then
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ctx.lookup_var_type(name));
             ctx.bind_var_typed(name, then_reg, var_ty);
         }
     }

@@ -22,6 +22,8 @@ fn get_span_start(error: &TypeError) -> usize {
     match error {
         TypeError::TypeMismatch { span, .. } => span.start,
         TypeError::UndefinedVariable { span, .. } => span.start,
+        TypeError::UseAfterMove { span, .. } => span.start,
+        TypeError::BorrowConflict { span, .. } => span.start,
         TypeError::UndefinedFunction { span, .. } => span.start,
         TypeError::NotMutable { span, .. } => span.start,
         TypeError::AssignToImmutable { span, .. } => span.start,
@@ -97,6 +99,32 @@ fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
                         .with_color(Color::Red),
                 )
                 .with_help("Make sure the variable is declared before use")
+                .finish()
+        }
+
+        TypeError::UseAfterMove { name, span } => {
+            Report::build(ReportKind::Error, span.start..span.end)
+                .with_code("E002A")
+                .with_message(format!("Use of moved value `{}`", name))
+                .with_label(
+                    Label::new(span.start..span.end)
+                        .with_message("value was moved and is no longer available here")
+                        .with_color(Color::Red),
+                )
+                .with_help("Reinitialize the binding before using it again, or avoid moving it")
+                .finish()
+        }
+
+        TypeError::BorrowConflict { name, reason, span } => {
+            Report::build(ReportKind::Error, span.start..span.end)
+                .with_code("E002B")
+                .with_message(format!("Borrow conflict involving `{}`", name))
+                .with_label(
+                    Label::new(span.start..span.end)
+                        .with_message(reason.clone())
+                        .with_color(Color::Red),
+                )
+                .with_help("Wait for the borrow to go out of scope, or avoid the conflicting move or mutation")
                 .finish()
         }
 

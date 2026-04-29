@@ -20,9 +20,11 @@ use crate::backend::dtal::instr::{
     BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
 };
 use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
+use crate::backend::regalloc::liveness::LivenessAnalysis;
 use crate::backend::dtal::types::DtalType;
 use crate::backend::regalloc::allocator::AllocationResult;
 use crate::backend::x86_64::regs::{Location, X86Reg};
+use std::collections::HashSet;
 
 /// Map from x86 register back to DTAL PhysicalReg
 fn x86_to_dtal_reg(x86: X86Reg) -> Reg {
@@ -287,6 +289,31 @@ fn emit_store_from(instrs: &mut Vec<DtalInstr>, src: Reg, loc: &PhysLoc, ty: Dta
     }
 }
 
+fn emit_store_from_owned(instrs: &mut Vec<DtalInstr>, src: Reg, loc: &PhysLoc, ty: DtalType) {
+    match loc {
+        PhysLoc::Reg(r) if *r == src => {}
+        PhysLoc::Reg(r) => {
+            instrs.push(DtalInstr::MoveOwned { dst: *r, src, ty });
+        }
+        PhysLoc::Spill(offset) => {
+            instrs.push(DtalInstr::SpillStore {
+                src,
+                offset: *offset,
+                ty,
+            });
+        }
+    }
+}
+
+fn pick_scratch(avoid: &[Reg]) -> Reg {
+    for reg in [RAX, R11, RDX] {
+        if !avoid.contains(&reg) {
+            return reg;
+        }
+    }
+    RAX
+}
+
 /// Physically allocate an entire DTAL program.
 ///
 /// Runs register allocation on each function, then applies the allocation
@@ -350,6 +377,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
 
     // Count unique caller-saved registers used (for alloca save slots)
     let caller_save_slots = caller_saved_to_save.len();
+    let liveness = LivenessAnalysis::analyze(func);
 
     // Compute frame size (spill slots + caller-save slots for alloca, 16-byte aligned)
     let spill_size = ((alloc.spill_slots + caller_save_slots) * 8) as u32;
@@ -428,11 +456,19 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                         && saved_to_scratch.is_none()
                     {
                         // Save src to scratch before it gets clobbered
-                        instrs.push(DtalInstr::MovReg {
-                            dst: R11,
-                            src: *src,
-                            ty: DtalType::Int,
-                        });
+                        if matches!(&param_moves[i].2, DtalType::Array { .. }) {
+                            instrs.push(DtalInstr::MoveOwned {
+                                dst: R11,
+                                src: *src,
+                                ty: param_moves[i].2.clone(),
+                            });
+                        } else {
+                            instrs.push(DtalInstr::MovReg {
+                                dst: R11,
+                                src: *src,
+                                ty: DtalType::Int,
+                            });
+                        }
                         saved_to_scratch = Some((*src, R11));
                     }
                 }
@@ -444,12 +480,23 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 } else {
                     *src
                 };
-                emit_store_from(&mut instrs, actual_src, dst_loc, ty.clone());
+                if matches!(ty, DtalType::Array { .. }) {
+                    emit_store_from_owned(&mut instrs, actual_src, dst_loc, ty.clone());
+                } else {
+                    emit_store_from(&mut instrs, actual_src, dst_loc, ty.clone());
+                }
             }
         }
 
         // Translate each instruction
-        for instr in &block.instructions {
+        let live_out = liveness
+            .blocks
+            .get(&block.label)
+            .map(|info| &info.live_out)
+            .cloned()
+            .unwrap_or_default();
+        let instr_liveness = LivenessAnalysis::compute_instruction_liveness(block, &live_out);
+        for (instr_idx, instr) in block.instructions.iter().enumerate() {
             allocate_instruction(
                 &mut instrs,
                 instr,
@@ -458,6 +505,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 &callee_saved_regs,
                 &caller_saved_to_save,
                 callee_saved_regs.len(),
+                instr_liveness.get(instr_idx),
             );
         }
 
@@ -510,6 +558,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     DtalFunction {
         name: func.name.clone(),
         params: phys_params,
+        parameter_kinds: func.parameter_kinds.clone(),
         return_type: func.return_type.clone(),
         precondition: phys_precond,
         postcondition: phys_postcond,
@@ -535,11 +584,15 @@ fn allocate_instruction(
     callee_saved: &[Reg],
     caller_saved: &[Reg],
     callee_saved_count: usize,
+    live_after: Option<&HashSet<VirtualReg>>,
 ) {
     // Skip instructions with dead destinations (register not allocated = never used)
     match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
+        | DtalInstr::AliasBorrow { dst, .. }
+        | DtalInstr::BorrowMut { dst, .. }
+        | DtalInstr::MoveOwned { dst, .. }
         | DtalInstr::BinOp { dst, .. }
         | DtalInstr::AddImm { dst, .. }
         | DtalInstr::ShlImm { dst, .. }
@@ -585,18 +638,39 @@ fn allocate_instruction(
             }
         }
 
-        DtalInstr::MovReg { dst, src, ty } => {
+        DtalInstr::MovReg { dst, src, ty }
+        | DtalInstr::AliasBorrow { dst, src, ty }
+        | DtalInstr::BorrowMut { dst, src, ty }
+        | DtalInstr::MoveOwned { dst, src, ty } => {
             let src_loc = resolve_reg(*src, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
 
             match (&src_loc, &dst_loc) {
                 (PhysLoc::Reg(s), PhysLoc::Reg(d)) if s == d => {} // nop
                 (PhysLoc::Reg(s), PhysLoc::Reg(d)) => {
-                    instrs.push(DtalInstr::MovReg {
-                        dst: *d,
-                        src: *s,
-                        ty: ty.clone(),
-                    });
+                    let lowered = match instr {
+                        DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                        DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                        DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                        _ => DtalInstr::MovReg {
+                            dst: *d,
+                            src: *s,
+                            ty: ty.clone(),
+                        },
+                    };
+                    instrs.push(lowered);
                 }
                 (PhysLoc::Reg(s), PhysLoc::Spill(offset)) => {
                     instrs.push(DtalInstr::SpillStore {
@@ -622,6 +696,48 @@ fn allocate_instruction(
                     instrs.push(DtalInstr::SpillStore {
                         src: RAX,
                         offset: *dst_off,
+                        ty: ty.clone(),
+                    });
+                }
+            }
+        }
+
+        DtalInstr::DropOwned { src, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            match src_loc {
+                PhysLoc::Reg(r) => instrs.push(DtalInstr::DropOwned {
+                    src: r,
+                    ty: ty.clone(),
+                }),
+                PhysLoc::Spill(offset) => {
+                    instrs.push(DtalInstr::SpillLoad {
+                        dst: R11,
+                        offset,
+                        ty: ty.clone(),
+                    });
+                    instrs.push(DtalInstr::DropOwned {
+                        src: R11,
+                        ty: ty.clone(),
+                    });
+                }
+            }
+        }
+
+        DtalInstr::BorrowEnd { src, ty } => {
+            let src_loc = resolve_reg(*src, alloc);
+            match src_loc {
+                PhysLoc::Reg(r) => instrs.push(DtalInstr::BorrowEnd {
+                    src: r,
+                    ty: ty.clone(),
+                }),
+                PhysLoc::Spill(offset) => {
+                    instrs.push(DtalInstr::SpillLoad {
+                        dst: R11,
+                        offset,
+                        ty: ty.clone(),
+                    });
+                    instrs.push(DtalInstr::BorrowEnd {
+                        src: R11,
                         ty: ty.clone(),
                     });
                 }
@@ -801,22 +917,31 @@ fn allocate_instruction(
             let base_loc = resolve_reg(*base, alloc);
             let offset_loc = resolve_reg(*offset, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
-            // Must load base and offset without clobbering each other.
-            // If offset is in RAX, load it to R11 first; if base is in R11, load it to RAX first.
-            let offset_in_rax = matches!(&offset_loc, PhysLoc::Reg(r) if *r == RAX);
-            let base_in_r11 = matches!(&base_loc, PhysLoc::Reg(r) if *r == R11);
-            if offset_in_rax || base_in_r11 {
-                // Load offset first (to R11), then base (to RAX)
-                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
-                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-            } else {
-                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            let mut base_reg = match &base_loc {
+                PhysLoc::Reg(r) => Some(*r),
+                PhysLoc::Spill(_) => None,
+            };
+            let mut offset_reg = match &offset_loc {
+                PhysLoc::Reg(r) => Some(*r),
+                PhysLoc::Spill(_) => None,
+            };
+            if base_reg == offset_reg {
+                offset_reg = None;
+            }
+            if base_reg.is_none() {
+                let scratch = pick_scratch(&offset_reg.iter().copied().collect::<Vec<_>>());
+                emit_load_to(instrs, &base_loc, scratch, DtalType::Int);
+                base_reg = Some(scratch);
+            }
+            if offset_reg.is_none() {
+                let scratch = pick_scratch(&base_reg.iter().copied().collect::<Vec<_>>());
+                emit_load_to(instrs, &offset_loc, scratch, DtalType::Int);
+                offset_reg = Some(scratch);
             }
             instrs.push(DtalInstr::Load {
                 dst: RAX,
-                base: RAX,
-                offset: R11,
+                base: base_reg.unwrap(),
+                offset: offset_reg.unwrap(),
                 ty: ty.clone(),
             });
             emit_store_from(instrs, RAX, &dst_loc, ty.clone());
@@ -834,29 +959,62 @@ fn allocate_instruction(
             let offset_loc = resolve_reg(*offset, alloc);
             let other_loc = resolve_reg(*other, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
-            // Load other into a safe third register (RDX) first.
+            let mut base_reg = match &base_loc {
+                PhysLoc::Reg(r) => Some(*r),
+                PhysLoc::Spill(_) => None,
+            };
+            let mut offset_reg = match &offset_loc {
+                PhysLoc::Reg(r) => Some(*r),
+                PhysLoc::Spill(_) => None,
+            };
+            if base_reg == offset_reg {
+                offset_reg = None;
+            }
             let other_reg = match &other_loc {
-                PhysLoc::Reg(r) if *r != RAX && *r != R11 => *r,
+                PhysLoc::Reg(r)
+                    if Some(*r) != base_reg && Some(*r) != offset_reg =>
+                {
+                    *r
+                }
                 _ => {
-                    emit_load_to(instrs, &other_loc, RDX, ty.clone());
-                    RDX
+                    let scratch = pick_scratch(
+                        &base_reg
+                            .iter()
+                            .chain(offset_reg.iter())
+                            .copied()
+                            .collect::<Vec<_>>(),
+                    );
+                    emit_load_to(instrs, &other_loc, scratch, ty.clone());
+                    scratch
                 }
             };
-            // Load base and offset without clobbering each other.
-            let offset_in_rax = matches!(&offset_loc, PhysLoc::Reg(r) if *r == RAX);
-            let base_in_r11 = matches!(&base_loc, PhysLoc::Reg(r) if *r == R11);
-            if offset_in_rax || base_in_r11 {
-                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
-                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-            } else {
-                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            if base_reg.is_none() {
+                let scratch = pick_scratch(
+                    &offset_reg
+                        .iter()
+                        .chain(std::iter::once(&other_reg))
+                        .copied()
+                        .collect::<Vec<_>>(),
+                );
+                emit_load_to(instrs, &base_loc, scratch, DtalType::Int);
+                base_reg = Some(scratch);
+            }
+            if offset_reg.is_none() {
+                let scratch = pick_scratch(
+                    &base_reg
+                        .iter()
+                        .chain(std::iter::once(&other_reg))
+                        .copied()
+                        .collect::<Vec<_>>(),
+                );
+                emit_load_to(instrs, &offset_loc, scratch, DtalType::Int);
+                offset_reg = Some(scratch);
             }
             instrs.push(DtalInstr::LoadOp {
                 op: *op,
                 dst: other_reg,
-                base: RAX,
-                offset: R11,
+                base: base_reg.unwrap(),
+                offset: offset_reg.unwrap(),
                 other: other_reg,
                 ty: ty.clone(),
             });
@@ -867,36 +1025,87 @@ fn allocate_instruction(
             let base_loc = resolve_reg(*base, alloc);
             let offset_loc = resolve_reg(*offset, alloc);
             let src_loc = resolve_reg(*src, alloc);
-            // Need base in RAX, offset in R11, src in a third reg.
-            // Must avoid clobbering: load src to RDX first (safest), then
-            // base/offset with conflict detection.
-            //
-            // Step 1: Get src into a safe register (RDX unless already safe).
+            let mut base_reg = match &base_loc {
+                PhysLoc::Reg(r) => Some(*r),
+                PhysLoc::Spill(_) => None,
+            };
+            let mut offset_reg = match &offset_loc {
+                PhysLoc::Reg(r) => Some(*r),
+                PhysLoc::Spill(_) => None,
+            };
+            if base_reg == offset_reg {
+                offset_reg = None;
+            }
             let src_reg = match &src_loc {
-                PhysLoc::Reg(r) if *r != RAX && *r != R11 => *r,
+                PhysLoc::Reg(r)
+                    if Some(*r) != base_reg && Some(*r) != offset_reg =>
+                {
+                    *r
+                }
                 _ => {
-                    emit_load_to(instrs, &src_loc, RDX, DtalType::Int);
-                    RDX
+                    let scratch = pick_scratch(
+                        &base_reg
+                            .iter()
+                            .chain(offset_reg.iter())
+                            .copied()
+                            .collect::<Vec<_>>(),
+                    );
+                    emit_load_to(instrs, &src_loc, scratch, DtalType::Int);
+                    scratch
                 }
             };
-            // Step 2: Load base and offset without clobbering each other or src.
-            let offset_in_rax = matches!(&offset_loc, PhysLoc::Reg(r) if *r == RAX);
-            let base_in_r11 = matches!(&base_loc, PhysLoc::Reg(r) if *r == R11);
-            if offset_in_rax || base_in_r11 {
-                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
-                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-            } else {
-                emit_load_to(instrs, &base_loc, RAX, DtalType::Int);
-                emit_load_to(instrs, &offset_loc, R11, DtalType::Int);
+            if base_reg.is_none() {
+                let scratch = pick_scratch(
+                    &offset_reg
+                        .iter()
+                        .chain(std::iter::once(&src_reg))
+                        .copied()
+                        .collect::<Vec<_>>(),
+                );
+                emit_load_to(instrs, &base_loc, scratch, DtalType::Int);
+                base_reg = Some(scratch);
+            }
+            if offset_reg.is_none() {
+                let scratch = pick_scratch(
+                    &base_reg
+                        .iter()
+                        .chain(std::iter::once(&src_reg))
+                        .copied()
+                        .collect::<Vec<_>>(),
+                );
+                emit_load_to(instrs, &offset_loc, scratch, DtalType::Int);
+                offset_reg = Some(scratch);
             }
             instrs.push(DtalInstr::Store {
-                base: RAX,
-                offset: R11,
+                base: base_reg.unwrap(),
+                offset: offset_reg.unwrap(),
                 src: src_reg,
             });
         }
 
-        DtalInstr::Call { target, return_ty } => {
+        DtalInstr::Call {
+            target,
+            arg_kinds,
+            return_ty,
+            ownership,
+        } => {
+            let regs_to_save: Vec<Reg> = if let Some(live_after) = live_after {
+                let mut regs = Vec::new();
+                for vreg in live_after {
+                    if let Some(Location::Reg(x86)) = alloc.allocation.get(vreg)
+                        && X86Reg::CALLER_SAVED.contains(x86)
+                        && X86Reg::ALLOCATABLE.contains(x86)
+                    {
+                        let reg = x86_to_dtal_reg(*x86);
+                        if !regs.contains(&reg) {
+                            regs.push(reg);
+                        }
+                    }
+                }
+                regs
+            } else {
+                caller_saved.to_vec()
+            };
             // Save caller-saved registers BEFORE argument setup.
             // The argument-setup moves (mov r0, ...; mov r1, ...) have
             // already been emitted to `instrs`. We need to insert saves
@@ -913,7 +1122,12 @@ fn allocate_instruction(
             let mut arg_move_count = 0;
             for instr in instrs.iter().rev() {
                 match instr {
-                    DtalInstr::MovReg { dst, .. } if arg_regs.contains(dst) => {
+                    DtalInstr::MovReg { dst, .. }
+                    | DtalInstr::AliasBorrow { dst, .. }
+                    | DtalInstr::BorrowMut { dst, .. }
+                    | DtalInstr::MoveOwned { dst, .. }
+                        if arg_regs.contains(dst) =>
+                    {
                         arg_move_count += 1;
                     }
                     _ => break,
@@ -926,7 +1140,7 @@ fn allocate_instruction(
 
             // Save caller-saved to rbp-relative spill slots (safe with alloca).
             // These slots are in the frame area allocated by the prologue.
-            for (i, &reg) in caller_saved.iter().enumerate() {
+            for (i, &reg) in regs_to_save.iter().enumerate() {
                 let offset = -(((callee_saved_count + alloc.spill_slots + 1 + i) * 8) as i32);
                 instrs.push(DtalInstr::SpillStore {
                     src: reg,
@@ -941,7 +1155,9 @@ fn allocate_instruction(
             // Call
             instrs.push(DtalInstr::Call {
                 target: target.clone(),
+                arg_kinds: arg_kinds.clone(),
                 return_ty: return_ty.clone(),
+                ownership: *ownership,
             });
 
             // Return value is in rax (LR). Move to the destination register
@@ -970,7 +1186,7 @@ fn allocate_instruction(
             // Correct approach: restore everything EXCEPT r0 now, and accept that
             // r0's pre-call value is lost. The register allocator should have placed
             // anything that needs to survive the call in a callee-saved register.
-            for (i, &reg) in caller_saved.iter().enumerate() {
+            for (i, &reg) in regs_to_save.iter().enumerate() {
                 if reg == r0_reg {
                     continue; // r0 now holds return value — don't overwrite
                 }
@@ -984,12 +1200,26 @@ fn allocate_instruction(
         }
 
         DtalInstr::Ret => {
-            // Move return value from R0 (rdi) to rax (x86 ABI)
-            instrs.push(DtalInstr::MovReg {
-                dst: RAX,
-                src: Reg::Physical(PhysicalReg::R0),
-                ty: func.return_type.clone(),
-            });
+            // Move return value to rax (x86 ABI). Unit carries no payload, so
+            // materialize a dummy scalar and retag it instead of reading a
+            // potentially-consumed source register.
+            if matches!(func.return_type, DtalType::Unit) {
+                instrs.push(DtalInstr::MovImm {
+                    dst: RAX,
+                    imm: 0,
+                    ty: DtalType::Int,
+                });
+                instrs.push(DtalInstr::TypeAnnotation {
+                    reg: RAX,
+                    ty: DtalType::Unit,
+                });
+            } else {
+                instrs.push(DtalInstr::MovReg {
+                    dst: RAX,
+                    src: Reg::Physical(PhysicalReg::R0),
+                    ty: func.return_type.clone(),
+                });
+            }
             // Epilogue must restore ALL saved registers (callee-saved + caller-saved
             // that were saved in the prologue for functions with calls)
             instrs.push(DtalInstr::Epilogue {
@@ -1110,6 +1340,7 @@ mod tests {
     use super::*;
     use crate::backend::emit::emit_program;
     use crate::pipeline;
+    use crate::verifier::verify_dtal;
 
     #[test]
     fn test_physalloc_simple() {
@@ -1249,5 +1480,39 @@ fn main() -> int {
             "Expected exit code 6 (4+2), got {:?}",
             status.code()
         );
+    }
+
+    #[test]
+    fn test_physalloc_verify_shared_borrow_call() {
+        let source = r#"
+fn inspect(r: &[int; 1]) -> int {
+    7
+}
+
+fn main() -> int {
+    let arr: [int; 1] = [0; 1];
+    inspect(&arr)
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        verify_dtal(&physical).expect("physical shared-borrow program should verify");
+    }
+
+    #[test]
+    fn test_physalloc_verify_mutable_borrow_call() {
+        let source = r#"
+fn touch(r: &mut [int; 1]) -> int {
+    9
+}
+
+fn main() -> int {
+    let mut arr: [int; 1] = [0; 1];
+    touch(&mut arr)
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        verify_dtal(&physical).expect("physical mutable-borrow program should verify");
     }
 }

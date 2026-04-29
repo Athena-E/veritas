@@ -1,12 +1,95 @@
 // Statement and program type checking
 
 use crate::common::ast::{Block, Expr, Function, Program, Stmt, Type as AstType};
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_expr};
 use im::HashMap;
 use std::sync::Arc;
+
+fn borrow_binding_target_name<'src>(expr: &Expr<'src>) -> Option<(&'src str, crate::common::ownership::BorrowKind)> {
+    match expr {
+        Expr::Borrow { kind, expr } => match &expr.0 {
+            Expr::Variable(name) => Some((name, *kind)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn reject_shadowing_borrowed_owner<'src>(
+    ctx: &TypingContext<'src>,
+    name: &str,
+    span: Span,
+) -> Result<(), TypeError<'src>> {
+    if ctx.is_borrowed(name) && ctx.lookup_borrow_binding(name).is_none() {
+        return Err(TypeError::BorrowConflict {
+            name: name.to_string(),
+            reason: "cannot shadow a binding while it is borrowed".to_string(),
+            span,
+        });
+    }
+    Ok(())
+}
+
+fn reject_mutating_borrowed_owner<'src>(
+    ctx: &TypingContext<'src>,
+    name: &str,
+    span: Span,
+) -> Result<(), TypeError<'src>> {
+    if ctx.is_borrowed(name) {
+        return Err(TypeError::BorrowConflict {
+            name: name.to_string(),
+            reason: "cannot mutate a binding while it is borrowed".to_string(),
+            span,
+        });
+    }
+    Ok(())
+}
+
+fn is_reference_type<'src>(ty: &IType<'src>) -> bool {
+    matches!(ty, IType::Ref(_) | IType::RefMut(_))
+}
+
+fn array_base_type<'src>(ty: &IType<'src>) -> Option<IType<'src>> {
+    match ty {
+        IType::Array { .. } => Some(ty.clone()),
+        IType::Ref(inner) | IType::RefMut(inner) => match inner.as_ref() {
+            IType::Array { .. } => Some(inner.as_ref().clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn reject_region_borrow_escape<'src>(
+    ctx: &TypingContext<'src>,
+    binding_name: &str,
+    binding_ty: &IType<'src>,
+    value: &Expr<'src>,
+    span: Span,
+) -> Result<(), TypeError<'src>> {
+    if ctx.bare_metal || !ctx.in_region_scope() || !is_reference_type(binding_ty) {
+        return Ok(());
+    }
+
+    if !matches!(value, Expr::Borrow { .. }) {
+        return Ok(());
+    }
+
+    if expr_depends_on_region_local_array(ctx, value) && !ctx.is_region_scoped_borrow(binding_name) {
+        return Err(TypeError::UnsupportedFeature {
+            feature:
+                "borrowing region-local arrays into bindings that survive a hosted region block is not yet supported"
+                    .to_string(),
+            span,
+        });
+    }
+
+    Ok(())
+}
 
 /// Recursively walk an expression and replace `arr[i]` subexpressions with their
 /// resolved concrete values from the typing context. Returns `(resolved_expr, any_resolved)`.
@@ -46,6 +129,20 @@ fn resolve_array_reads_in_expr<'src>(
                     Expr::UnaryOp {
                         op: *op,
                         cond: Box::new((new_cond, cond.1)),
+                    },
+                    true,
+                )
+            } else {
+                (expr.clone(), false)
+            }
+        }
+        Expr::Borrow { kind, expr: borrowed } => {
+            let (new_borrowed, resolved) = resolve_array_reads_in_expr(ctx, &borrowed.0);
+            if resolved {
+                (
+                    Expr::Borrow {
+                        kind: *kind,
+                        expr: Box::new((new_borrowed, borrowed.1)),
                     },
                     true,
                 )
@@ -107,11 +204,21 @@ pub fn check_stmt<'src>(
             value,
             is_mut: false,
         } => {
+            reject_shadowing_borrowed_owner(ctx, name, span)?;
+
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
             // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
+
+            if array_contains_reference_type(&ann_ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "storing references inside arrays is not yet supported".to_string(),
+                    span: ty.1,
+                });
+            }
 
             // Check value type is subtype of annotation
             if !is_subtype(ctx, &value_ty, &ann_ty) {
@@ -122,8 +229,35 @@ pub fn check_stmt<'src>(
                 });
             }
 
+            let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty, value.1)?;
+
             // Add to context with the synthesized type (more precise)
-            let mut new_ctx = ctx.with_immutable(name.to_string(), value_ty.clone());
+            let mut new_ctx = move_ctx.with_immutable(name.to_string(), value_ty.clone());
+            if matches!(ann_ty, IType::Ref(_) | IType::RefMut(_))
+                && !matches!(value.0, Expr::Borrow { .. })
+            {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "copying reference values is not yet supported".to_string(),
+                    span: value.1,
+                });
+            }
+            if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
+                new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
+            }
+            if !ctx.bare_metal && ctx.in_region_scope() && is_reference_type(&ann_ty) {
+                new_ctx = new_ctx.mark_region_scoped_borrow(name);
+            }
+            reject_region_borrow_escape(&new_ctx, name, &ann_ty, &value.0, value.1)?;
+            if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&value_ty) {
+                new_ctx = new_ctx.mark_region_scoped_array(name);
+            }
+            if !ctx.bare_metal
+                && ctx.in_region_scope()
+                && contains_array_type(&value_ty)
+                && expr_depends_on_region_local_array(ctx, &value.0)
+            {
+                new_ctx = new_ctx.mark_region_local_array(name);
+            }
 
             // Resolve array reads in the RHS expression and snapshot their values
             // so that subsequent mutations to the array don't drag this binding along.
@@ -153,7 +287,8 @@ pub fn check_stmt<'src>(
                 name: name.to_string(),
                 declared_ty: ann_ty,
                 value: tvalue,
-                checked_ty: value_ty,
+                checked_ty: value_ty.clone(),
+                ownership: explicit_transfer_ownership(ctx.bare_metal, &value.0, &value_ty),
             };
 
             Ok(((tstmt, span), new_ctx))
@@ -166,11 +301,21 @@ pub fn check_stmt<'src>(
             value,
             is_mut: true,
         } => {
+            reject_shadowing_borrowed_owner(ctx, name, span)?;
+
             // Synthesize type of initializer
             let (tvalue, value_ty) = synth_expr(ctx, value)?;
 
             // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
+
+            if array_contains_reference_type(&ann_ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "storing references inside arrays is not yet supported".to_string(),
+                    span: ty.1,
+                });
+            }
 
             // Check value type is subtype of annotation
             if !is_subtype(ctx, &value_ty, &ann_ty) {
@@ -189,7 +334,34 @@ pub fn check_stmt<'src>(
                 IType::Array { .. } | IType::RefinedInt { .. } => ann_ty.clone(),
                 _ => value_ty.clone(),
             };
-            let mut new_ctx = ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty, value.1)?;
+
+            let mut new_ctx = move_ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            if matches!(ann_ty, IType::Ref(_) | IType::RefMut(_))
+                && !matches!(value.0, Expr::Borrow { .. })
+            {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "copying reference values is not yet supported".to_string(),
+                    span: value.1,
+                });
+            }
+            if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
+                new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
+            }
+            if !ctx.bare_metal && ctx.in_region_scope() && is_reference_type(&ann_ty) {
+                new_ctx = new_ctx.mark_region_scoped_borrow(name);
+            }
+            reject_region_borrow_escape(&new_ctx, name, &ann_ty, &value.0, value.1)?;
+            if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&current_ty) {
+                new_ctx = new_ctx.mark_region_scoped_array(name);
+            }
+            if !ctx.bare_metal
+                && ctx.in_region_scope()
+                && contains_array_type(&current_ty)
+                && expr_depends_on_region_local_array(ctx, &value.0)
+            {
+                new_ctx = new_ctx.mark_region_local_array(name);
+            }
 
             // For mutable array init, add pointwise propositions for each index
             // rather than a single forall. This way, `arr[k] = v` only invalidates
@@ -260,6 +432,7 @@ pub fn check_stmt<'src>(
                 declared_ty: ann_ty,
                 value: tvalue,
                 checked_ty: current_ty,
+                ownership: explicit_transfer_ownership(ctx.bare_metal, &value.0, &value_ty),
             };
 
             Ok(((tstmt, span), new_ctx))
@@ -275,6 +448,30 @@ pub fn check_stmt<'src>(
             match &lhs.0 {
                 // Variable assignment
                 crate::common::ast::Expr::Variable(var_name) => {
+                    if ctx.lookup_borrow_binding(var_name).is_none() {
+                        reject_mutating_borrowed_owner(ctx, var_name, span)?;
+                    }
+
+                    let rhs_depends_on_region_local = !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && contains_array_type(&rhs_ty)
+                        && expr_depends_on_region_local_array(ctx, &rhs.0);
+
+                    if !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && contains_array_type(&rhs_ty)
+                        && rhs_depends_on_region_local
+                        && !ctx.is_region_local_array(var_name)
+                        && !ctx.is_region_scoped_array(var_name)
+                    {
+                        return Err(TypeError::UnsupportedFeature {
+                            feature:
+                                "assigning whole arrays inside a hosted region block is not yet supported"
+                                    .to_string(),
+                            span: rhs.1,
+                        });
+                    }
+
                     // Look up mutable variable
                     let binding =
                         ctx.lookup_mutable(var_name)
@@ -289,6 +486,19 @@ pub fn check_stmt<'src>(
                         _ => &binding.master_type,
                     };
 
+                    if !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && is_reference_type(master_base)
+                        && !ctx.is_region_scoped_borrow(var_name)
+                    {
+                        return Err(TypeError::UnsupportedFeature {
+                            feature:
+                                "reassigning reference bindings that outlive a hosted region block is not yet supported"
+                                    .to_string(),
+                            span: rhs.1,
+                        });
+                    }
+
                     if !check_expr_satisfies_refined(ctx, &rhs.0, &rhs_ty, master_base) {
                         return Err(TypeError::TypeMismatch {
                             expected: master_base.clone(),
@@ -298,13 +508,42 @@ pub fn check_stmt<'src>(
                     }
 
                     // Update mutable variable's current type
+                    let move_ctx = if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name)
+                    {
+                        apply_call_argument_moves(ctx, &rhs.0)?
+                    } else {
+                        apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?
+                    };
+
                     let mut new_ctx =
-                        ctx.with_mutable_update(var_name, rhs_ty.clone())
+                        move_ctx.with_mutable_update(var_name, rhs_ty.clone())
                             .map_err(|e| TypeError::InvalidAssignment {
                                 variable: var_name.to_string(),
                                 reason: e,
                                 span,
                             })?;
+
+                    new_ctx = new_ctx.release_borrow_binding(var_name);
+                    reject_region_borrow_escape(ctx, var_name, master_base, &rhs.0, rhs.1)?;
+                    if matches!(master_base, IType::Ref(_) | IType::RefMut(_))
+                        && !matches!(rhs.0, Expr::Borrow { .. })
+                    {
+                        return Err(TypeError::UnsupportedFeature {
+                            feature: "copying reference values is not yet supported".to_string(),
+                            span: rhs.1,
+                        });
+                    }
+                    if let Some((owner_name, kind)) = borrow_binding_target_name(&rhs.0) {
+                        new_ctx = new_ctx.add_borrow_binding(var_name, owner_name, kind);
+                    }
+
+                    if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&rhs_ty) {
+                        if rhs_depends_on_region_local {
+                            new_ctx = new_ctx.mark_region_local_array(var_name);
+                        } else if ctx.is_region_scoped_array(var_name) {
+                            new_ctx = new_ctx.clear_region_local_array(var_name);
+                        }
+                    }
 
                     // Resolve array reads in the RHS and snapshot their values
                     let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
@@ -333,6 +572,11 @@ pub fn check_stmt<'src>(
                     let tstmt = TStmt::Assignment {
                         lhs: (tlhs_expr, lhs.1),
                         rhs: trhs,
+                        ownership: if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name) {
+                            OwnershipMode::Plain
+                        } else {
+                            explicit_transfer_ownership(ctx.bare_metal, &rhs.0, &rhs_ty)
+                        },
                     };
 
                     Ok(((tstmt, span), new_ctx))
@@ -340,6 +584,10 @@ pub fn check_stmt<'src>(
 
                 // Array indexing assignment
                 crate::common::ast::Expr::Index { base, index } => {
+                    if let Expr::Variable(arr_name) = &base.0 {
+                        reject_mutating_borrowed_owner(ctx, arr_name, span)?;
+                    }
+
                     let (tbase, base_ty) = synth_expr(ctx, base)?;
                     let (tindex, index_ty) = synth_expr(ctx, index)?;
 
@@ -352,24 +600,46 @@ pub fn check_stmt<'src>(
                         });
                     }
 
-                    // Check array type and extract element type
+                    // Check array/reference-to-array type and extract element type
                     let (elem_ty, array_size) = match &base_ty {
-                        IType::Array { element_type, size } => (element_type.as_ref(), size),
-                        _ => {
-                            return Err(TypeError::NotAnArray {
-                                found: base_ty,
+                        IType::Ref(_) => {
+                            let name = if let Expr::Variable(name) = &base.0 {
+                                name.to_string()
+                            } else {
+                                "<ref>".to_string()
+                            };
+                            return Err(TypeError::BorrowConflict {
+                                name,
+                                reason: "cannot assign through a shared reference".to_string(),
                                 span: base.1,
                             });
                         }
+                        _ => match array_base_type(&base_ty) {
+                            Some(IType::Array { element_type, size }) => {
+                                (element_type.as_ref().clone(), size.clone())
+                            }
+                            Some(other) => {
+                                return Err(TypeError::NotAnArray {
+                                    found: other,
+                                    span: base.1,
+                                });
+                            }
+                            None => {
+                                return Err(TypeError::NotAnArray {
+                                    found: base_ty,
+                                    span: base.1,
+                                });
+                            }
+                        },
                     };
 
                     // Check array bounds using the actual index expression
                     crate::frontend::typechecker::check_array_bounds_expr(
-                        ctx, &index.0, &index_ty, array_size, &base_ty, index.1,
+                        ctx, &index.0, &index_ty, &array_size, &base_ty, index.1,
                     )?;
 
                     // Check value type matches element type
-                    if !is_subtype(ctx, &rhs_ty, elem_ty) {
+                    if !is_subtype(ctx, &rhs_ty, &elem_ty) {
                         return Err(TypeError::TypeMismatch {
                             expected: elem_ty.clone(),
                             found: rhs_ty,
@@ -384,15 +654,18 @@ pub fn check_stmt<'src>(
                         ty: elem_ty.clone(),
                     };
 
+                    let move_ctx = apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?;
+
                     let tstmt = TStmt::Assignment {
                         lhs: (tlhs_expr, lhs.1),
                         rhs: trhs,
+                        ownership: OwnershipMode::Plain,
                     };
 
                     // Add pointwise proposition: arr[i]...[k] == rhs.
                     // Supports nested index chains (2D+) by extracting the root
                     // array name and the full index tuple.
-                    let mut new_ctx = ctx.clone();
+                    let mut new_ctx = move_ctx.clone();
 
                     if let Some((arr_name, indices)) = extract_array_access(&lhs.0) {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
@@ -432,6 +705,88 @@ pub fn check_stmt<'src>(
                     Ok(((tstmt, span), new_ctx))
                 }
 
+                crate::common::ast::Expr::UnaryOp {
+                    op: crate::common::ast::UnaryOp::Deref,
+                    ..
+                } => {
+                    let (tlhs, _lhs_ty) = synth_expr(ctx, lhs)?;
+                    let (owner_name, kind, pointee_ty, ref_name) = match &tlhs.0 {
+                        TExpr::Deref {
+                            owner, kind, ty, ..
+                        } => {
+                            let ref_name = match &lhs.0 {
+                                crate::common::ast::Expr::UnaryOp { cond, .. } => match &cond.0 {
+                                    crate::common::ast::Expr::Variable(name) => Some((*name).to_string()),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+                            (owner.clone(), *kind, ty.clone(), ref_name)
+                        }
+                        _ => {
+                            return Err(TypeError::UnsupportedFeature {
+                                feature: "dereference assignment target must be a reference binding".to_string(),
+                                span: lhs.1,
+                            });
+                        }
+                    };
+
+                    if kind.is_shared() {
+                        return Err(TypeError::BorrowConflict {
+                            name: owner_name
+                                .clone()
+                                .or(ref_name)
+                                .unwrap_or_else(|| "<ref>".to_string()),
+                            reason: "cannot assign through a shared reference".to_string(),
+                            span: lhs.1,
+                        });
+                    }
+                    if !is_subtype(ctx, &rhs_ty, &pointee_ty) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: pointee_ty.clone(),
+                            found: rhs_ty,
+                            span: rhs.1,
+                        });
+                    }
+
+                    let move_ctx = apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?;
+                    let mut new_ctx = if let Some(owner_name) = owner_name.as_ref() {
+                        move_ctx
+                            .with_mutable_update(owner_name, rhs_ty.clone())
+                            .map_err(|reason| TypeError::InvalidAssignment {
+                                variable: owner_name.clone(),
+                                reason,
+                                span: lhs.1,
+                            })?
+                    } else {
+                        move_ctx
+                    };
+
+                    let tlhs_expr = TExpr::Deref {
+                        expr: match tlhs.0 {
+                            TExpr::Deref { expr, .. } => expr,
+                            _ => unreachable!(),
+                        },
+                        owner: owner_name.clone(),
+                        kind,
+                        ty: pointee_ty,
+                    };
+
+                    let tstmt = TStmt::Assignment {
+                        lhs: (tlhs_expr, lhs.1),
+                        rhs: trhs,
+                        ownership: OwnershipMode::Plain,
+                    };
+
+                    if let Some(owner_name) = owner_name.as_ref()
+                        && let Some(prop) = postcondition_for_call(&new_ctx, owner_name, &rhs.0)
+                    {
+                        new_ctx = new_ctx.with_proposition(prop);
+                    }
+
+                    Ok(((tstmt, span), new_ctx))
+                }
+
                 _ => Err(TypeError::InvalidAssignment {
                     variable: format!("{:?}", lhs.0),
                     reason: "Invalid assignment target".to_string(),
@@ -442,6 +797,15 @@ pub fn check_stmt<'src>(
 
         // RETURN: Return statement
         Stmt::Return { expr } => {
+            if !ctx.bare_metal && ctx.in_region_scope() {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "returning from inside a hosted region block is not yet supported"
+                            .to_string(),
+                    span: expr.1,
+                });
+            }
+
             let (texpr, ret_ty) = synth_expr(ctx, expr)?;
 
             // Check return type matches expected return type
@@ -468,11 +832,14 @@ pub fn check_stmt<'src>(
                 }
             }
 
-            let tstmt = TStmt::Return {
-                expr: Box::new(texpr),
-            };
+            let move_ctx = apply_whole_value_move(ctx, &expr.0, &ret_ty, expr.1)?;
 
-            Ok(((tstmt, span), ctx.clone()))
+                    let tstmt = TStmt::Return {
+                        expr: Box::new(texpr),
+                        ownership: explicit_transfer_ownership(ctx.bare_metal, &expr.0, &ret_ty),
+                    };
+
+            Ok(((tstmt, span), move_ctx))
         }
 
         // FOR-LOOP: For loop with range and optional invariant
@@ -590,7 +957,9 @@ pub fn check_stmt<'src>(
             };
 
             // Check body statements with invariant in context
-            let (tbody, body_ctx) = check_stmts(&loop_ctx, &body.statements)?;
+            let scoped_loop_ctx = loop_ctx.enter_borrow_scope();
+            let (tbody, body_ctx) = check_stmts(&scoped_loop_ctx, &body.statements)?;
+            let body_ctx = body_ctx.exit_borrow_scope();
 
             // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
@@ -738,7 +1107,9 @@ pub fn check_stmt<'src>(
             };
 
             // Step 3: Check body statements
-            let (tbody, body_ctx) = check_stmts(&loop_ctx, &body.statements)?;
+            let scoped_loop_ctx = loop_ctx.enter_borrow_scope();
+            let (tbody, body_ctx) = check_stmts(&scoped_loop_ctx, &body.statements)?;
+            let body_ctx = body_ctx.exit_borrow_scope();
 
             // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
@@ -799,6 +1170,13 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), post_ctx))
         }
 
+        Stmt::Region { body } => {
+            let region_ctx = ctx.enter_region_scope();
+            let (tbody, final_region_ctx) = check_block_as_stmt(&region_ctx, body)?;
+            let tstmt = TStmt::Region { body: tbody };
+            Ok(((tstmt, span), ctx.merge_region_exit(&final_region_ctx)))
+        }
+
         // EXPR-STMT: Expression statement
         // Special handling for if-expressions to support context joining
         Stmt::Expr(expr) => {
@@ -813,7 +1191,7 @@ pub fn check_stmt<'src>(
                 _ => {
                     let (texpr, _) = synth_expr(ctx, expr)?;
                     let tstmt = TStmt::Expr(texpr);
-                    Ok(((tstmt, span), ctx.clone()))
+                    Ok(((tstmt, span), apply_call_argument_moves(ctx, &expr.0)?))
                 }
             }
         }
@@ -855,6 +1233,9 @@ fn collect_array_modifications_inner<'src>(
                 }
             }
             Stmt::For { body, .. } => {
+                collect_array_modifications_inner(&body.statements, modifications);
+            }
+            Stmt::Region { body } => {
                 collect_array_modifications_inner(&body.statements, modifications);
             }
             _ => {}
@@ -933,7 +1314,8 @@ fn check_block_as_stmt<'src>(
     ctx: &TypingContext<'src>,
     block: &Block<'src>,
 ) -> Result<(TBlock<'src>, TypingContext<'src>), TypeError<'src>> {
-    let (typed_stmts, stmts_ctx) = check_stmts(ctx, &block.statements)?;
+    let scoped_ctx = ctx.enter_borrow_scope();
+    let (typed_stmts, stmts_ctx) = check_stmts(&scoped_ctx, &block.statements)?;
 
     // If there's a trailing expression, check it and thread context
     if let Some(trailing) = &block.trailing_expr {
@@ -959,7 +1341,7 @@ fn check_block_as_stmt<'src>(
                         statements: all_stmts,
                         trailing_expr: None,
                     },
-                    final_ctx,
+                    final_ctx.exit_borrow_scope(),
                 ))
             }
             // Other trailing expressions: synthesize and include
@@ -970,7 +1352,7 @@ fn check_block_as_stmt<'src>(
                         statements: typed_stmts,
                         trailing_expr: Some(Box::new(texpr)),
                     },
-                    stmts_ctx,
+                    stmts_ctx.exit_borrow_scope(),
                 ))
             }
         }
@@ -980,7 +1362,7 @@ fn check_block_as_stmt<'src>(
                 statements: typed_stmts,
                 trailing_expr: None,
             },
-            stmts_ctx,
+            stmts_ctx.exit_borrow_scope(),
         ))
     }
 }
@@ -1020,10 +1402,25 @@ pub fn check_function<'src>(
 
     let return_type = ast_type_to_itype(&func_inner.return_type)?;
 
+    if matches!(return_type, IType::Ref(_) | IType::RefMut(_)) {
+        return Err(TypeError::UnsupportedFeature {
+            feature: "returning references is not yet supported".to_string(),
+            span: func_inner.return_type.1,
+        });
+    }
+
     // Create context with parameters and expected return type
     let mut func_ctx = global_ctx.clone();
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
+
+        if array_contains_reference_type(ty) {
+            return Err(TypeError::UnsupportedFeature {
+                feature:
+                    "storing references inside arrays is not yet supported".to_string(),
+                span: spanned_param.1,
+            });
+        }
 
         // Reject nested arrays with a symbolic inner dimension. The backend
         // needs a concrete stride to flatten multi-dim access, so only the
@@ -1092,7 +1489,8 @@ pub fn check_function<'src>(
     }
     func_ctx = func_ctx.with_current_function(func_inner.name.to_string());
 
-    let (tbody, final_ctx) = check_stmts(&func_ctx, &func_inner.body.statements)?;
+    let scoped_func_ctx = func_ctx.enter_borrow_scope();
+    let (tbody, final_ctx) = check_stmts(&scoped_func_ctx, &func_inner.body.statements)?;
 
     // Check if body contains any return statements
     fn has_return_stmt(stmts: &[Spanned<TStmt>]) -> bool {
@@ -1165,7 +1563,14 @@ pub fn check_function<'src>(
     let tfunc = TFunction {
         name: func_inner.name.to_string(),
         parameters: tparams,
+        parameter_kinds: global_ctx
+            .lookup_function(func_inner.name)
+            .map(|sig| sig.parameter_kinds.clone())
+            .unwrap_or_else(|| vec![ParameterKind::PlainValue; func_inner.parameters.len()]),
         return_type,
+        returns_owned: global_ctx
+            .lookup_function(func_inner.name)
+            .is_some_and(|sig| sig.returns_owned),
         precondition,
         postcondition,
         body: TFunctionBody {
@@ -1215,11 +1620,45 @@ fn check_program_with_options<'src>(
         for spanned_param in &func.parameters {
             let param = &spanned_param.0;
             let ty = ast_type_to_itype(&param.ty)?;
+            if array_contains_reference_type(&ty) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature:
+                        "storing references inside arrays is not yet supported".to_string(),
+                    span: spanned_param.1,
+                });
+            }
             parameters.push((param.name.to_string(), ty));
         }
 
         // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
+        if matches!(return_type, IType::Ref(_) | IType::RefMut(_)) {
+            return Err(TypeError::UnsupportedFeature {
+                feature: "returning references is not yet supported".to_string(),
+                span: func.return_type.1,
+            });
+        }
+        if array_contains_reference_type(&return_type) {
+            return Err(TypeError::UnsupportedFeature {
+                feature:
+                    "storing references inside arrays is not yet supported".to_string(),
+                span: func.return_type.1,
+            });
+        }
+        let returns_owned =
+            !bare_metal && contains_array_type(&return_type) && func.name != "main";
+        let return_ownership = if returns_owned {
+            OwnershipMode::FreshOwned
+        } else {
+            OwnershipMode::Plain
+        };
+        if !bare_metal && contains_array_type(&return_type) && func.name == "main" {
+            return Err(TypeError::UnsupportedFeature {
+                feature:
+                    "returning arrays from hosted main is not yet supported with function-local region allocation".to_string(),
+                span: *func_span,
+            });
+        }
 
         // Convert precondition to IProposition
         let precondition = func.precondition.as_ref().map(|precond_expr| {
@@ -1263,10 +1702,15 @@ fn check_program_with_options<'src>(
             }
         }
 
+        let parameter_kinds = infer_parameter_kinds(&func);
+
         let sig = FunctionSignature {
             name: func.name.to_string(),
             parameters,
+            parameter_kinds,
             return_type,
+            return_ownership,
+            returns_owned,
             precondition,
             postcondition,
             span: *func_span,
@@ -1285,7 +1729,10 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "print_int".into(),
                 parameters: vec![("n".into(), IType::Int)],
+                parameter_kinds: vec![ParameterKind::PlainValue],
                 return_type: IType::Unit,
+                return_ownership: OwnershipMode::Plain,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 span: dummy_span,
@@ -1296,7 +1743,10 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "print_char".into(),
                 parameters: vec![("c".into(), IType::Int)],
+                parameter_kinds: vec![ParameterKind::PlainValue],
                 return_type: IType::Unit,
+                return_ownership: OwnershipMode::Plain,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 span: dummy_span,
@@ -1307,7 +1757,10 @@ fn check_program_with_options<'src>(
             FunctionSignature {
                 name: "read_int".into(),
                 parameters: vec![],
+                parameter_kinds: vec![],
                 return_type: IType::Int,
+                return_ownership: OwnershipMode::Plain,
+                returns_owned: false,
                 precondition: None,
                 postcondition: None,
                 span: dummy_span,
@@ -1321,7 +1774,10 @@ fn check_program_with_options<'src>(
         FunctionSignature {
             name: "port_in".into(),
             parameters: vec![("port".into(), IType::Int)],
+            parameter_kinds: vec![ParameterKind::PlainValue],
             return_type: IType::Int,
+            return_ownership: OwnershipMode::Plain,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             span: dummy_span,
@@ -1332,7 +1788,10 @@ fn check_program_with_options<'src>(
         FunctionSignature {
             name: "port_out".into(),
             parameters: vec![("port".into(), IType::Int), ("value".into(), IType::Int)],
+            parameter_kinds: vec![ParameterKind::PlainValue, ParameterKind::PlainValue],
             return_type: IType::Unit,
+            return_ownership: OwnershipMode::Plain,
+            returns_owned: false,
             precondition: None,
             postcondition: None,
             span: dummy_span,
@@ -1341,6 +1800,7 @@ fn check_program_with_options<'src>(
 
     let mut global_ctx = TypingContext::with_functions(signatures);
     global_ctx.check_overflow = check_overflow;
+    global_ctx.bare_metal = bare_metal;
 
     // Process constant declarations — add as immutable singleton bindings
     for (constant, _span) in &program.constants {
@@ -1626,6 +2086,411 @@ fn inner_has_symbolic<'src>(ty: &IType<'src>) -> bool {
     }
 }
 
+fn contains_array_type<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { .. } => true,
+        IType::RefinedInt { base, .. } => contains_array_type(base),
+        _ => false,
+    }
+}
+
+fn array_contains_reference_type<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Array { element_type, .. } => {
+            matches!(element_type.as_ref(), IType::Ref(_) | IType::RefMut(_))
+                || array_contains_reference_type(element_type)
+        }
+        IType::RefinedInt { base, .. } => array_contains_reference_type(base),
+        _ => false,
+    }
+}
+
+fn source_type_contains_array<'src>(ty: &AstType<'src>) -> bool {
+    match ty {
+        AstType::Array { .. } => true,
+        AstType::Ref(inner) | AstType::RefMut(inner) => source_type_contains_array(&inner.0),
+        AstType::Unit
+        | AstType::Int
+        | AstType::I64
+        | AstType::U64
+        | AstType::Bool
+        | AstType::SingletonInt(_)
+        | AstType::RefinedInt { .. }
+        | AstType::RefinedI64 { .. }
+        | AstType::RefinedU64 { .. } => false,
+    }
+}
+
+fn infer_parameter_kinds<'src>(func: &Function<'src>) -> Vec<ParameterKind> {
+    func.parameters
+        .iter()
+        .map(|param| {
+            match &param.0.ty.0 {
+                AstType::Ref(_) => return ParameterKind::SharedBorrow,
+                AstType::RefMut(_) => return ParameterKind::MutableBorrow,
+                _ => {}
+            }
+            if !source_type_contains_array(&param.0.ty.0) {
+                return ParameterKind::PlainValue;
+            }
+            if block_consumes_variable(&func.body, param.0.name)
+                || func
+                    .body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_is_whole_value_variable(&expr.0, param.0.name))
+            {
+                ParameterKind::OwnedValue
+            } else {
+                ParameterKind::SharedBorrow
+            }
+        })
+        .collect()
+}
+
+fn block_consumes_variable<'src>(block: &Block<'src>, name: &str) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|stmt| stmt_consumes_variable(&stmt.0, name))
+        || block
+            .trailing_expr
+            .as_ref()
+            .is_some_and(|expr| expr_consumes_variable(&expr.0, name))
+}
+
+fn stmt_consumes_variable<'src>(stmt: &Stmt<'src>, name: &str) -> bool {
+    match stmt {
+        Stmt::Let { value, .. } => expr_is_whole_value_variable(&value.0, name),
+        Stmt::Assignment { rhs, .. } => expr_is_whole_value_variable(&rhs.0, name),
+        Stmt::Return { expr } => expr_is_whole_value_variable(&expr.0, name),
+        Stmt::Expr(expr) => expr_consumes_variable(&expr.0, name),
+        Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::Region { body } => {
+            block_consumes_variable(body, name)
+        }
+    }
+}
+
+fn expr_consumes_variable<'src>(expr: &Expr<'src>, name: &str) -> bool {
+    match expr {
+        Expr::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            block_consumes_variable(then_block, name)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_consumes_variable(block, name))
+        }
+        _ => expr_is_whole_value_variable(expr, name),
+    }
+}
+
+fn expr_is_whole_value_variable<'src>(expr: &Expr<'src>, name: &str) -> bool {
+    matches!(expr, Expr::Variable(var_name) if *var_name == name)
+}
+
+fn expr_mentions_var<'src>(expr: &Expr<'src>, name: &str) -> bool {
+    match expr {
+        Expr::Variable(var) => *var == name,
+        Expr::Literal(_) | Expr::Error => false,
+        Expr::BinOp { lhs, rhs, .. } => {
+            expr_mentions_var(&lhs.0, name) || expr_mentions_var(&rhs.0, name)
+        }
+        Expr::UnaryOp { cond, .. } => expr_mentions_var(&cond.0, name),
+        Expr::Borrow { expr, .. } => expr_mentions_var(&expr.0, name),
+        Expr::Index { base, index } => {
+            expr_mentions_var(&base.0, name) || expr_mentions_var(&index.0, name)
+        }
+        Expr::Call { args, .. } => args.0.iter().any(|arg| expr_mentions_var(&arg.0, name)),
+        Expr::ArrayInit { value, length } => {
+            expr_mentions_var(&value.0, name) || expr_mentions_var(&length.0, name)
+        }
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            expr_mentions_var(&cond.0, name)
+                || then_block
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_mentions_var(&stmt.0, name))
+                || then_block
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_mentions_var(&expr.0, name))
+                || else_block.as_ref().is_some_and(|block| {
+                    block.statements
+                        .iter()
+                        .any(|stmt| stmt_mentions_var(&stmt.0, name))
+                        || block
+                            .trailing_expr
+                            .as_ref()
+                            .is_some_and(|expr| expr_mentions_var(&expr.0, name))
+                })
+        }
+        Expr::Forall {
+            var,
+            start,
+            end,
+            body,
+        }
+        | Expr::Exists {
+            var,
+            start,
+            end,
+            body,
+        } => {
+            expr_mentions_var(&start.0, name)
+                || expr_mentions_var(&end.0, name)
+                || (*var != name && expr_mentions_var(&body.0, name))
+        }
+    }
+}
+
+fn stmt_mentions_var<'src>(stmt: &Stmt<'src>, name: &str) -> bool {
+    match stmt {
+        Stmt::Let { value, .. } => expr_mentions_var(&value.0, name),
+        Stmt::Assignment { lhs, rhs } => {
+            expr_mentions_var(&lhs.0, name) || expr_mentions_var(&rhs.0, name)
+        }
+        Stmt::Return { expr } => expr_mentions_var(&expr.0, name),
+        Stmt::Expr(expr) => expr_mentions_var(&expr.0, name),
+        Stmt::For {
+            var,
+            start,
+            end,
+            body,
+            ..
+        } => {
+            expr_mentions_var(&start.0, name)
+                || expr_mentions_var(&end.0, name)
+                || (*var != name
+                    && body
+                        .statements
+                        .iter()
+                        .any(|stmt| stmt_mentions_var(&stmt.0, name)))
+        }
+        Stmt::While {
+            condition, body, ..
+        } => {
+            expr_mentions_var(&condition.0, name)
+                || body
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_mentions_var(&stmt.0, name))
+        }
+        Stmt::Region { body } => body
+            .statements
+            .iter()
+            .any(|stmt| stmt_mentions_var(&stmt.0, name)),
+    }
+}
+
+fn invalidate_moved_binding_props<'src>(ctx: &TypingContext<'src>, name: &str) -> TypingContext<'src> {
+    ctx.retain_propositions(|prop| prop.var != name && !expr_mentions_var(&prop.predicate.0, name))
+}
+
+fn consume_owned_variable<'src>(ctx: &TypingContext<'src>, name: &str) -> TypingContext<'src> {
+    invalidate_moved_binding_props(ctx, name).mark_moved(name)
+}
+
+fn apply_call_argument_moves<'src>(
+    ctx: &TypingContext<'src>,
+    expr: &Expr<'src>,
+) -> Result<TypingContext<'src>, TypeError<'src>> {
+    match expr {
+        Expr::Call { func_name, args } => {
+            let mut new_ctx = ctx.clone();
+            if let Some(sig) = ctx.lookup_function(func_name) {
+                for (((arg_expr, _), (_param_name, param_ty)), arg_kind) in args
+                    .0
+                    .iter()
+                    .zip(sig.parameters.iter())
+                    .zip(sig.parameter_kinds.iter())
+                {
+                    new_ctx = apply_call_argument_moves(&new_ctx, arg_expr)?;
+                    if arg_kind.is_owned_value()
+                        && !new_ctx.bare_metal
+                        && contains_array_type(param_ty)
+                        && let Expr::Variable(name) = arg_expr
+                    {
+                        if new_ctx.is_borrowed(name) {
+                            return Err(TypeError::BorrowConflict {
+                                name: name.to_string(),
+                                reason: "cannot move a binding while it is borrowed".to_string(),
+                                span: args.1,
+                            });
+                        }
+                        new_ctx = consume_owned_variable(&new_ctx, name);
+                    }
+                }
+            }
+            Ok(new_ctx)
+        }
+        Expr::BinOp { lhs, rhs, .. } => {
+            let after_lhs = apply_call_argument_moves(ctx, &lhs.0)?;
+            apply_call_argument_moves(&after_lhs, &rhs.0)
+        }
+        Expr::UnaryOp { cond, .. } => apply_call_argument_moves(ctx, &cond.0),
+        Expr::Borrow { expr, .. } => apply_call_argument_moves(ctx, &expr.0),
+        Expr::Index { base, index } => {
+            let after_base = apply_call_argument_moves(ctx, &base.0)?;
+            apply_call_argument_moves(&after_base, &index.0)
+        }
+        Expr::ArrayInit { value, length } => {
+            let after_value = apply_call_argument_moves(ctx, &value.0)?;
+            apply_call_argument_moves(&after_value, &length.0)
+        }
+        _ => Ok(ctx.clone()),
+    }
+}
+
+fn apply_whole_value_move<'src>(
+    ctx: &TypingContext<'src>,
+    expr: &Expr<'src>,
+    ty: &IType<'src>,
+    span: Span,
+) -> Result<TypingContext<'src>, TypeError<'src>> {
+    let new_ctx = apply_call_argument_moves(ctx, expr)?;
+    if !new_ctx.bare_metal && contains_array_type(ty) && let Expr::Variable(name) = expr {
+        if new_ctx.is_borrowed(name) {
+            return Err(TypeError::BorrowConflict {
+                name: name.to_string(),
+                reason: "cannot move a binding while it is borrowed".to_string(),
+                span,
+            });
+        }
+        return Ok(consume_owned_variable(&new_ctx, name));
+    }
+    Ok(new_ctx)
+}
+
+fn explicit_transfer_ownership<'src>(
+    bare_metal: bool,
+    expr: &Expr<'src>,
+    ty: &IType<'src>,
+) -> OwnershipMode {
+    if bare_metal || !contains_array_type(ty) {
+        return OwnershipMode::Plain;
+    }
+
+    match expr {
+        Expr::Variable(_) => OwnershipMode::Consume,
+        Expr::ArrayInit { .. } => OwnershipMode::FreshOwned,
+        _ => OwnershipMode::Plain,
+    }
+}
+
+fn expr_depends_on_region_local_array<'src>(
+    ctx: &TypingContext<'src>,
+    expr: &Expr<'src>,
+) -> bool {
+    match expr {
+        Expr::Variable(name) => ctx.is_region_local_array(name),
+        Expr::ArrayInit { .. } => ctx.in_region_scope() && !ctx.bare_metal,
+        Expr::BinOp { lhs, rhs, .. } => {
+            expr_depends_on_region_local_array(ctx, &lhs.0)
+                || expr_depends_on_region_local_array(ctx, &rhs.0)
+        }
+        Expr::UnaryOp { cond, .. } => expr_depends_on_region_local_array(ctx, &cond.0),
+        Expr::Borrow { expr, .. } => expr_depends_on_region_local_array(ctx, &expr.0),
+        Expr::Call { args, .. } => args
+            .0
+            .iter()
+            .any(|arg| expr_depends_on_region_local_array(ctx, &arg.0)),
+        Expr::Index { base, index } => {
+            expr_depends_on_region_local_array(ctx, &base.0)
+                || expr_depends_on_region_local_array(ctx, &index.0)
+        }
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            expr_depends_on_region_local_array(ctx, &cond.0)
+                || then_block
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || then_block
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+                || else_block.as_ref().is_some_and(|block| {
+                    block.statements
+                        .iter()
+                        .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                        || block
+                            .trailing_expr
+                            .as_ref()
+                            .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+                })
+        }
+        Expr::Forall {
+            start, end, body, ..
+        }
+        | Expr::Exists {
+            start, end, body, ..
+        } => {
+            expr_depends_on_region_local_array(ctx, &start.0)
+                || expr_depends_on_region_local_array(ctx, &end.0)
+                || expr_depends_on_region_local_array(ctx, &body.0)
+        }
+        Expr::Literal(_) | Expr::Error => false,
+    }
+}
+
+fn stmt_depends_on_region_local_array<'src>(
+    ctx: &TypingContext<'src>,
+    stmt: &Stmt<'src>,
+) -> bool {
+    match stmt {
+        Stmt::Let { value, .. } => expr_depends_on_region_local_array(ctx, &value.0),
+        Stmt::Assignment { lhs, rhs } => {
+            expr_depends_on_region_local_array(ctx, &lhs.0)
+                || expr_depends_on_region_local_array(ctx, &rhs.0)
+        }
+        Stmt::Return { expr } => expr_depends_on_region_local_array(ctx, &expr.0),
+        Stmt::Expr(expr) => expr_depends_on_region_local_array(ctx, &expr.0),
+        Stmt::For {
+            start, end, body, ..
+        } => {
+            expr_depends_on_region_local_array(ctx, &start.0)
+                || expr_depends_on_region_local_array(ctx, &end.0)
+                || body
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+        }
+        Stmt::While { condition, body, .. } => {
+            expr_depends_on_region_local_array(ctx, &condition.0)
+                || body
+                    .statements
+                    .iter()
+                    .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+        }
+        Stmt::Region { body } => body
+            .statements
+            .iter()
+            .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+            || body
+                .trailing_expr
+                .as_ref()
+                .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0)),
+    }
+}
+
 /// Substitute a variable with a literal integer in an expression
 pub(super) fn substitute_var_with_literal<'src>(
     expr: &crate::common::ast::Expr<'src>,
@@ -1649,6 +2514,13 @@ pub(super) fn substitute_var_with_literal<'src>(
             cond: Box::new((
                 substitute_var_with_literal(&cond.0, var_name, value),
                 cond.1,
+            )),
+        },
+        Expr::Borrow { kind, expr } => Expr::Borrow {
+            kind: *kind,
+            expr: Box::new((
+                substitute_var_with_literal(&expr.0, var_name, value),
+                expr.1,
             )),
         },
         Expr::Call { func_name, args } => Expr::Call {
@@ -1830,6 +2702,19 @@ fn substitute_var_in_stmt<'src>(
             invariant: invariant
                 .as_ref()
                 .map(|(inv, span)| (substitute_var_with_literal(inv, var_name, value), *span)),
+            body: Block {
+                statements: body
+                    .statements
+                    .iter()
+                    .map(|(s, span)| (substitute_var_in_stmt(s, var_name, value), *span))
+                    .collect(),
+                trailing_expr: body
+                    .trailing_expr
+                    .as_ref()
+                    .map(|e| Box::new((substitute_var_with_literal(&e.0, var_name, value), e.1))),
+            },
+        },
+        Stmt::Region { body } => Stmt::Region {
             body: Block {
                 statements: body
                     .statements
@@ -2034,6 +2919,7 @@ fn find_invalid_free_var<'src>(
         Expr::BinOp { lhs, rhs, .. } => find_invalid_free_var(&lhs.0, allowed)
             .or_else(|| find_invalid_free_var(&rhs.0, allowed)),
         Expr::UnaryOp { cond, .. } => find_invalid_free_var(&cond.0, allowed),
+        Expr::Borrow { expr, .. } => find_invalid_free_var(&expr.0, allowed),
         Expr::Index { base, index } => find_invalid_free_var(&base.0, allowed)
             .or_else(|| find_invalid_free_var(&index.0, allowed)),
         Expr::Call { args, .. } => args
@@ -2123,6 +3009,14 @@ fn find_invalid_free_var_in_stmt<'src>(
             if let Some(v) = find_invalid_free_var(&condition.0, allowed) {
                 return Some(v);
             }
+            for (s, _) in &body.statements {
+                if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        Stmt::Region { body } => {
             for (s, _) in &body.statements {
                 if let Some(v) = find_invalid_free_var_in_stmt(s, allowed) {
                     return Some(v);

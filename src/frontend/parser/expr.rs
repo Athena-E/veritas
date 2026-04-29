@@ -1,5 +1,6 @@
 use super::types::type_parser;
 use crate::common::ast::{BinOp, Block, Expr, Literal, Stmt, Token, UnaryOp};
+use crate::common::ownership::BorrowKind;
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
@@ -10,6 +11,15 @@ where
     I: ValueInput<'tokens, Token = Token<'src>, Span = Span>,
 {
     recursive(|expr| {
+        #[derive(Clone, Copy)]
+        enum PrefixOp {
+            Not,
+            Neg,
+            Deref,
+            BorrowShared,
+            BorrowMut,
+        }
+
         // Literals
         let lit = select! {
             Token::Num(n) => Literal::Int(n),
@@ -123,21 +133,42 @@ where
             },
         );
 
-        // Unary operators
-        let op_unary = choice((
-            just(Token::Op("!")).to(UnaryOp::Not),
-            just(Token::Op("-")).to(UnaryOp::Neg),
+        // Prefix operators
+        let op_prefix = choice((
+            just(Token::Op("&"))
+                .ignore_then(just(Token::Mut))
+                .to(PrefixOp::BorrowMut),
+            just(Token::Op("&")).to(PrefixOp::BorrowShared),
+            just(Token::Op("*")).to(PrefixOp::Deref),
+            just(Token::Op("!")).to(PrefixOp::Not),
+            just(Token::Op("-")).to(PrefixOp::Neg),
         ));
-        let unary = op_unary
+        let unary = op_prefix
             .repeated()
             .foldr_with(indexed, |op, operand, e| {
-                (
-                    Expr::UnaryOp {
-                        op,
+                let expr = match op {
+                    PrefixOp::Not => Expr::UnaryOp {
+                        op: UnaryOp::Not,
                         cond: Box::new(operand),
                     },
-                    e.span(),
-                )
+                    PrefixOp::Neg => Expr::UnaryOp {
+                        op: UnaryOp::Neg,
+                        cond: Box::new(operand),
+                    },
+                    PrefixOp::Deref => Expr::UnaryOp {
+                        op: UnaryOp::Deref,
+                        cond: Box::new(operand),
+                    },
+                    PrefixOp::BorrowShared => Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(operand),
+                    },
+                    PrefixOp::BorrowMut => Expr::Borrow {
+                        kind: BorrowKind::Mutable,
+                        expr: Box::new(operand),
+                    },
+                };
+                (expr, e.span())
             })
             .boxed();
 

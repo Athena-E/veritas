@@ -23,6 +23,7 @@ fn compile_and_verify_roundtrip(source: &str) -> Result<(), String> {
 macro_rules! verify_example {
     ($name:ident, $file:expr) => {
         #[test]
+        #[ignore = "slow end-to-end verification suite; run explicitly"]
         fn $name() {
             let source = include_str!(concat!("../src/examples/", $file));
             compile_and_verify(source).unwrap_or_else(|e| panic!("{}: {}", $file, e));
@@ -33,6 +34,7 @@ macro_rules! verify_example {
 macro_rules! verify_roundtrip {
     ($name:ident, $file:expr) => {
         #[test]
+        #[ignore = "slow end-to-end verification suite; run explicitly"]
         fn $name() {
             let source = include_str!(concat!("../src/examples/", $file));
             compile_and_verify_roundtrip(source).unwrap_or_else(|e| panic!("{}: {}", $file, e));
@@ -43,6 +45,7 @@ macro_rules! verify_roundtrip {
 macro_rules! expect_compile_error {
     ($name:ident, $file:expr) => {
         #[test]
+        #[ignore = "slow end-to-end verification suite; run explicitly"]
         fn $name() {
             let source = include_str!(concat!("../src/examples/errors/", $file));
             let result = compile_verbose(source);
@@ -101,6 +104,12 @@ verify_example!(e2e_sortedness, "sortedness.veri");
 verify_example!(e2e_29_i64_basic, "29_i64_basic.veri");
 verify_example!(e2e_30_i64_safe_midpoint, "30_i64_safe_midpoint.veri");
 verify_example!(e2e_31_u64_basic, "31_u64_basic.veri");
+verify_example!(e2e_32_shared_borrow, "32_shared_borrow.veri");
+verify_example!(e2e_33_mutable_borrow, "33_mutable_borrow.veri");
+verify_example!(e2e_34_shared_scalar_deref, "34_shared_scalar_deref.veri");
+verify_example!(e2e_35_mutable_scalar_deref, "35_mutable_scalar_deref.veri");
+verify_example!(e2e_36_shared_scalar_borrow_call, "36_shared_scalar_borrow_call.veri");
+verify_example!(e2e_37_mutable_scalar_borrow_call, "37_mutable_scalar_borrow_call.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation

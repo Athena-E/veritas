@@ -1,8 +1,10 @@
 use crate::common::ast::{BinOp, Expr, Literal};
+use crate::common::ownership::BorrowKind;
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::helpers::rename_prop_var;
 use chumsky::prelude::SimpleSpan;
 use im::{HashMap, Vector};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 // phi: Refinement propositions known to be true
@@ -22,6 +24,18 @@ pub struct MutableBinding<'src> {
 pub enum VarBinding<'src> {
     Immutable(IType<'src>),
     Mutable(MutableBinding<'src>),
+}
+
+#[derive(Clone, Debug, Default)]
+struct BorrowState {
+    shared: usize,
+    mutable: bool,
+}
+
+#[derive(Clone, Debug)]
+struct BorrowBinding {
+    owner: String,
+    kind: BorrowKind,
 }
 
 // Typing context
@@ -59,6 +73,46 @@ pub struct TypingContext<'src> {
     // Phase 1: plumbing only — helpers exist but are not yet called from synth_expr.
     // Phase 3 will gate `check_no_overflow` calls on this flag.
     pub check_overflow: bool,
+
+    // Whether the current compilation target is bare metal.
+    // Hosted mode uses function-local regions for array allocation, so some
+    // escape paths remain conservatively disallowed until ownership/regions are
+    // tracked more precisely.
+    pub bare_metal: bool,
+
+    // Number of nested explicit region scopes currently being checked.
+    pub region_depth: usize,
+
+    // Region-local array bindings created by the currently active nested
+    // region scopes. A binding is tracked here only if it depends on the
+    // current nested region's storage and therefore must not escape it.
+    region_local_arrays: Vec<HashSet<String>>,
+
+    // Array bindings introduced within the currently active nested region
+    // scopes, regardless of whether they currently depend on nested-region
+    // storage. These names are local to the region and therefore safe to
+    // retarget to region-local arrays without escaping.
+    region_scoped_arrays: Vec<HashSet<String>>,
+
+    // Reference bindings introduced within the currently active nested region
+    // scopes. These bindings are local to the region and therefore may safely
+    // point at region-local storage without escaping the region.
+    region_scoped_borrows: Vec<HashSet<String>>,
+
+    // Bindings whose ownership has been moved away and therefore cannot be
+    // read again until they are reinitialized.
+    moved_bindings: HashSet<String>,
+
+    // Active borrow state for owner bindings in the current lexical scope tree.
+    active_borrows: HashMap<String, BorrowState>,
+
+    // Local bindings that hold references, mapped back to the owner binding
+    // they borrow from. This is only needed for the first lexical borrow
+    // checker slice; lowering still does not consume reference expressions.
+    borrow_bindings: HashMap<String, BorrowBinding>,
+
+    // Lexical scope stack for borrow bindings created in each block scope.
+    borrow_scopes: Vec<Vec<String>>,
 }
 
 impl<'src> TypingContext<'src> {
@@ -73,6 +127,15 @@ impl<'src> TypingContext<'src> {
             current_function: None,
             allow_quantifiers: false,
             check_overflow: false,
+            bare_metal: false,
+            region_depth: 0,
+            region_local_arrays: Vec::new(),
+            region_scoped_arrays: Vec::new(),
+            region_scoped_borrows: Vec::new(),
+            moved_bindings: HashSet::new(),
+            active_borrows: HashMap::new(),
+            borrow_bindings: HashMap::new(),
+            borrow_scopes: Vec::new(),
         }
     }
 
@@ -88,7 +151,123 @@ impl<'src> TypingContext<'src> {
             current_function: None,
             allow_quantifiers: false,
             check_overflow: false,
+            bare_metal: false,
+            region_depth: 0,
+            region_local_arrays: Vec::new(),
+            region_scoped_arrays: Vec::new(),
+            region_scoped_borrows: Vec::new(),
+            moved_bindings: HashSet::new(),
+            active_borrows: HashMap::new(),
+            borrow_bindings: HashMap::new(),
+            borrow_scopes: Vec::new(),
         }
+    }
+
+    pub fn enter_borrow_scope(&self) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.borrow_scopes.push(Vec::new());
+        new_ctx
+    }
+
+    pub fn exit_borrow_scope(&self) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(bindings) = new_ctx.borrow_scopes.pop() {
+            for binding in bindings {
+                new_ctx = new_ctx.release_borrow_binding(&binding);
+            }
+        }
+        new_ctx
+    }
+
+    pub fn enter_region_scope(&self) -> Self {
+        let mut new_ctx = self.clone();
+        new_ctx.region_depth += 1;
+        new_ctx.region_local_arrays.push(HashSet::new());
+        new_ctx.region_scoped_arrays.push(HashSet::new());
+        new_ctx.region_scoped_borrows.push(HashSet::new());
+        new_ctx
+    }
+
+    pub fn in_region_scope(&self) -> bool {
+        self.region_depth > 0
+    }
+
+    /// Merge the result of a region body back into the outer context.
+    ///
+    /// Stage 2 keeps region-local bindings local, but preserves updates to
+    /// pre-existing mutable variables. Newly derived propositions are dropped
+    /// conservatively because they may mention region-local names.
+    pub fn merge_region_exit(&self, region_ctx: &Self) -> Self {
+        let mut merged = self.clone();
+        for name in self.delta.keys() {
+            if let Some(updated_binding) = region_ctx.delta.get(name) {
+                merged.delta.insert(name.clone(), updated_binding.clone());
+            }
+        }
+
+        merged.region_local_arrays = self.region_local_arrays.clone();
+        merged.region_scoped_arrays = self.region_scoped_arrays.clone();
+        merged.region_scoped_borrows = self.region_scoped_borrows.clone();
+        merged.moved_bindings = region_ctx.moved_bindings.clone();
+        merged.active_borrows = self.active_borrows.clone();
+        merged.borrow_bindings = self.borrow_bindings.clone();
+        merged.borrow_scopes = self.borrow_scopes.clone();
+        merged
+    }
+
+    pub fn mark_region_local_array(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(scope) = new_ctx.region_local_arrays.last_mut() {
+            scope.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn clear_region_local_array(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        for scope in new_ctx.region_local_arrays.iter_mut().rev() {
+            if scope.remove(name) {
+                break;
+            }
+        }
+        new_ctx
+    }
+
+    pub fn mark_region_scoped_array(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(scope) = new_ctx.region_scoped_arrays.last_mut() {
+            scope.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn is_region_local_array(&self, name: &str) -> bool {
+        self.region_local_arrays
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
+    pub fn is_region_scoped_array(&self, name: &str) -> bool {
+        self.region_scoped_arrays
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
+    pub fn mark_region_scoped_borrow(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(scope) = new_ctx.region_scoped_borrows.last_mut() {
+            scope.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn is_region_scoped_borrow(&self, name: &str) -> bool {
+        self.region_scoped_borrows
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
     }
 
     // Set expected return type for current function
@@ -152,13 +331,17 @@ impl<'src> TypingContext<'src> {
     // Immutable context
 
     pub fn with_immutable(&self, name: String, ty: IType<'src>) -> Self {
-        let mut new_ctx = self.clone();
-        new_ctx.gamma.insert(name, ty);
+        let mut new_ctx = self.release_borrow_binding(&name);
+        new_ctx.gamma.insert(name.clone(), ty);
+        new_ctx.moved_bindings.remove(&name);
         new_ctx
     }
 
     #[allow(dead_code)]
     pub fn lookup_immutable(&self, name: &str) -> Option<&IType<'src>> {
+        if self.moved_bindings.contains(name) {
+            return None;
+        }
         self.gamma.get(name)
     }
 
@@ -170,14 +353,15 @@ impl<'src> TypingContext<'src> {
         current_type: IType<'src>,
         master_type: IType<'src>,
     ) -> Self {
-        let mut new_ctx = self.clone();
+        let mut new_ctx = self.release_borrow_binding(&name);
         new_ctx.delta.insert(
-            name,
+            name.clone(),
             MutableBinding {
                 current_type,
                 master_type,
             },
         );
+        new_ctx.moved_bindings.remove(&name);
         new_ctx
     }
 
@@ -195,6 +379,7 @@ impl<'src> TypingContext<'src> {
                 master_type: binding.master_type.clone(),
             },
         );
+        new_ctx.moved_bindings.remove(name);
 
         Ok(new_ctx)
     }
@@ -210,6 +395,9 @@ impl<'src> TypingContext<'src> {
 
     // Returns the type and whether it's immutable or mutable.
     pub fn lookup_var(&self, name: &str) -> Option<VarBinding<'src>> {
+        if self.moved_bindings.contains(name) {
+            return None;
+        }
         // Check immutable bindings first
         if let Some(ty) = self.gamma.get(name) {
             return Some(VarBinding::Immutable(ty.clone()));
@@ -221,6 +409,89 @@ impl<'src> TypingContext<'src> {
         }
 
         None
+    }
+
+    pub fn mark_moved(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if new_ctx.gamma.contains_key(name) || new_ctx.delta.contains_key(name) {
+            new_ctx.moved_bindings.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn is_moved(&self, name: &str) -> bool {
+        self.moved_bindings.contains(name)
+    }
+
+    pub fn add_borrow_binding(&self, binding_name: &str, owner_name: &str, kind: BorrowKind) -> Self {
+        let mut new_ctx = self.release_borrow_binding(binding_name);
+        let mut state = new_ctx
+            .active_borrows
+            .get(owner_name)
+            .cloned()
+            .unwrap_or_default();
+        match kind {
+            BorrowKind::Shared => state.shared += 1,
+            BorrowKind::Mutable => state.mutable = true,
+        }
+        new_ctx.active_borrows.insert(owner_name.to_string(), state);
+        new_ctx.borrow_bindings.insert(
+            binding_name.to_string(),
+            BorrowBinding {
+                owner: owner_name.to_string(),
+                kind,
+            },
+        );
+        if let Some(scope) = new_ctx.borrow_scopes.last_mut() {
+            scope.push(binding_name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn release_borrow_binding(&self, binding_name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        let Some(binding) = new_ctx.borrow_bindings.remove(binding_name) else {
+            return new_ctx;
+        };
+        if let Some(state) = new_ctx.active_borrows.get_mut(&binding.owner) {
+            match binding.kind {
+                BorrowKind::Shared => {
+                    state.shared = state.shared.saturating_sub(1);
+                }
+                BorrowKind::Mutable => {
+                    state.mutable = false;
+                }
+            }
+            if state.shared == 0 && !state.mutable {
+                new_ctx.active_borrows.remove(&binding.owner);
+            }
+        }
+        for scope in &mut new_ctx.borrow_scopes {
+            scope.retain(|name| name != binding_name);
+        }
+        new_ctx
+    }
+
+    pub fn lookup_borrow_binding(&self, name: &str) -> Option<(&str, BorrowKind)> {
+        self.borrow_bindings
+            .get(name)
+            .map(|binding| (binding.owner.as_str(), binding.kind))
+    }
+
+    pub fn has_shared_borrows(&self, owner: &str) -> bool {
+        self.active_borrows
+            .get(owner)
+            .is_some_and(|state| state.shared > 0)
+    }
+
+    pub fn has_mutable_borrow(&self, owner: &str) -> bool {
+        self.active_borrows
+            .get(owner)
+            .is_some_and(|state| state.mutable)
+    }
+
+    pub fn is_borrowed(&self, owner: &str) -> bool {
+        self.has_shared_borrows(owner) || self.has_mutable_borrow(owner)
     }
 
     // Function signatures
@@ -291,6 +562,40 @@ impl<'src> TypingContext<'src> {
 
         // Note: Variables only in ctx2 but not ctx1 shouldn't happen in well-scoped code
         // Both branches start from same context, so they should have same variables
+
+        // Conservatively preserve any region-local array dependency discovered
+        // in either branch. If one branch makes a binding region-local, the
+        // merged continuation must treat it as region-local too.
+        joined.region_local_arrays = ctx1.region_local_arrays.clone();
+        for (scope_idx, scope) in ctx2.region_local_arrays.iter().enumerate() {
+            if let Some(joined_scope) = joined.region_local_arrays.get_mut(scope_idx) {
+                joined_scope.extend(scope.iter().cloned());
+            } else {
+                joined.region_local_arrays.push(scope.clone());
+            }
+        }
+
+        joined.region_scoped_arrays = ctx1.region_scoped_arrays.clone();
+        for (scope_idx, scope) in ctx2.region_scoped_arrays.iter().enumerate() {
+            if let Some(joined_scope) = joined.region_scoped_arrays.get_mut(scope_idx) {
+                joined_scope.extend(scope.iter().cloned());
+            } else {
+                joined.region_scoped_arrays.push(scope.clone());
+            }
+        }
+
+        joined.region_scoped_borrows = ctx1.region_scoped_borrows.clone();
+        for (scope_idx, scope) in ctx2.region_scoped_borrows.iter().enumerate() {
+            if let Some(joined_scope) = joined.region_scoped_borrows.get_mut(scope_idx) {
+                joined_scope.extend(scope.iter().cloned());
+            } else {
+                joined.region_scoped_borrows.push(scope.clone());
+            }
+        }
+
+        joined
+            .moved_bindings
+            .extend(ctx2.moved_bindings.iter().cloned());
 
         joined
     }
@@ -435,7 +740,7 @@ fn expr_references_array_index(expr: &Expr, arr_name: &str) -> bool {
 
 /// Compute the join (least upper bound) of two types
 /// Used after if-else to merge mutable variable types from both branches
-fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
+pub(crate) fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src> {
     match (t1, t2) {
         // Same types - keep as is
         (IType::Unit, IType::Unit) => IType::Unit,

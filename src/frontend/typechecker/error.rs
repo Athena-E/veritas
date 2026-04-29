@@ -25,6 +25,17 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
+    UseAfterMove {
+        name: String,
+        span: Span,
+    },
+
+    BorrowConflict {
+        name: String,
+        reason: String,
+        span: Span,
+    },
+
     UndefinedFunction {
         name: String,
         span: Span,
@@ -180,6 +191,14 @@ impl<'src> fmt::Display for TypeError<'src> {
 
             TypeError::UndefinedVariable { name, span } => {
                 write!(f, "Undefined variable `{}` at {:?}", name, span)
+            }
+
+            TypeError::UseAfterMove { name, span } => {
+                write!(f, "Use of moved value `{}` at {:?}", name, span)
+            }
+
+            TypeError::BorrowConflict { name, reason, span } => {
+                write!(f, "Borrow conflict for `{}` at {:?}: {}", name, span, reason)
             }
 
             TypeError::UndefinedFunction { name, span } => {

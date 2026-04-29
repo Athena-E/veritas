@@ -473,6 +473,7 @@ mod tests {
         DtalFunction {
             name: "test_loop".to_string(),
             params: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -616,6 +617,7 @@ mod tests {
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,
@@ -692,6 +694,7 @@ mod tests {
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
+            parameter_kinds: vec![],
             return_type: DtalType::Int,
             precondition: None,
             postcondition: None,

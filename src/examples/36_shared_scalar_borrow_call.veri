@@ -1,0 +1,8 @@
+fn inspect(r: &int) -> int {
+    *r
+}
+
+fn main() -> int {
+    let x: int = 7;
+    inspect(&x)
+}

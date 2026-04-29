@@ -5,7 +5,8 @@
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
-use std::collections::HashMap;
+use crate::common::ownership::{OwnershipMode, ParameterKind};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Operands of the most recent comparison instruction
@@ -40,6 +41,34 @@ pub struct TypeState {
     /// Types stored at stack spill slot offsets (post-regalloc).
     /// Maps frame offset (negative from rbp) to the type stored there.
     pub spill_types: HashMap<i32, DtalType>,
+    /// Registers currently holding owned values.
+    pub owned_registers: HashSet<Reg>,
+    /// Object identity for each register that currently owns a value.
+    pub owned_object_ids: HashMap<Reg, u32>,
+    /// Registers currently holding shared borrows.
+    pub shared_borrow_object_ids: HashMap<Reg, u32>,
+    /// Registers currently holding mutable borrows.
+    pub mutable_borrow_object_ids: HashMap<Reg, u32>,
+    /// Ownership state for stack values tracked by `Push`/`Pop`.
+    pub owned_stack: Vec<bool>,
+    /// Object identities for stack values tracked by `Push`/`Pop`.
+    pub owned_stack_object_ids: Vec<Option<u32>>,
+    /// Shared-borrow object identities for stack values tracked by `Push`/`Pop`.
+    pub shared_borrow_stack_object_ids: Vec<Option<u32>>,
+    /// Mutable-borrow object identities for stack values tracked by `Push`/`Pop`.
+    pub mutable_borrow_stack_object_ids: Vec<Option<u32>>,
+    /// Stack spill slots currently holding owned values.
+    pub owned_spills: HashSet<i32>,
+    /// Object identities for owned spill slots.
+    pub owned_spill_object_ids: HashMap<i32, u32>,
+    /// Object identities for spill slots currently holding shared borrows.
+    pub shared_borrow_spill_object_ids: HashMap<i32, u32>,
+    /// Object identities for spill slots currently holding mutable borrows.
+    pub mutable_borrow_spill_object_ids: HashMap<i32, u32>,
+    /// Registers whose previously-owned value has been consumed by move/drop.
+    pub consumed_registers: HashSet<Reg>,
+    /// Fresh object id supply for ownership-capability tracking.
+    pub next_object_id: u32,
 }
 
 impl TypeState {
@@ -52,6 +81,20 @@ impl TypeState {
             array_versions: HashMap::new(),
             proven_assertions: Vec::new(),
             spill_types: HashMap::new(),
+            owned_registers: HashSet::new(),
+            owned_object_ids: HashMap::new(),
+            shared_borrow_object_ids: HashMap::new(),
+            mutable_borrow_object_ids: HashMap::new(),
+            owned_stack: Vec::new(),
+            owned_stack_object_ids: Vec::new(),
+            shared_borrow_stack_object_ids: Vec::new(),
+            mutable_borrow_stack_object_ids: Vec::new(),
+            owned_spills: HashSet::new(),
+            owned_spill_object_ids: HashMap::new(),
+            shared_borrow_spill_object_ids: HashMap::new(),
+            mutable_borrow_spill_object_ids: HashMap::new(),
+            consumed_registers: HashSet::new(),
+            next_object_id: 0,
         }
     }
 }
@@ -74,6 +117,8 @@ pub struct DtalFunction {
     pub name: String,
     /// Parameter registers with their types
     pub params: Vec<(Reg, DtalType)>,
+    /// Parameter passing kind for each parameter, parallel to `params`.
+    pub parameter_kinds: Vec<ParameterKind>,
     /// Return type
     pub return_type: DtalType,
     /// Precondition (if any)
@@ -163,6 +208,14 @@ pub enum DtalInstr {
     MovImm { dst: Reg, imm: i128, ty: DtalType },
     /// mov rd, rs
     MovReg { dst: Reg, src: Reg, ty: DtalType },
+    /// alias_borrow rd, rs (shared borrow)
+    AliasBorrow { dst: Reg, src: Reg, ty: DtalType },
+    /// borrow_mut rd, rs (mutable borrow)
+    BorrowMut { dst: Reg, src: Reg, ty: DtalType },
+    /// borrow_end rs
+    BorrowEnd { src: Reg, ty: DtalType },
+    /// move_owned rd, rs
+    MoveOwned { dst: Reg, src: Reg, ty: DtalType },
     /// load rd, [base + offset]
     Load {
         dst: Reg,
@@ -234,7 +287,12 @@ pub enum DtalInstr {
     /// branch if condition
     Branch { cond: CmpOp, target: String },
     /// call function
-    Call { target: String, return_ty: DtalType },
+    Call {
+        target: String,
+        arg_kinds: Vec<ParameterKind>,
+        return_ty: DtalType,
+        ownership: OwnershipMode,
+    },
     /// ret
     Ret,
 
@@ -245,6 +303,8 @@ pub enum DtalInstr {
     Pop { dst: Reg, ty: DtalType },
     /// alloca rd, size
     Alloca { dst: Reg, size: u32, ty: DtalType },
+    /// drop_owned rs
+    DropOwned { src: Reg, ty: DtalType },
 
     // Port I/O (bare-metal hardware access)
     /// in al, dx: read byte from I/O port in src to dst

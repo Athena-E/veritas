@@ -4,6 +4,7 @@
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::types::{BinaryOp, BlockId, UnaryOp};
+use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::types::IType;
 
 /// TIR instructions (three-address code in SSA form)
@@ -19,6 +20,39 @@ pub enum TirInstr<'src> {
     /// dst = src (copy)
     Copy {
         dst: VirtualReg,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
+    /// dst = move src (ownership transfer)
+    MoveOwned {
+        dst: VirtualReg,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
+    /// drop src (ownership destruction)
+    DropOwned {
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
+    /// dst = shared borrow src
+    BorrowShared {
+        dst: VirtualReg,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
+    /// dst = mutable borrow src
+    BorrowMut {
+        dst: VirtualReg,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
+
+    /// end shared borrow held in src
+    BorrowEnd {
         src: VirtualReg,
         ty: IType<'src>,
     },
@@ -62,6 +96,9 @@ pub enum TirInstr<'src> {
         dst: Option<VirtualReg>,
         func: String,
         args: Vec<VirtualReg>,
+        arg_types: Vec<IType<'src>>,
+        arg_kinds: Vec<ParameterKind>,
+        ownership: OwnershipMode,
         result_ty: IType<'src>,
     },
 
@@ -70,6 +107,17 @@ pub enum TirInstr<'src> {
         dst: VirtualReg,
         element_ty: IType<'src>,
         size: i64,
+        region: Option<VirtualReg>,
+    },
+
+    /// Enter a nested lexical region, yielding a region handle.
+    RegionEnter {
+        dst: VirtualReg,
+    },
+
+    /// Leave a nested lexical region.
+    RegionLeave {
+        region: VirtualReg,
     },
 
     /// Assume a constraint (from branch or precondition)
@@ -85,12 +133,19 @@ impl<'src> TirInstr<'src> {
         match self {
             TirInstr::LoadImm { dst, .. } => Some(*dst),
             TirInstr::Copy { dst, .. } => Some(*dst),
+            TirInstr::MoveOwned { dst, .. } => Some(*dst),
+            TirInstr::DropOwned { .. } => None,
+            TirInstr::BorrowShared { dst, .. } => Some(*dst),
+            TirInstr::BorrowMut { dst, .. } => Some(*dst),
+            TirInstr::BorrowEnd { .. } => None,
             TirInstr::BinOp { dst, .. } => Some(*dst),
             TirInstr::UnaryOp { dst, .. } => Some(*dst),
             TirInstr::ArrayLoad { dst, .. } => Some(*dst),
             TirInstr::ArrayStore { .. } => None,
             TirInstr::Call { dst, .. } => *dst,
             TirInstr::AllocArray { dst, .. } => Some(*dst),
+            TirInstr::RegionEnter { dst } => Some(*dst),
+            TirInstr::RegionLeave { .. } => None,
             TirInstr::AssumeConstraint { .. } => None,
             TirInstr::AssertConstraint { .. } => None,
         }
@@ -101,12 +156,19 @@ impl<'src> TirInstr<'src> {
         match self {
             TirInstr::LoadImm { ty, .. } => Some(ty),
             TirInstr::Copy { ty, .. } => Some(ty),
+            TirInstr::MoveOwned { ty, .. } => Some(ty),
+            TirInstr::DropOwned { ty, .. } => Some(ty),
+            TirInstr::BorrowShared { ty, .. } => Some(ty),
+            TirInstr::BorrowMut { ty, .. } => Some(ty),
+            TirInstr::BorrowEnd { ty, .. } => Some(ty),
             TirInstr::BinOp { ty, .. } => Some(ty),
             TirInstr::UnaryOp { ty, .. } => Some(ty),
             TirInstr::ArrayLoad { element_ty, .. } => Some(element_ty),
             TirInstr::ArrayStore { .. } => None,
             TirInstr::Call { result_ty, .. } => Some(result_ty),
             TirInstr::AllocArray { element_ty, .. } => Some(element_ty),
+            TirInstr::RegionEnter { .. } => None,
+            TirInstr::RegionLeave { .. } => None,
             TirInstr::AssumeConstraint { .. } => None,
             TirInstr::AssertConstraint { .. } => None,
         }
@@ -131,7 +193,10 @@ pub enum Terminator {
     },
 
     /// Return from function
-    Return { value: Option<VirtualReg> },
+    Return {
+        value: Option<VirtualReg>,
+        ownership: OwnershipMode,
+    },
 
     /// Unreachable (after error or infinite loop)
     Unreachable,

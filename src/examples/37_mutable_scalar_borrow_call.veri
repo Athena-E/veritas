@@ -1,0 +1,10 @@
+fn write(r: &mut int) -> int {
+    *r = 9;
+    *r
+}
+
+fn main() -> int {
+    let mut x: int = 0;
+    write(&mut x);
+    x
+}

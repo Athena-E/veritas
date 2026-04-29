@@ -5,12 +5,13 @@
 
 use crate::backend::dtal::VirtualReg;
 use crate::backend::dtal::constraints::Constraint;
-use crate::backend::dtal::convert::expr_to_constraint;
 use crate::backend::lower::context::LoweringContext;
+use crate::backend::dtal::convert::expr_to_constraint;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::lower::stmt::lower_stmts;
-use crate::backend::tir::{Terminator, TirFunction};
-use crate::common::tast::TFunction;
+use crate::backend::tir::{Terminator, TirFunction, TirInstr};
+use crate::common::ownership::OwnershipMode;
+use crate::common::tast::{TExpr, TFunction};
 use crate::common::types::{IProposition, IType};
 
 /// Lower a typed function to TIR
@@ -26,10 +27,14 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     let mut param_names: Vec<String> = Vec::new();
     for param in &func.parameters {
         let reg = ctx.fresh_reg();
-        ctx.bind_var_typed(&param.name, reg, param.ty.clone());
-        params.push((reg, param.ty.clone()));
+        let lowered_param_ty = LoweringContext::lowered_ref_storage_type(&param.ty);
+        ctx.bind_var_typed(&param.name, reg, lowered_param_ty.clone());
+        ctx.mark_var_moved(&param.name);
+        params.push((reg, lowered_param_ty));
         param_names.push(param.name.clone());
     }
+
+    ctx.enter_scope();
 
     // Lower the function body statements
     lower_stmts(&mut ctx, &func.body.statements);
@@ -39,12 +44,36 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         .body
         .trailing_expr
         .as_ref()
-        .map(|trailing_expr| lower_expr(&mut ctx, trailing_expr));
+        .map(|trailing_expr| {
+            let value_reg = lower_expr(&mut ctx, trailing_expr);
+            if func.returns_owned && matches!(&trailing_expr.0, TExpr::Variable { .. }) {
+                let moved_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::MoveOwned {
+                    dst: moved_reg,
+                    src: value_reg,
+                    ty: func.return_type.clone(),
+                });
+                if let TExpr::Variable { name, .. } = &trailing_expr.0 {
+                    ctx.mark_var_moved(name);
+                }
+                moved_reg
+            } else {
+                value_reg
+            }
+        });
+
+    ctx.emit_scope_exit_drops();
+    ctx.exit_scope();
 
     // Finish the entry block with a return terminator
     ctx.finish_block(
         Terminator::Return {
             value: return_value,
+            ownership: if func.returns_owned {
+                OwnershipMode::FreshOwned
+            } else {
+                OwnershipMode::Plain
+            },
         },
         vec![], // Entry block has no predecessors
     );
@@ -66,8 +95,10 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     ctx.build_function(
         func.name.clone(),
         params,
+        func.parameter_kinds.clone(),
         param_names,
         func.return_type.clone(),
+        func.returns_owned,
         precondition,
         postcondition,
         entry_block,
