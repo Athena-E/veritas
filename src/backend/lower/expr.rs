@@ -79,7 +79,9 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
             }
         }
 
-        TExpr::Deref { owner, .. } => Some(IndexExpr::Var(owner.clone())),
+        TExpr::Deref {
+            owner: Some(owner), ..
+        } => Some(IndexExpr::Var(owner.clone())),
 
         _ => None,
     }
@@ -191,15 +193,26 @@ pub fn lower_expr<'src>(
 
         TExpr::UnaryOp { op, operand, ty } => lower_unaryop(ctx, *op, operand, ty),
 
-        TExpr::Deref { owner, ty, .. } => {
+        TExpr::Deref { expr, ty, .. } => {
             if matches!(ty, IType::Array { .. }) {
                 panic!("whole-array dereference should not reach lowering");
             }
-            if let Some(reg) = ctx.lookup_var(owner) {
-                reg
-            } else {
-                panic!("Undefined deref owner during lowering: {}", owner)
-            }
+            let base_reg = lower_expr(ctx, expr);
+            let index_reg = ctx.fresh_reg();
+            ctx.emit(TirInstr::LoadImm {
+                dst: index_reg,
+                value: 0,
+                ty: IType::Int,
+            });
+            let dst = ctx.fresh_reg();
+            ctx.emit(TirInstr::ArrayLoad {
+                dst,
+                base: base_reg,
+                index: index_reg,
+                element_ty: ty.clone(),
+                bounds_constraint: Constraint::True,
+            });
+            dst
         }
 
         TExpr::Borrow { kind, expr: place, ty } => lower_borrow_expr(ctx, *kind, place, ty),
@@ -377,7 +390,25 @@ fn lower_call<'src>(
                         ..
                     } = &arg.0
                     {
-                        return (lower_expr(ctx, place), place.0.get_type().clone());
+                        if matches!(place.0.get_type(), IType::Array { .. }) {
+                            return (lower_expr(ctx, place), place.0.get_type().clone());
+                        }
+                        if let TExpr::Variable { name, .. } = &place.0 {
+                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                                panic!(
+                                    "Undefined scalar borrow owner during call lowering: {}",
+                                    name
+                                )
+                            });
+                            let (borrow_reg, _cell_reg, lowered_ref_ty) =
+                                ctx.create_scalar_borrow_value(
+                                    owner_reg,
+                                    place.0.get_type().clone(),
+                                    crate::common::ownership::BorrowKind::Shared,
+                                );
+                            borrow_end_regs.push((borrow_reg, lowered_ref_ty.clone(), None));
+                            return (borrow_reg, lowered_ref_ty);
+                        }
                     }
                     let arg_reg = lower_expr(ctx, arg);
                     let borrowed_reg = ctx.fresh_reg();
@@ -386,7 +417,7 @@ fn lower_call<'src>(
                         src: arg_reg,
                         ty: arg.0.get_type().clone(),
                     });
-                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
+                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
                     (borrowed_reg, arg.0.get_type().clone())
                 }
                 ParameterKind::MutableBorrow => {
@@ -396,7 +427,29 @@ fn lower_call<'src>(
                         ..
                     } = &arg.0
                     {
-                        return (lower_expr(ctx, place), place.0.get_type().clone());
+                        if matches!(place.0.get_type(), IType::Array { .. }) {
+                            return (lower_expr(ctx, place), place.0.get_type().clone());
+                        }
+                        if let TExpr::Variable { name, .. } = &place.0 {
+                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                                panic!(
+                                    "Undefined scalar mutable borrow owner during call lowering: {}",
+                                    name
+                                )
+                            });
+                            let (borrow_reg, cell_reg, lowered_ref_ty) =
+                                ctx.create_scalar_borrow_value(
+                                    owner_reg,
+                                    place.0.get_type().clone(),
+                                    crate::common::ownership::BorrowKind::Mutable,
+                                );
+                            borrow_end_regs.push((
+                                borrow_reg,
+                                lowered_ref_ty.clone(),
+                                Some((name.clone(), cell_reg, place.0.get_type().clone())),
+                            ));
+                            return (borrow_reg, lowered_ref_ty);
+                        }
                     }
                     let arg_reg = lower_expr(ctx, arg);
                     let borrowed_reg = ctx.fresh_reg();
@@ -405,7 +458,7 @@ fn lower_call<'src>(
                         src: arg_reg,
                         ty: arg.0.get_type().clone(),
                     });
-                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
+                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
                     (borrowed_reg, arg.0.get_type().clone())
                 }
             }
@@ -424,7 +477,10 @@ fn lower_call<'src>(
             ownership,
             result_ty: ty.clone(),
         });
-        for (borrow_reg, borrow_ty) in borrow_end_regs {
+        for (borrow_reg, borrow_ty, sync_back) in borrow_end_regs {
+            if let Some((owner_name, cell_reg, pointee_ty)) = sync_back {
+                ctx.sync_scalar_borrow_owner(&owner_name, cell_reg, pointee_ty);
+            }
             ctx.emit(TirInstr::BorrowEnd {
                 src: borrow_reg,
                 ty: borrow_ty,
@@ -450,7 +506,10 @@ fn lower_call<'src>(
             ownership,
             result_ty: ty.clone(),
         });
-        for (borrow_reg, borrow_ty) in borrow_end_regs {
+        for (borrow_reg, borrow_ty, sync_back) in borrow_end_regs {
+            if let Some((owner_name, cell_reg, pointee_ty)) = sync_back {
+                ctx.sync_scalar_borrow_owner(&owner_name, cell_reg, pointee_ty);
+            }
             ctx.emit(TirInstr::BorrowEnd {
                 src: borrow_reg,
                 ty: borrow_ty,
@@ -466,6 +525,16 @@ fn lower_borrow_expr<'src>(
     place: &Spanned<TExpr<'src>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
+    if !matches!(place.0.get_type(), IType::Array { .. })
+        && let TExpr::Variable { name, .. } = &place.0
+    {
+        let owner_reg = ctx
+            .lookup_var(name)
+            .unwrap_or_else(|| panic!("Undefined scalar borrow owner during lowering: {}", name));
+        let (borrow_reg, _, _) =
+            ctx.create_scalar_borrow_value(owner_reg, place.0.get_type().clone(), kind);
+        return borrow_reg;
+    }
     let place_reg = lower_expr(ctx, place);
     let dst = ctx.fresh_reg();
     match kind {

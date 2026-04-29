@@ -4,7 +4,7 @@
 //! and control flow structures.
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
-use crate::backend::lower::context::{LoweringContext, is_scalar_ref_type};
+use crate::backend::lower::context::{LoweringContext, ScalarBorrowBinding};
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
 use crate::backend::lower::widen_itype;
 use crate::backend::tir::{BinaryOp, PhiNode, Terminator, TirInstr};
@@ -94,17 +94,6 @@ fn lower_let<'src>(
     ty: &IType<'src>,
     ownership: OwnershipMode,
 ) {
-    if is_scalar_ref_type(ty)
-        && let TExpr::Borrow { expr, .. } = &value.0
-        && let TExpr::Variable { name: owner, .. } = &expr.0
-    {
-        let owner_reg = ctx
-            .lookup_var(owner)
-            .unwrap_or_else(|| panic!("Undefined scalar borrow owner during lowering: {}", owner));
-        ctx.bind_var_borrow_alias(name, owner_reg, ty.clone());
-        return;
-    }
-
     let prior_binding = ctx
         .lookup_var(name)
         .zip(Some(ctx.lookup_var_type(name)))
@@ -113,6 +102,44 @@ fn lower_let<'src>(
         .lookup_var(name)
         .zip(Some(ctx.lookup_var_type(name)))
         .filter(|(_, prior_ty)| is_borrow_type(prior_ty));
+
+    if matches!(ty, IType::Ref(inner) | IType::RefMut(inner) if !matches!(inner.as_ref(), IType::Array { .. }))
+        && let TExpr::Borrow { expr, .. } = &value.0
+        && let TExpr::Variable { name: owner, .. } = &expr.0
+    {
+        if let Some((prior_reg, prior_ty)) = prior_binding {
+            ctx.emit(TirInstr::DropOwned {
+                src: prior_reg,
+                ty: prior_ty,
+            });
+        }
+        if prior_borrow_binding.is_some() {
+            ctx.emit_borrow_end_for_binding(name);
+        }
+        let owner_reg = ctx
+            .lookup_var(owner)
+            .unwrap_or_else(|| panic!("Undefined scalar borrow owner during lowering: {}", owner));
+        let pointee_ty = expr.0.get_type().clone();
+        let kind = if matches!(ty, IType::Ref(_)) {
+            crate::common::ownership::BorrowKind::Shared
+        } else {
+            crate::common::ownership::BorrowKind::Mutable
+        };
+        let (borrow_reg, cell_reg, lowered_ref_ty) =
+            ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind);
+        ctx.bind_scalar_borrow(
+            name,
+            borrow_reg,
+            lowered_ref_ty,
+            ScalarBorrowBinding {
+                owner_name: owner.clone(),
+                cell_reg,
+                kind,
+                pointee_ty,
+            },
+        );
+        return;
+    }
 
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
@@ -146,11 +173,9 @@ fn lower_let<'src>(
     if let Some((prior_reg, prior_ty)) = prior_borrow_binding
         && !matches!(&value.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name && is_borrow_type(&prior_ty))
     {
-        ctx.emit(TirInstr::BorrowEnd {
-            src: prior_reg,
-            ty: prior_ty.clone(),
-        });
-        ctx.mark_borrow_ended(name);
+        let _ = prior_reg;
+        let _ = prior_ty;
+        ctx.emit_borrow_end_for_binding(name);
     }
 
     // Bind the variable name to this register with its type
@@ -168,22 +193,43 @@ fn lower_assignment<'src>(
         TExpr::Variable { name, ty: _ } => {
             // Simple variable assignment
             // In SSA, we create a new register and update the binding
-            if is_scalar_ref_type(&ctx.lookup_var_type(name))
+            let prior_reg = ctx.lookup_var(name);
+            let prior_ty = ctx.lookup_var_type(name);
+            let self_assignment =
+                matches!(&rhs.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name);
+            if matches!(ctx.lookup_var_type(name), IType::Ref(_) | IType::RefMut(_))
                 && let TExpr::Borrow { expr, .. } = &rhs.0
                 && let TExpr::Variable { name: owner, .. } = &expr.0
             {
                 let owner_reg = ctx.lookup_var(owner).unwrap_or_else(|| {
                     panic!("Undefined scalar borrow owner during lowering: {}", owner)
                 });
-                ctx.bind_var_borrow_alias(name, owner_reg, rhs.0.get_type().clone());
+                let pointee_ty = expr.0.get_type().clone();
+                let kind = if matches!(rhs.0.get_type(), IType::Ref(_)) {
+                    crate::common::ownership::BorrowKind::Shared
+                } else {
+                    crate::common::ownership::BorrowKind::Mutable
+                };
+                let (borrow_reg, cell_reg, lowered_ref_ty) =
+                    ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind);
+                if prior_reg.is_some() && is_borrow_type(&prior_ty) && !self_assignment {
+                    ctx.emit_borrow_end_for_binding(name);
+                }
+                ctx.bind_scalar_borrow(
+                    name,
+                    borrow_reg,
+                    lowered_ref_ty,
+                    ScalarBorrowBinding {
+                        owner_name: owner.clone(),
+                        cell_reg,
+                        kind,
+                        pointee_ty,
+                    },
+                );
                 return;
             }
 
             let rhs_reg = lower_expr(ctx, rhs);
-            let prior_reg = ctx.lookup_var(name);
-            let prior_ty = ctx.lookup_var_type(name);
-            let self_assignment =
-                matches!(&rhs.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name);
 
             // Create a copy to a new register (SSA form)
             // Use the RHS type, not the LHS declared type (which may be a stale singleton)
@@ -223,11 +269,8 @@ fn lower_assignment<'src>(
                 && is_borrow_type(&prior_ty)
                 && !self_assignment
             {
-                ctx.emit(TirInstr::BorrowEnd {
-                    src: prior_reg,
-                    ty: prior_ty.clone(),
-                });
-                ctx.mark_borrow_ended(name);
+                let _ = prior_reg;
+                ctx.emit_borrow_end_for_binding(name);
             }
 
             // Update the variable binding with the RHS type
@@ -248,33 +291,21 @@ fn lower_assignment<'src>(
             });
         }
 
-        TExpr::Deref { owner, ty, .. } => {
+        TExpr::Deref { expr, .. } => {
+            let base_reg = lower_expr(ctx, expr);
+            let index_reg = ctx.fresh_reg();
+            ctx.emit(TirInstr::LoadImm {
+                dst: index_reg,
+                value: 0,
+                ty: IType::Int,
+            });
             let rhs_reg = lower_expr(ctx, rhs);
-            let prior_reg = ctx.lookup_var(owner);
-            let prior_ty = ctx.lookup_var_type(owner);
-
-            let new_reg = if matches!(&rhs.0, TExpr::Borrow { .. }) {
-                rhs_reg
-            } else {
-                let new_reg = ctx.fresh_reg();
-                ctx.emit(TirInstr::Copy {
-                    dst: new_reg,
-                    src: rhs_reg,
-                    ty: ty.clone(),
-                });
-                new_reg
-            };
-
-            if let Some(prior_reg) = prior_reg
-                && is_owned_type(&prior_ty)
-            {
-                ctx.emit(TirInstr::DropOwned {
-                    src: prior_reg,
-                    ty: prior_ty.clone(),
-                });
-            }
-
-            ctx.bind_var_typed(owner, new_reg, rhs.0.get_type().clone());
+            ctx.emit(TirInstr::ArrayStore {
+                base: base_reg,
+                index: index_reg,
+                value: rhs_reg,
+                bounds_constraint: Constraint::True,
+            });
         }
 
         _ => {

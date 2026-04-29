@@ -196,15 +196,11 @@ pub fn synth_expr<'src>(
                 }
             };
 
-            let Some((owner_name, kind)) = ctx.lookup_borrow_binding(ref_name) else {
-                return Err(TypeError::UnsupportedFeature {
-                    feature: "dereferencing reference parameters or copied references is not yet supported".to_string(),
-                    span: cond.1,
-                });
-            };
-
-            let inner_ty = match &cond_ty {
-                IType::Ref(inner) | IType::RefMut(inner) => inner.as_ref().clone(),
+            let (kind, inner_ty) = match &cond_ty {
+                IType::Ref(inner) => (crate::common::ownership::BorrowKind::Shared, inner.as_ref().clone()),
+                IType::RefMut(inner) => {
+                    (crate::common::ownership::BorrowKind::Mutable, inner.as_ref().clone())
+                }
                 _ => {
                     return Err(TypeError::InvalidOperation {
                         operation: "deref".to_string(),
@@ -223,7 +219,9 @@ pub fn synth_expr<'src>(
 
             let texpr = TExpr::Deref {
                 expr: Box::new(tcond),
-                owner: owner_name.to_string(),
+                owner: ctx
+                    .lookup_borrow_binding(ref_name)
+                    .map(|(owner_name, _)| owner_name.to_string()),
                 kind,
                 ty: inner_ty.clone(),
             };
@@ -561,23 +559,6 @@ pub fn synth_expr<'src>(
                     return Err(TypeError::TypeMismatch {
                         expected: param_ty.clone(),
                         found: arg_ty,
-                        span: arg.1,
-                    });
-                }
-
-                if matches!(
-                    arg_kind,
-                    crate::common::ownership::ParameterKind::SharedBorrow
-                        | crate::common::ownership::ParameterKind::MutableBorrow
-                ) && matches!(
-                    param_ty,
-                    IType::Ref(inner) | IType::RefMut(inner)
-                        if !matches!(inner.as_ref(), IType::Array { .. })
-                ) {
-                    return Err(TypeError::UnsupportedFeature {
-                        feature:
-                            "passing scalar references to functions is not yet supported"
-                                .to_string(),
                         span: arg.1,
                     });
                 }

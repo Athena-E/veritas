@@ -367,7 +367,7 @@ fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
 }
 
 #[test]
-fn test_lower_direct_borrow_call_reuses_borrow_and_ends_it_after_call() {
+fn test_lower_direct_scalar_borrow_call_materializes_hidden_cell_and_ends_it() {
     let callee = TFunction {
         name: "inspect".to_string(),
         parameters: vec![TParameter {
@@ -430,8 +430,12 @@ fn test_lower_direct_borrow_call_reuses_borrow_and_ends_it_after_call() {
         .iter()
         .filter(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
         .count();
-    assert_eq!(borrow_shared_count, 0);
-    assert_eq!(borrow_end_count, 0);
+    assert_eq!(borrow_shared_count, 1);
+    assert_eq!(borrow_end_count, 1);
+    assert!(entry_block
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, TirInstr::AllocArray { size: 1, .. })));
     assert!(entry_block.instructions.iter().any(|instr| matches!(
         instr,
         TirInstr::Call {

@@ -710,10 +710,19 @@ pub fn check_stmt<'src>(
                     ..
                 } => {
                     let (tlhs, _lhs_ty) = synth_expr(ctx, lhs)?;
-                    let (owner_name, kind, pointee_ty) = match &tlhs.0 {
+                    let (owner_name, kind, pointee_ty, ref_name) = match &tlhs.0 {
                         TExpr::Deref {
                             owner, kind, ty, ..
-                        } => (owner.clone(), *kind, ty.clone()),
+                        } => {
+                            let ref_name = match &lhs.0 {
+                                crate::common::ast::Expr::UnaryOp { cond, .. } => match &cond.0 {
+                                    crate::common::ast::Expr::Variable(name) => Some((*name).to_string()),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+                            (owner.clone(), *kind, ty.clone(), ref_name)
+                        }
                         _ => {
                             return Err(TypeError::UnsupportedFeature {
                                 feature: "dereference assignment target must be a reference binding".to_string(),
@@ -724,7 +733,10 @@ pub fn check_stmt<'src>(
 
                     if kind.is_shared() {
                         return Err(TypeError::BorrowConflict {
-                            name: owner_name,
+                            name: owner_name
+                                .clone()
+                                .or(ref_name)
+                                .unwrap_or_else(|| "<ref>".to_string()),
                             reason: "cannot assign through a shared reference".to_string(),
                             span: lhs.1,
                         });
@@ -738,14 +750,17 @@ pub fn check_stmt<'src>(
                     }
 
                     let move_ctx = apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?;
-                    let mut new_ctx =
-                        move_ctx.with_mutable_update(&owner_name, rhs_ty.clone()).map_err(|reason| {
-                            TypeError::InvalidAssignment {
+                    let mut new_ctx = if let Some(owner_name) = owner_name.as_ref() {
+                        move_ctx
+                            .with_mutable_update(owner_name, rhs_ty.clone())
+                            .map_err(|reason| TypeError::InvalidAssignment {
                                 variable: owner_name.clone(),
                                 reason,
                                 span: lhs.1,
-                            }
-                        })?;
+                            })?
+                    } else {
+                        move_ctx
+                    };
 
                     let tlhs_expr = TExpr::Deref {
                         expr: match tlhs.0 {
@@ -763,7 +778,9 @@ pub fn check_stmt<'src>(
                         ownership: OwnershipMode::Plain,
                     };
 
-                    if let Some(prop) = postcondition_for_call(&new_ctx, &owner_name, &rhs.0) {
+                    if let Some(owner_name) = owner_name.as_ref()
+                        && let Some(prop) = postcondition_for_call(&new_ctx, owner_name, &rhs.0)
+                    {
                         new_ctx = new_ctx.with_proposition(prop);
                     }
 

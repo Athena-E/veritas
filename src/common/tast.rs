@@ -44,7 +44,7 @@ pub enum TExpr<'src> {
 
     Deref {
         expr: Box<Spanned<Self>>,
-        owner: String,
+        owner: Option<String>,
         kind: BorrowKind,
         ty: IType<'src>,
     },

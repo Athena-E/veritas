@@ -5,8 +5,8 @@
 
 use crate::backend::dtal::VirtualReg;
 use crate::backend::dtal::constraints::Constraint;
-use crate::backend::dtal::convert::expr_to_constraint;
 use crate::backend::lower::context::LoweringContext;
+use crate::backend::dtal::convert::expr_to_constraint;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::lower::stmt::lower_stmts;
 use crate::backend::tir::{Terminator, TirFunction, TirInstr};
@@ -27,9 +27,10 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     let mut param_names: Vec<String> = Vec::new();
     for param in &func.parameters {
         let reg = ctx.fresh_reg();
-        ctx.bind_var_typed(&param.name, reg, param.ty.clone());
+        let lowered_param_ty = LoweringContext::lowered_ref_storage_type(&param.ty);
+        ctx.bind_var_typed(&param.name, reg, lowered_param_ty.clone());
         ctx.mark_var_moved(&param.name);
-        params.push((reg, param.ty.clone()));
+        params.push((reg, lowered_param_ty));
         param_names.push(param.name.clone());
     }
 

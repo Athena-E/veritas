@@ -5,9 +5,10 @@
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
-use crate::common::ownership::ParameterKind;
+use crate::common::ownership::{BorrowKind, ParameterKind};
 use crate::common::types::IType;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 /// Context for lowering TAST to TIR
 ///
@@ -37,6 +38,10 @@ pub struct LoweringContext<'src> {
     /// Whether the current binding for a variable is a live borrow value.
     borrow_live_map: BTreeMap<String, bool>,
 
+    /// Lowering-time metadata for scalar reference bindings that are backed by
+    /// hidden one-element cells.
+    scalar_borrow_map: BTreeMap<String, ScalarBorrowBinding<'src>>,
+
     /// Current nested lexical region handle, if any.
     current_region: Option<VirtualReg>,
 
@@ -49,7 +54,16 @@ struct ScopeSnapshot<'src> {
     var_type_map: BTreeMap<String, IType<'src>>,
     owned_live_map: BTreeMap<String, bool>,
     borrow_live_map: BTreeMap<String, bool>,
+    scalar_borrow_map: BTreeMap<String, ScalarBorrowBinding<'src>>,
     declared_names: BTreeSet<String>,
+}
+
+#[derive(Clone)]
+pub struct ScalarBorrowBinding<'src> {
+    pub owner_name: String,
+    pub cell_reg: VirtualReg,
+    pub kind: BorrowKind,
+    pub pointee_ty: IType<'src>,
 }
 
 impl<'src> LoweringContext<'src> {
@@ -62,6 +76,7 @@ impl<'src> LoweringContext<'src> {
             scope_stack: Vec::new(),
             owned_live_map: BTreeMap::new(),
             borrow_live_map: BTreeMap::new(),
+            scalar_borrow_map: BTreeMap::new(),
             current_region: None,
             region_stack: Vec::new(),
         }
@@ -93,16 +108,6 @@ impl<'src> LoweringContext<'src> {
             .insert(name.to_string(), is_owned_type(&self.lookup_var_type(name)));
         self.borrow_live_map
             .insert(name.to_string(), is_borrow_type(&self.lookup_var_type(name)));
-        if let Some(scope) = self.scope_stack.last_mut() {
-            scope.declared_names.insert(name.to_string());
-        }
-    }
-
-    pub fn bind_var_borrow_alias(&mut self, name: &str, reg: VirtualReg, ty: IType<'src>) {
-        self.var_map.insert(name.to_string(), reg);
-        self.var_type_map.insert(name.to_string(), ty);
-        self.owned_live_map.insert(name.to_string(), false);
-        self.borrow_live_map.insert(name.to_string(), false);
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.declared_names.insert(name.to_string());
         }
@@ -144,6 +149,28 @@ impl<'src> LoweringContext<'src> {
         if self.var_map.contains_key(name) {
             self.borrow_live_map.insert(name.to_string(), false);
         }
+        self.scalar_borrow_map.remove(name);
+    }
+
+    pub fn bind_scalar_borrow(
+        &mut self,
+        name: &str,
+        borrow_reg: VirtualReg,
+        lowered_ref_ty: IType<'src>,
+        binding: ScalarBorrowBinding<'src>,
+    ) {
+        self.var_map.insert(name.to_string(), borrow_reg);
+        self.var_type_map.insert(name.to_string(), lowered_ref_ty);
+        self.owned_live_map.insert(name.to_string(), false);
+        self.borrow_live_map.insert(name.to_string(), true);
+        self.scalar_borrow_map.insert(name.to_string(), binding);
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.declared_names.insert(name.to_string());
+        }
+    }
+
+    pub fn lookup_scalar_borrow(&self, name: &str) -> Option<&ScalarBorrowBinding<'src>> {
+        self.scalar_borrow_map.get(name)
     }
 
     /// Get a snapshot of the current variable map
@@ -197,6 +224,7 @@ impl<'src> LoweringContext<'src> {
             var_type_map: self.var_type_map.clone(),
             owned_live_map: self.owned_live_map.clone(),
             borrow_live_map: self.borrow_live_map.clone(),
+            scalar_borrow_map: self.scalar_borrow_map.clone(),
             declared_names: BTreeSet::new(),
         });
     }
@@ -218,12 +246,9 @@ impl<'src> LoweringContext<'src> {
                 }
             }
             if self.is_borrow_live(name)
-                && let Some(reg) = self.lookup_var(name)
+                && is_borrow_type(&self.lookup_var_type(name))
             {
-                let ty = self.lookup_var_type(name);
-                if is_borrow_type(&ty) {
-                    borrow_ends.push((name.clone(), reg, ty));
-                }
+                borrow_ends.push(name.clone());
             }
         }
 
@@ -231,9 +256,8 @@ impl<'src> LoweringContext<'src> {
             self.emit(TirInstr::DropOwned { src: reg, ty });
             self.owned_live_map.insert(name, false);
         }
-        for (name, reg, ty) in borrow_ends {
-            self.emit(TirInstr::BorrowEnd { src: reg, ty });
-            self.borrow_live_map.insert(name, false);
+        for name in borrow_ends {
+            self.emit_borrow_end_for_binding(&name);
         }
     }
 
@@ -244,7 +268,121 @@ impl<'src> LoweringContext<'src> {
             self.var_type_map = snapshot.var_type_map;
             self.owned_live_map = snapshot.owned_live_map;
             self.borrow_live_map = snapshot.borrow_live_map;
+            self.scalar_borrow_map = snapshot.scalar_borrow_map;
         }
+    }
+
+    pub fn lowered_ref_storage_type(ty: &IType<'src>) -> IType<'src> {
+        match ty {
+            IType::Ref(inner) if !matches!(inner.as_ref(), IType::Array { .. }) => IType::Ref(
+                Arc::new(IType::Array {
+                    element_type: inner.clone(),
+                    size: crate::common::types::IValue::Int(1),
+                }),
+            ),
+            IType::RefMut(inner) if !matches!(inner.as_ref(), IType::Array { .. }) => {
+                IType::RefMut(Arc::new(IType::Array {
+                    element_type: inner.clone(),
+                    size: crate::common::types::IValue::Int(1),
+                }))
+            }
+            _ => ty.clone(),
+        }
+    }
+
+    pub fn create_scalar_borrow_value(
+        &mut self,
+        owner_reg: VirtualReg,
+        pointee_ty: IType<'src>,
+        kind: BorrowKind,
+    ) -> (VirtualReg, VirtualReg, IType<'src>) {
+        let cell_reg = self.fresh_reg();
+        self.emit(TirInstr::AllocArray {
+            dst: cell_reg,
+            element_ty: pointee_ty.clone(),
+            size: 1,
+            region: self.current_region(),
+        });
+
+        let zero_reg = self.fresh_reg();
+        self.emit(TirInstr::LoadImm {
+            dst: zero_reg,
+            value: 0,
+            ty: IType::Int,
+        });
+        self.emit(TirInstr::ArrayStore {
+            base: cell_reg,
+            index: zero_reg,
+            value: owner_reg,
+            bounds_constraint: Constraint::True,
+        });
+
+        let lowered_ref_ty = match kind {
+            BorrowKind::Shared => IType::Ref(Arc::new(IType::Array {
+                element_type: Arc::new(pointee_ty.clone()),
+                size: crate::common::types::IValue::Int(1),
+            })),
+            BorrowKind::Mutable => IType::RefMut(Arc::new(IType::Array {
+                element_type: Arc::new(pointee_ty.clone()),
+                size: crate::common::types::IValue::Int(1),
+            })),
+        };
+
+        let borrow_reg = self.fresh_reg();
+        match kind {
+            BorrowKind::Shared => self.emit(TirInstr::BorrowShared {
+                dst: borrow_reg,
+                src: cell_reg,
+                ty: lowered_ref_ty.clone(),
+            }),
+            BorrowKind::Mutable => self.emit(TirInstr::BorrowMut {
+                dst: borrow_reg,
+                src: cell_reg,
+                ty: lowered_ref_ty.clone(),
+            }),
+        }
+
+        (borrow_reg, cell_reg, lowered_ref_ty)
+    }
+
+    pub fn sync_scalar_borrow_owner(
+        &mut self,
+        owner_name: &str,
+        cell_reg: VirtualReg,
+        pointee_ty: IType<'src>,
+    ) {
+        let zero_reg = self.fresh_reg();
+        self.emit(TirInstr::LoadImm {
+            dst: zero_reg,
+            value: 0,
+            ty: IType::Int,
+        });
+        let loaded_reg = self.fresh_reg();
+        self.emit(TirInstr::ArrayLoad {
+            dst: loaded_reg,
+            base: cell_reg,
+            index: zero_reg,
+            element_ty: pointee_ty,
+            bounds_constraint: Constraint::True,
+        });
+        let owner_ty = self.lookup_var_type(owner_name);
+        self.bind_var_typed(owner_name, loaded_reg, owner_ty);
+    }
+
+    pub fn emit_borrow_end_for_binding(&mut self, name: &str) {
+        let Some(reg) = self.lookup_var(name) else {
+            return;
+        };
+        let ty = self.lookup_var_type(name);
+        let scalar_binding = self.lookup_scalar_borrow(name).cloned();
+        if let Some(binding) = scalar_binding
+            && binding.kind.is_mutable()
+        {
+            self.sync_scalar_borrow_owner(&binding.owner_name, binding.cell_reg, binding.pointee_ty);
+        }
+        self.emit(TirInstr::BorrowEnd { src: reg, ty });
+        self.borrow_live_map.insert(name.to_string(), false);
+        self.scalar_borrow_map.remove(name);
     }
 
     pub fn current_region(&self) -> Option<VirtualReg> {
@@ -355,13 +493,6 @@ fn is_owned_type<'src>(ty: &IType<'src>) -> bool {
 
 fn is_borrow_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Ref(_) | IType::RefMut(_))
-}
-
-pub(crate) fn is_scalar_ref_type<'src>(ty: &IType<'src>) -> bool {
-    match ty {
-        IType::Ref(inner) | IType::RefMut(inner) => !matches!(inner.as_ref(), IType::Array { .. }),
-        _ => false,
-    }
 }
 
 impl<'src> Default for LoweringContext<'src> {

@@ -218,51 +218,106 @@ fn storing_references_inside_arrays_is_rejected() {
 }
 
 #[test]
-fn shared_scalar_borrow_parameter_call_is_rejected() {
+fn shared_scalar_borrow_parameter_call_typechecks() {
     let inspect = Function {
         name: "inspect",
         parameters: vec![spanned(Parameter {
             name: "r",
             ty: ref_int_type(),
         })],
-        return_type: spanned(Type::Unit),
+        return_type: int_type(),
         precondition: None,
         postcondition: None,
         body: FunctionBody {
             statements: vec![],
-            trailing_expr: None,
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("r"))),
+            }))),
         },
     };
 
     let main = Function {
         name: "main",
         parameters: vec![],
-        return_type: spanned(Type::Unit),
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![spanned(Stmt::Let {
+                is_mut: false,
+                name: "x",
+                ty: int_type(),
+                value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+            })],
+            trailing_expr: Some(Box::new(spanned(Expr::Call {
+                func_name: "inspect",
+                args: spanned(vec![spanned(Expr::Borrow {
+                    kind: BorrowKind::Shared,
+                    expr: Box::new(spanned(Expr::Variable("x"))),
+                })]),
+            }))),
+        },
+    };
+
+    check_program(&make_program(vec![inspect, main]))
+        .expect("scalar shared-borrow parameter calls should typecheck");
+}
+
+#[test]
+fn mutable_scalar_borrow_parameter_call_typechecks() {
+    let write = Function {
+        name: "write",
+        parameters: vec![spanned(Parameter {
+            name: "r",
+            ty: ref_mut_int_type(),
+        })],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![spanned(Stmt::Assignment {
+                lhs: spanned(Expr::UnaryOp {
+                    op: crate::common::ast::UnaryOp::Deref,
+                    cond: Box::new(spanned(Expr::Variable("r"))),
+                }),
+                rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(9))),
+            })],
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("r"))),
+            }))),
+        },
+    };
+
+    let main = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: int_type(),
         precondition: None,
         postcondition: None,
         body: FunctionBody {
             statements: vec![
                 spanned(Stmt::Let {
-                    is_mut: false,
+                    is_mut: true,
                     name: "x",
                     ty: int_type(),
-                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(0))),
                 }),
                 spanned(Stmt::Expr(spanned(Expr::Call {
-                    func_name: "inspect",
+                    func_name: "write",
                     args: spanned(vec![spanned(Expr::Borrow {
-                        kind: BorrowKind::Shared,
+                        kind: BorrowKind::Mutable,
                         expr: Box::new(spanned(Expr::Variable("x"))),
                     })]),
                 }))),
             ],
-            trailing_expr: None,
+            trailing_expr: Some(Box::new(spanned(Expr::Variable("x")))),
         },
     };
 
-    let err = check_program(&make_program(vec![inspect, main]))
-        .expect_err("scalar shared-borrow parameter calls are not supported yet");
-    assert!(matches!(err, TypeError::UnsupportedFeature { .. }));
+    check_program(&make_program(vec![write, main]))
+        .expect("scalar mutable-borrow parameter calls should typecheck");
 }
 
 #[test]
