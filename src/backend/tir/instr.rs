@@ -96,6 +96,7 @@ pub enum TirInstr<'src> {
         dst: Option<VirtualReg>,
         func: String,
         args: Vec<VirtualReg>,
+        arg_types: Vec<IType<'src>>,
         arg_kinds: Vec<ParameterKind>,
         ownership: OwnershipMode,
         result_ty: IType<'src>,

@@ -331,14 +331,14 @@ fn lower_call<'src>(
 ) -> VirtualReg {
     // Lower all arguments
     let mut borrow_end_regs = Vec::new();
-    let arg_regs: Vec<VirtualReg> = args
+    let lowered_args: Vec<(VirtualReg, IType<'src>)> = args
         .iter()
         .zip(arg_kinds.iter())
         .map(|(arg, arg_kind)| {
-            let arg_reg = lower_expr(ctx, arg);
             match arg_kind {
-                ParameterKind::PlainValue => arg_reg,
+                ParameterKind::PlainValue => (lower_expr(ctx, arg), arg.0.get_type().clone()),
                 ParameterKind::OwnedValue => {
+                    let arg_reg = lower_expr(ctx, arg);
                     if matches!(&arg.0, TExpr::Variable { .. })
                         && matches!(arg.0.get_type(), IType::Array { .. })
                     {
@@ -351,18 +351,21 @@ fn lower_call<'src>(
                         if let TExpr::Variable { name, .. } = &arg.0 {
                             ctx.mark_var_moved(name);
                         }
-                        moved_reg
+                        (moved_reg, arg.0.get_type().clone())
                     } else {
-                        arg_reg
+                        (arg_reg, arg.0.get_type().clone())
                     }
-                },
+                }
                 ParameterKind::SharedBorrow => {
-                    if matches!(arg.0.get_type(), IType::Ref(_) | IType::RefMut(_)) {
-                        if matches!(&arg.0, TExpr::Borrow { .. }) {
-                            borrow_end_regs.push((arg_reg, arg.0.get_type().clone()));
-                        }
-                        return arg_reg;
+                    if let TExpr::Borrow {
+                        kind: crate::common::ownership::BorrowKind::Shared,
+                        expr: place,
+                        ..
+                    } = &arg.0
+                    {
+                        return (lower_expr(ctx, place), place.0.get_type().clone());
                     }
+                    let arg_reg = lower_expr(ctx, arg);
                     let borrowed_reg = ctx.fresh_reg();
                     ctx.emit(TirInstr::BorrowShared {
                         dst: borrowed_reg,
@@ -370,15 +373,18 @@ fn lower_call<'src>(
                         ty: arg.0.get_type().clone(),
                     });
                     borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
-                    borrowed_reg
-                },
+                    (borrowed_reg, arg.0.get_type().clone())
+                }
                 ParameterKind::MutableBorrow => {
-                    if matches!(arg.0.get_type(), IType::RefMut(_)) {
-                        if matches!(&arg.0, TExpr::Borrow { .. }) {
-                            borrow_end_regs.push((arg_reg, arg.0.get_type().clone()));
-                        }
-                        return arg_reg;
+                    if let TExpr::Borrow {
+                        kind: crate::common::ownership::BorrowKind::Mutable,
+                        expr: place,
+                        ..
+                    } = &arg.0
+                    {
+                        return (lower_expr(ctx, place), place.0.get_type().clone());
                     }
+                    let arg_reg = lower_expr(ctx, arg);
                     let borrowed_reg = ctx.fresh_reg();
                     ctx.emit(TirInstr::BorrowMut {
                         dst: borrowed_reg,
@@ -386,11 +392,12 @@ fn lower_call<'src>(
                         ty: arg.0.get_type().clone(),
                     });
                     borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone()));
-                    borrowed_reg
-                },
+                    (borrowed_reg, arg.0.get_type().clone())
+                }
             }
         })
         .collect();
+    let (arg_regs, arg_types): (Vec<VirtualReg>, Vec<IType<'src>>) = lowered_args.into_iter().unzip();
 
     // For unit-returning functions, don't try to capture the return value
     if matches!(ty, IType::Unit) {
@@ -398,6 +405,7 @@ fn lower_call<'src>(
             dst: None,
             func: func_name.to_string(),
             args: arg_regs,
+            arg_types,
             arg_kinds: arg_kinds.to_vec(),
             ownership,
             result_ty: ty.clone(),
@@ -423,6 +431,7 @@ fn lower_call<'src>(
             dst: Some(dst),
             func: func_name.to_string(),
             args: arg_regs,
+            arg_types,
             arg_kinds: arg_kinds.to_vec(),
             ownership,
             result_ty: ty.clone(),

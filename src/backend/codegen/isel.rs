@@ -134,6 +134,7 @@ pub fn lower_instruction<'src>(
             dst,
             func,
             args,
+            arg_types,
             arg_kinds,
             ownership,
             result_ty,
@@ -143,6 +144,7 @@ pub fn lower_instruction<'src>(
                 dst.as_ref().copied(),
                 func,
                 args,
+                arg_types,
                 arg_kinds,
                 *ownership,
                 result_ty,
@@ -471,6 +473,7 @@ fn lower_call<'src>(
     dst: Option<crate::backend::dtal::VirtualReg>,
     func: &str,
     args: &[crate::backend::dtal::VirtualReg],
+    arg_types: &[crate::common::types::IType<'src>],
     arg_kinds: &[ParameterKind],
     ownership: OwnershipMode,
     result_ty: &crate::common::types::IType<'src>,
@@ -480,7 +483,12 @@ fn lower_call<'src>(
     let dtal_result_ty = DtalType::from_itype(result_ty);
 
     // Move arguments to parameter registers (r0, r1, r2, ...)
-    for (i, (arg, arg_kind)) in args.iter().zip(arg_kinds.iter()).enumerate() {
+    for (i, ((arg, arg_ty), arg_kind)) in args
+        .iter()
+        .zip(arg_types.iter())
+        .zip(arg_kinds.iter())
+        .enumerate()
+    {
         if i < 8 {
             // Use physical parameter registers
             let param_reg = match i {
@@ -507,12 +515,28 @@ fn lower_call<'src>(
                     ty: DtalType::Int,
                 });
             } else if arg_kind.is_shared_borrow() {
+                if matches!(arg_ty, crate::common::types::IType::Ref(_)) {
+                    instrs.push(DtalInstr::MovReg {
+                        dst: Reg::Physical(param_reg),
+                        src: Reg::Virtual(*arg),
+                        ty: DtalType::Int,
+                    });
+                    continue;
+                }
                 instrs.push(DtalInstr::AliasBorrow {
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),
                     ty: DtalType::Int,
                 });
             } else {
+                if matches!(arg_ty, crate::common::types::IType::RefMut(_)) {
+                    instrs.push(DtalInstr::MovReg {
+                        dst: Reg::Physical(param_reg),
+                        src: Reg::Virtual(*arg),
+                        ty: DtalType::Int,
+                    });
+                    continue;
+                }
                 instrs.push(DtalInstr::BorrowMut {
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),

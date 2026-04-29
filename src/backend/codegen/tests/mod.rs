@@ -6,10 +6,11 @@ use crate::backend::codegen::codegen_program;
 use crate::backend::emit::emit_program;
 use crate::backend::lower::lower_program;
 use crate::common::ast::{BinOp, Literal};
-use crate::common::ownership::OwnershipMode;
+use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::IType;
+use crate::verifier::verify_dtal;
 
 /// Helper to create a spanned value with a dummy span
 fn spanned<T>(value: T) -> Spanned<T> {
@@ -461,4 +462,174 @@ fn test_pipeline_function_with_inequality_postcondition() {
         "=== Function with Inequality Postcondition DTAL ===\n{}",
         output
     );
+}
+
+#[test]
+fn test_pipeline_shared_borrow_survives_to_dtal_and_verifies() {
+    use std::sync::Arc;
+    let array_ty = IType::Array {
+        element_type: Arc::new(IType::Int),
+        size: crate::common::types::IValue::Int(1),
+    };
+
+    let program = TProgram {
+        functions: vec![
+            TFunction {
+                name: "inspect".to_string(),
+                parameters: vec![TParameter {
+                    name: "r".to_string(),
+                    ty: IType::Ref(Arc::new(array_ty.clone())),
+                }],
+                parameter_kinds: vec![ParameterKind::SharedBorrow],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+            TFunction {
+                name: "main".to_string(),
+                parameters: vec![],
+                parameter_kinds: vec![],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![
+                        spanned(TStmt::Let {
+                            is_mut: false,
+                            name: "x".to_string(),
+                            declared_ty: array_ty.clone(),
+                            value: spanned(TExpr::ArrayInit {
+                                value: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                length: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                ty: array_ty.clone(),
+                            }),
+                            checked_ty: array_ty.clone(),
+                            ownership: OwnershipMode::FreshOwned,
+                        }),
+                        spanned(TStmt::Expr(spanned(TExpr::Call {
+                            func_name: "inspect".to_string(),
+                            args: vec![spanned(TExpr::Borrow {
+                                kind: BorrowKind::Shared,
+                                expr: Box::new(spanned(TExpr::Variable {
+                                    name: "x".to_string(),
+                                    ty: array_ty.clone(),
+                                })),
+                                ty: IType::Ref(Arc::new(array_ty.clone())),
+                            })],
+                            arg_kinds: vec![ParameterKind::SharedBorrow],
+                            ownership: OwnershipMode::Plain,
+                            ty: IType::Unit,
+                        }))),
+                    ],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+        ],
+    };
+
+    let tir = lower_program(&program);
+    let dtal = codegen_program(&tir);
+    verify_dtal(&dtal).expect("shared borrow pipeline should verify");
+
+    let output = emit_program(&dtal);
+    assert!(output.contains("alias_borrow"));
+}
+
+#[test]
+fn test_pipeline_mutable_borrow_survives_to_dtal_and_verifies() {
+    use std::sync::Arc;
+    let array_ty = IType::Array {
+        element_type: Arc::new(IType::Int),
+        size: crate::common::types::IValue::Int(1),
+    };
+
+    let program = TProgram {
+        functions: vec![
+            TFunction {
+                name: "touch".to_string(),
+                parameters: vec![TParameter {
+                    name: "r".to_string(),
+                    ty: IType::RefMut(Arc::new(array_ty.clone())),
+                }],
+                parameter_kinds: vec![ParameterKind::MutableBorrow],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+            TFunction {
+                name: "main".to_string(),
+                parameters: vec![],
+                parameter_kinds: vec![],
+                return_type: IType::Unit,
+                returns_owned: false,
+                precondition: None,
+                postcondition: None,
+                body: TFunctionBody {
+                    statements: vec![
+                        spanned(TStmt::Let {
+                            is_mut: true,
+                            name: "x".to_string(),
+                            declared_ty: array_ty.clone(),
+                            value: spanned(TExpr::ArrayInit {
+                                value: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                length: Box::new(spanned(TExpr::Literal {
+                                    value: Literal::Int(1),
+                                    ty: IType::Int,
+                                })),
+                                ty: array_ty.clone(),
+                            }),
+                            checked_ty: array_ty.clone(),
+                            ownership: OwnershipMode::FreshOwned,
+                        }),
+                        spanned(TStmt::Expr(spanned(TExpr::Call {
+                            func_name: "touch".to_string(),
+                            args: vec![spanned(TExpr::Borrow {
+                                kind: BorrowKind::Mutable,
+                                expr: Box::new(spanned(TExpr::Variable {
+                                    name: "x".to_string(),
+                                    ty: array_ty.clone(),
+                                })),
+                                ty: IType::RefMut(Arc::new(array_ty.clone())),
+                            })],
+                            arg_kinds: vec![ParameterKind::MutableBorrow],
+                            ownership: OwnershipMode::Plain,
+                            ty: IType::Unit,
+                        }))),
+                    ],
+                    trailing_expr: None,
+                },
+                span: Span::new(0, 0),
+            },
+        ],
+    };
+
+    let tir = lower_program(&program);
+    let dtal = codegen_program(&tir);
+    verify_dtal(&dtal).expect("mutable borrow pipeline should verify");
+
+    let output = emit_program(&dtal);
+    assert!(output.contains("borrow_mut"));
 }

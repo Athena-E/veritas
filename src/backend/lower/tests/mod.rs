@@ -426,8 +426,8 @@ fn test_lower_direct_borrow_call_reuses_borrow_and_ends_it_after_call() {
         .iter()
         .filter(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
         .count();
-    assert_eq!(borrow_shared_count, 1);
-    assert_eq!(borrow_end_count, 1);
+    assert_eq!(borrow_shared_count, 0);
+    assert_eq!(borrow_end_count, 0);
     assert!(entry_block.instructions.iter().any(|instr| matches!(
         instr,
         TirInstr::Call {
