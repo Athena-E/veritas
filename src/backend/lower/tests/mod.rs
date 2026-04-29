@@ -436,10 +436,12 @@ fn test_lower_direct_scalar_borrow_call_materializes_hidden_cell() {
         .count();
     assert_eq!(borrow_shared_count, 0);
     assert_eq!(borrow_end_count, 0);
-    assert!(entry_block
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::AllocArray { size: 1, .. })));
+    assert!(
+        entry_block
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::AllocArray { size: 1, .. }))
+    );
     assert!(entry_block.instructions.iter().any(|instr| matches!(
         instr,
         TirInstr::Call {

@@ -365,98 +365,96 @@ fn lower_call<'src>(
     let lowered_args: Vec<(VirtualReg, IType<'src>)> = args
         .iter()
         .zip(arg_kinds.iter())
-        .map(|(arg, arg_kind)| {
-            match arg_kind {
-                ParameterKind::PlainValue => (lower_expr(ctx, arg), arg.0.get_type().clone()),
-                ParameterKind::OwnedValue => {
-                    let arg_reg = lower_expr(ctx, arg);
-                    if matches!(&arg.0, TExpr::Variable { .. })
-                        && matches!(arg.0.get_type(), IType::Array { .. })
-                    {
-                        let moved_reg = ctx.fresh_reg();
-                        ctx.emit(TirInstr::MoveOwned {
-                            dst: moved_reg,
-                            src: arg_reg,
-                            ty: arg.0.get_type().clone(),
+        .map(|(arg, arg_kind)| match arg_kind {
+            ParameterKind::PlainValue => (lower_expr(ctx, arg), arg.0.get_type().clone()),
+            ParameterKind::OwnedValue => {
+                let arg_reg = lower_expr(ctx, arg);
+                if matches!(&arg.0, TExpr::Variable { .. })
+                    && matches!(arg.0.get_type(), IType::Array { .. })
+                {
+                    let moved_reg = ctx.fresh_reg();
+                    ctx.emit(TirInstr::MoveOwned {
+                        dst: moved_reg,
+                        src: arg_reg,
+                        ty: arg.0.get_type().clone(),
+                    });
+                    if let TExpr::Variable { name, .. } = &arg.0 {
+                        ctx.mark_var_moved(name);
+                    }
+                    (moved_reg, arg.0.get_type().clone())
+                } else {
+                    (arg_reg, arg.0.get_type().clone())
+                }
+            }
+            ParameterKind::SharedBorrow => {
+                if let TExpr::Borrow {
+                    kind: crate::common::ownership::BorrowKind::Shared,
+                    expr: place,
+                    ..
+                } = &arg.0
+                {
+                    if matches!(place.0.get_type(), IType::Array { .. }) {
+                        return (lower_expr(ctx, place), place.0.get_type().clone());
+                    }
+                    if let TExpr::Variable { name, .. } = &place.0 {
+                        let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                            panic!(
+                                "Undefined scalar borrow owner during call lowering: {}",
+                                name
+                            )
                         });
-                        if let TExpr::Variable { name, .. } = &arg.0 {
-                            ctx.mark_var_moved(name);
-                        }
-                        (moved_reg, arg.0.get_type().clone())
-                    } else {
-                        (arg_reg, arg.0.get_type().clone())
+                        let (cell_reg, cell_ty) =
+                            ctx.create_scalar_borrow_cell(owner_reg, place.0.get_type().clone());
+                        return (cell_reg, cell_ty);
                     }
                 }
-                ParameterKind::SharedBorrow => {
-                    if let TExpr::Borrow {
-                        kind: crate::common::ownership::BorrowKind::Shared,
-                        expr: place,
-                        ..
-                    } = &arg.0
-                    {
-                        if matches!(place.0.get_type(), IType::Array { .. }) {
-                            return (lower_expr(ctx, place), place.0.get_type().clone());
-                        }
-                        if let TExpr::Variable { name, .. } = &place.0 {
-                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
-                                panic!(
-                                    "Undefined scalar borrow owner during call lowering: {}",
-                                    name
-                                )
-                            });
-                            let (cell_reg, cell_ty) =
-                                ctx.create_scalar_borrow_cell(owner_reg, place.0.get_type().clone());
-                            return (cell_reg, cell_ty);
-                        }
+                let arg_reg = lower_expr(ctx, arg);
+                let borrowed_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::BorrowShared {
+                    dst: borrowed_reg,
+                    src: arg_reg,
+                    ty: arg.0.get_type().clone(),
+                });
+                borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), true, None));
+                (borrowed_reg, arg.0.get_type().clone())
+            }
+            ParameterKind::MutableBorrow => {
+                if let TExpr::Borrow {
+                    kind: crate::common::ownership::BorrowKind::Mutable,
+                    expr: place,
+                    ..
+                } = &arg.0
+                {
+                    if matches!(place.0.get_type(), IType::Array { .. }) {
+                        return (lower_expr(ctx, place), place.0.get_type().clone());
                     }
-                    let arg_reg = lower_expr(ctx, arg);
-                    let borrowed_reg = ctx.fresh_reg();
-                    ctx.emit(TirInstr::BorrowShared {
-                        dst: borrowed_reg,
-                        src: arg_reg,
-                        ty: arg.0.get_type().clone(),
-                    });
-                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), true, None));
-                    (borrowed_reg, arg.0.get_type().clone())
-                }
-                ParameterKind::MutableBorrow => {
-                    if let TExpr::Borrow {
-                        kind: crate::common::ownership::BorrowKind::Mutable,
-                        expr: place,
-                        ..
-                    } = &arg.0
-                    {
-                        if matches!(place.0.get_type(), IType::Array { .. }) {
-                            return (lower_expr(ctx, place), place.0.get_type().clone());
-                        }
-                        if let TExpr::Variable { name, .. } = &place.0 {
-                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
-                                panic!(
-                                    "Undefined scalar mutable borrow owner during call lowering: {}",
-                                    name
-                                )
-                            });
-                            let (cell_reg, cell_ty) =
-                                ctx.create_scalar_borrow_cell(owner_reg, place.0.get_type().clone());
-                            borrow_end_regs.push((
-                                cell_reg,
-                                cell_ty.clone(),
-                                false,
-                                Some((name.clone(), cell_reg, place.0.get_type().clone())),
-                            ));
-                            return (cell_reg, cell_ty);
-                        }
+                    if let TExpr::Variable { name, .. } = &place.0 {
+                        let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                            panic!(
+                                "Undefined scalar mutable borrow owner during call lowering: {}",
+                                name
+                            )
+                        });
+                        let (cell_reg, cell_ty) =
+                            ctx.create_scalar_borrow_cell(owner_reg, place.0.get_type().clone());
+                        borrow_end_regs.push((
+                            cell_reg,
+                            cell_ty.clone(),
+                            false,
+                            Some((name.clone(), cell_reg, place.0.get_type().clone())),
+                        ));
+                        return (cell_reg, cell_ty);
                     }
-                    let arg_reg = lower_expr(ctx, arg);
-                    let borrowed_reg = ctx.fresh_reg();
-                    ctx.emit(TirInstr::BorrowMut {
-                        dst: borrowed_reg,
-                        src: arg_reg,
-                        ty: arg.0.get_type().clone(),
-                    });
-                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), true, None));
-                    (borrowed_reg, arg.0.get_type().clone())
                 }
+                let arg_reg = lower_expr(ctx, arg);
+                let borrowed_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::BorrowMut {
+                    dst: borrowed_reg,
+                    src: arg_reg,
+                    ty: arg.0.get_type().clone(),
+                });
+                borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), true, None));
+                (borrowed_reg, arg.0.get_type().clone())
             }
         })
         .collect();
