@@ -705,6 +705,71 @@ pub fn check_stmt<'src>(
                     Ok(((tstmt, span), new_ctx))
                 }
 
+                crate::common::ast::Expr::UnaryOp {
+                    op: crate::common::ast::UnaryOp::Deref,
+                    ..
+                } => {
+                    let (tlhs, _lhs_ty) = synth_expr(ctx, lhs)?;
+                    let (owner_name, kind, pointee_ty) = match &tlhs.0 {
+                        TExpr::Deref {
+                            owner, kind, ty, ..
+                        } => (owner.clone(), *kind, ty.clone()),
+                        _ => {
+                            return Err(TypeError::UnsupportedFeature {
+                                feature: "dereference assignment target must be a reference binding".to_string(),
+                                span: lhs.1,
+                            });
+                        }
+                    };
+
+                    if kind.is_shared() {
+                        return Err(TypeError::BorrowConflict {
+                            name: owner_name,
+                            reason: "cannot assign through a shared reference".to_string(),
+                            span: lhs.1,
+                        });
+                    }
+                    if !is_subtype(ctx, &rhs_ty, &pointee_ty) {
+                        return Err(TypeError::TypeMismatch {
+                            expected: pointee_ty.clone(),
+                            found: rhs_ty,
+                            span: rhs.1,
+                        });
+                    }
+
+                    let move_ctx = apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?;
+                    let mut new_ctx =
+                        move_ctx.with_mutable_update(&owner_name, rhs_ty.clone()).map_err(|reason| {
+                            TypeError::InvalidAssignment {
+                                variable: owner_name.clone(),
+                                reason,
+                                span: lhs.1,
+                            }
+                        })?;
+
+                    let tlhs_expr = TExpr::Deref {
+                        expr: match tlhs.0 {
+                            TExpr::Deref { expr, .. } => expr,
+                            _ => unreachable!(),
+                        },
+                        owner: owner_name.clone(),
+                        kind,
+                        ty: pointee_ty,
+                    };
+
+                    let tstmt = TStmt::Assignment {
+                        lhs: (tlhs_expr, lhs.1),
+                        rhs: trhs,
+                        ownership: OwnershipMode::Plain,
+                    };
+
+                    if let Some(prop) = postcondition_for_call(&new_ctx, &owner_name, &rhs.0) {
+                        new_ctx = new_ctx.with_proposition(prop);
+                    }
+
+                    Ok(((tstmt, span), new_ctx))
+                }
+
                 _ => Err(TypeError::InvalidAssignment {
                     variable: format!("{:?}", lhs.0),
                     reason: "Invalid assignment target".to_string(),

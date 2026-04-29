@@ -4,7 +4,7 @@
 //! and control flow structures.
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
-use crate::backend::lower::context::LoweringContext;
+use crate::backend::lower::context::{LoweringContext, is_scalar_ref_type};
 use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
 use crate::backend::lower::widen_itype;
 use crate::backend::tir::{BinaryOp, PhiNode, Terminator, TirInstr};
@@ -94,6 +94,17 @@ fn lower_let<'src>(
     ty: &IType<'src>,
     ownership: OwnershipMode,
 ) {
+    if is_scalar_ref_type(ty)
+        && let TExpr::Borrow { expr, .. } = &value.0
+        && let TExpr::Variable { name: owner, .. } = &expr.0
+    {
+        let owner_reg = ctx
+            .lookup_var(owner)
+            .unwrap_or_else(|| panic!("Undefined scalar borrow owner during lowering: {}", owner));
+        ctx.bind_var_borrow_alias(name, owner_reg, ty.clone());
+        return;
+    }
+
     let prior_binding = ctx
         .lookup_var(name)
         .zip(Some(ctx.lookup_var_type(name)))
@@ -157,6 +168,17 @@ fn lower_assignment<'src>(
         TExpr::Variable { name, ty: _ } => {
             // Simple variable assignment
             // In SSA, we create a new register and update the binding
+            if is_scalar_ref_type(&ctx.lookup_var_type(name))
+                && let TExpr::Borrow { expr, .. } = &rhs.0
+                && let TExpr::Variable { name: owner, .. } = &expr.0
+            {
+                let owner_reg = ctx.lookup_var(owner).unwrap_or_else(|| {
+                    panic!("Undefined scalar borrow owner during lowering: {}", owner)
+                });
+                ctx.bind_var_borrow_alias(name, owner_reg, rhs.0.get_type().clone());
+                return;
+            }
+
             let rhs_reg = lower_expr(ctx, rhs);
             let prior_reg = ctx.lookup_var(name);
             let prior_ty = ctx.lookup_var_type(name);
@@ -224,6 +246,35 @@ fn lower_assignment<'src>(
                 value: rhs_reg,
                 bounds_constraint: Constraint::True,
             });
+        }
+
+        TExpr::Deref { owner, ty, .. } => {
+            let rhs_reg = lower_expr(ctx, rhs);
+            let prior_reg = ctx.lookup_var(owner);
+            let prior_ty = ctx.lookup_var_type(owner);
+
+            let new_reg = if matches!(&rhs.0, TExpr::Borrow { .. }) {
+                rhs_reg
+            } else {
+                let new_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::Copy {
+                    dst: new_reg,
+                    src: rhs_reg,
+                    ty: ty.clone(),
+                });
+                new_reg
+            };
+
+            if let Some(prior_reg) = prior_reg
+                && is_owned_type(&prior_ty)
+            {
+                ctx.emit(TirInstr::DropOwned {
+                    src: prior_reg,
+                    ty: prior_ty.clone(),
+                });
+            }
+
+            ctx.bind_var_typed(owner, new_reg, rhs.0.get_type().clone());
         }
 
         _ => {

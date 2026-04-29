@@ -15,6 +15,7 @@ where
         enum PrefixOp {
             Not,
             Neg,
+            Deref,
             BorrowShared,
             BorrowMut,
         }
@@ -138,6 +139,7 @@ where
                 .ignore_then(just(Token::Mut))
                 .to(PrefixOp::BorrowMut),
             just(Token::Op("&")).to(PrefixOp::BorrowShared),
+            just(Token::Op("*")).to(PrefixOp::Deref),
             just(Token::Op("!")).to(PrefixOp::Not),
             just(Token::Op("-")).to(PrefixOp::Neg),
         ));
@@ -151,6 +153,10 @@ where
                     },
                     PrefixOp::Neg => Expr::UnaryOp {
                         op: UnaryOp::Neg,
+                        cond: Box::new(operand),
+                    },
+                    PrefixOp::Deref => Expr::UnaryOp {
+                        op: UnaryOp::Deref,
                         cond: Box::new(operand),
                     },
                     PrefixOp::BorrowShared => Expr::Borrow {

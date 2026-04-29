@@ -106,6 +106,8 @@ verify_example!(e2e_30_i64_safe_midpoint, "30_i64_safe_midpoint.veri");
 verify_example!(e2e_31_u64_basic, "31_u64_basic.veri");
 verify_example!(e2e_32_shared_borrow, "32_shared_borrow.veri");
 verify_example!(e2e_33_mutable_borrow, "33_mutable_borrow.veri");
+verify_example!(e2e_34_shared_scalar_deref, "34_shared_scalar_deref.veri");
+verify_example!(e2e_35_mutable_scalar_deref, "35_mutable_scalar_deref.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation

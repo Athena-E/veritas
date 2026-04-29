@@ -277,6 +277,31 @@ fn test_expr_parser_mutable_borrow() {
 }
 
 #[test]
+fn test_expr_parser_deref() {
+    let src = "*rx";
+    let tokens = parse_tokens(src);
+    let result = expr_parser_for_types()
+        .parse(
+            tokens
+                .as_slice()
+                .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+        )
+        .into_result();
+    assert!(result.is_ok());
+    if let Ok((expr, _)) = result {
+        match expr {
+            Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond,
+            } => {
+                assert!(matches!(cond.0, Expr::Variable("rx")));
+            }
+            other => panic!("Expected deref expression, got {:?}", other),
+        }
+    }
+}
+
+#[test]
 fn test_expr_parser_function_call_no_args() {
     let src = "foo()";
     let tokens = parse_tokens(src);

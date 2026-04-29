@@ -79,6 +79,8 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
             }
         }
 
+        TExpr::Deref { owner, .. } => Some(IndexExpr::Var(owner.clone())),
+
         _ => None,
     }
 }
@@ -189,6 +191,17 @@ pub fn lower_expr<'src>(
 
         TExpr::UnaryOp { op, operand, ty } => lower_unaryop(ctx, *op, operand, ty),
 
+        TExpr::Deref { owner, ty, .. } => {
+            if matches!(ty, IType::Array { .. }) {
+                panic!("whole-array dereference should not reach lowering");
+            }
+            if let Some(reg) = ctx.lookup_var(owner) {
+                reg
+            } else {
+                panic!("Undefined deref owner during lowering: {}", owner)
+            }
+        }
+
         TExpr::Borrow { kind, expr: place, ty } => lower_borrow_expr(ctx, *kind, place, ty),
 
         TExpr::Call {
@@ -297,6 +310,7 @@ fn convert_unaryop(op: AstUnaryOp) -> UnaryOp {
     match op {
         AstUnaryOp::Not => UnaryOp::Not,
         AstUnaryOp::Neg => UnaryOp::Neg,
+        AstUnaryOp::Deref => panic!("deref is lowered structurally, not as a unary op"),
     }
 }
 

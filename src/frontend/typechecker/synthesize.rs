@@ -179,6 +179,57 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), borrow_ty))
         }
 
+        Expr::UnaryOp {
+            op: UnaryOp::Deref,
+            cond,
+        } => {
+            let (tcond, cond_ty) = synth_expr(ctx, cond)?;
+            let ref_name = match &cond.0 {
+                Expr::Variable(name) => *name,
+                _ => {
+                    return Err(TypeError::UnsupportedFeature {
+                        feature:
+                            "dereferencing non-binding reference expressions is not yet supported"
+                                .to_string(),
+                        span: cond.1,
+                    });
+                }
+            };
+
+            let Some((owner_name, kind)) = ctx.lookup_borrow_binding(ref_name) else {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "dereferencing reference parameters or copied references is not yet supported".to_string(),
+                    span: cond.1,
+                });
+            };
+
+            let inner_ty = match &cond_ty {
+                IType::Ref(inner) | IType::RefMut(inner) => inner.as_ref().clone(),
+                _ => {
+                    return Err(TypeError::InvalidOperation {
+                        operation: "deref".to_string(),
+                        operand_types: vec![cond_ty],
+                        span,
+                    });
+                }
+            };
+
+            if matches!(inner_ty, IType::Array { .. }) {
+                return Err(TypeError::UnsupportedFeature {
+                    feature: "whole-array dereference is not yet supported; use indexing through the reference instead".to_string(),
+                    span,
+                });
+            }
+
+            let texpr = TExpr::Deref {
+                expr: Box::new(tcond),
+                owner: owner_name.to_string(),
+                kind,
+                ty: inner_ty.clone(),
+            };
+            Ok(((texpr, span), inner_ty))
+        }
+
         // BINOP-ARITH: Arithmetic operations with SMT synthesis
         Expr::BinOp {
             op:
@@ -510,6 +561,23 @@ pub fn synth_expr<'src>(
                     return Err(TypeError::TypeMismatch {
                         expected: param_ty.clone(),
                         found: arg_ty,
+                        span: arg.1,
+                    });
+                }
+
+                if matches!(
+                    arg_kind,
+                    crate::common::ownership::ParameterKind::SharedBorrow
+                        | crate::common::ownership::ParameterKind::MutableBorrow
+                ) && matches!(
+                    param_ty,
+                    IType::Ref(inner) | IType::RefMut(inner)
+                        if !matches!(inner.as_ref(), IType::Array { .. })
+                ) {
+                    return Err(TypeError::UnsupportedFeature {
+                        feature:
+                            "passing scalar references to functions is not yet supported"
+                                .to_string(),
                         span: arg.1,
                     });
                 }

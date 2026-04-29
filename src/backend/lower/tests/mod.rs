@@ -318,11 +318,15 @@ fn test_lower_function_without_postcondition() {
 
 #[test]
 fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
+    let array_ty = IType::Array {
+        element_type: std::sync::Arc::new(IType::Int),
+        size: crate::common::types::IValue::Int(1),
+    };
     let func = TFunction {
         name: "borrow_local".to_string(),
         parameters: vec![TParameter {
             name: "x".to_string(),
-            ty: IType::Int,
+            ty: array_ty.clone(),
         }],
         parameter_kinds: vec![ParameterKind::PlainValue],
         return_type: IType::Unit,
@@ -333,16 +337,16 @@ fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
             statements: vec![spanned(TStmt::Let {
                 is_mut: false,
                 name: "rx".to_string(),
-                declared_ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                declared_ty: IType::Ref(std::sync::Arc::new(array_ty.clone())),
                 value: spanned(TExpr::Borrow {
                     kind: BorrowKind::Shared,
                     expr: Box::new(spanned(TExpr::Variable {
                         name: "x".to_string(),
-                        ty: IType::Int,
+                        ty: array_ty.clone(),
                     })),
-                    ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                    ty: IType::Ref(std::sync::Arc::new(array_ty.clone())),
                 }),
-                checked_ty: IType::Ref(std::sync::Arc::new(IType::Int)),
+                checked_ty: IType::Ref(std::sync::Arc::new(array_ty)),
                 ownership: OwnershipMode::Plain,
             })],
             trailing_expr: None,

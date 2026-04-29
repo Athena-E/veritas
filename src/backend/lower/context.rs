@@ -98,6 +98,16 @@ impl<'src> LoweringContext<'src> {
         }
     }
 
+    pub fn bind_var_borrow_alias(&mut self, name: &str, reg: VirtualReg, ty: IType<'src>) {
+        self.var_map.insert(name.to_string(), reg);
+        self.var_type_map.insert(name.to_string(), ty);
+        self.owned_live_map.insert(name.to_string(), false);
+        self.borrow_live_map.insert(name.to_string(), false);
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.declared_names.insert(name.to_string());
+        }
+    }
+
     /// Look up the current SSA register for a variable
     pub fn lookup_var(&self, name: &str) -> Option<VirtualReg> {
         self.var_map.get(name).copied()
@@ -345,6 +355,13 @@ fn is_owned_type<'src>(ty: &IType<'src>) -> bool {
 
 fn is_borrow_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Ref(_) | IType::RefMut(_))
+}
+
+pub(crate) fn is_scalar_ref_type<'src>(ty: &IType<'src>) -> bool {
+    match ty {
+        IType::Ref(inner) | IType::RefMut(inner) => !matches!(inner.as_ref(), IType::Array { .. }),
+        _ => false,
+    }
 }
 
 impl<'src> Default for LoweringContext<'src> {

@@ -123,6 +123,7 @@ pub enum BinOp {
 pub enum UnaryOp {
     Not,
     Neg,
+    Deref,
 }
 
 // Literals

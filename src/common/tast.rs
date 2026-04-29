@@ -42,6 +42,13 @@ pub enum TExpr<'src> {
         ty: IType<'src>,
     },
 
+    Deref {
+        expr: Box<Spanned<Self>>,
+        owner: String,
+        kind: BorrowKind,
+        ty: IType<'src>,
+    },
+
     Borrow {
         kind: BorrowKind,
         expr: Box<Spanned<Self>>,
@@ -84,6 +91,7 @@ impl<'src> TExpr<'src> {
             TExpr::Variable { ty, .. } => ty,
             TExpr::BinOp { ty, .. } => ty,
             TExpr::UnaryOp { ty, .. } => ty,
+            TExpr::Deref { ty, .. } => ty,
             TExpr::Borrow { ty, .. } => ty,
             TExpr::Call { ty, .. } => ty,
             TExpr::Index { ty, .. } => ty,

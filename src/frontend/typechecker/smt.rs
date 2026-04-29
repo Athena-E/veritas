@@ -73,7 +73,7 @@ impl SmtOracle {
                     let operand = Self::translate_expr(&cond.0)?;
                     Some(-operand)
                 }
-                UnaryOp::Not => None,
+                UnaryOp::Not | UnaryOp::Deref => None,
             },
             Expr::Borrow { .. } => None,
 
@@ -199,7 +199,7 @@ impl SmtOracle {
                     let operand = Self::translate_bool_expr(&cond.0)?;
                     Some(operand.not())
                 }
-                UnaryOp::Neg => None,
+                UnaryOp::Neg | UnaryOp::Deref => None,
             },
             Expr::Borrow { .. } => None,
 

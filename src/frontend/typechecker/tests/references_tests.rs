@@ -218,7 +218,7 @@ fn storing_references_inside_arrays_is_rejected() {
 }
 
 #[test]
-fn shared_borrow_parameter_call_typechecks() {
+fn shared_scalar_borrow_parameter_call_is_rejected() {
     let inspect = Function {
         name: "inspect",
         parameters: vec![spanned(Parameter {
@@ -260,8 +260,9 @@ fn shared_borrow_parameter_call_typechecks() {
         },
     };
 
-    check_program(&make_program(vec![inspect, main]))
-        .expect("shared-borrow parameter call should typecheck");
+    let err = check_program(&make_program(vec![inspect, main]))
+        .expect_err("scalar shared-borrow parameter calls are not supported yet");
+    assert!(matches!(err, TypeError::UnsupportedFeature { .. }));
 }
 
 #[test]
@@ -515,5 +516,128 @@ fn assignment_through_shared_array_reference_is_rejected() {
 
     let err = check_program(&make_program(vec![touch]))
         .expect_err("assignment through a shared array reference should be rejected");
+    assert!(matches!(err, TypeError::BorrowConflict { .. }));
+}
+
+#[test]
+fn local_shared_scalar_deref_typechecks() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(7))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rx",
+                    ty: ref_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+            ],
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("rx"))),
+            }))),
+        },
+    };
+
+    check_program(&make_program(vec![func]))
+        .expect("dereferencing a local shared scalar reference should typecheck");
+}
+
+#[test]
+fn local_mutable_scalar_deref_assignment_typechecks() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(0))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "mx",
+                    ty: ref_mut_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Mutable,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+                spanned(Stmt::Assignment {
+                    lhs: spanned(Expr::UnaryOp {
+                        op: crate::common::ast::UnaryOp::Deref,
+                        cond: Box::new(spanned(Expr::Variable("mx"))),
+                    }),
+                    rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(9))),
+                }),
+            ],
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("mx"))),
+            }))),
+        },
+    };
+
+    check_program(&make_program(vec![func]))
+        .expect("assignment through a local mutable scalar reference should typecheck");
+}
+
+#[test]
+fn local_shared_scalar_deref_assignment_is_rejected() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: spanned(Type::Unit),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(0))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rx",
+                    ty: ref_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+                spanned(Stmt::Assignment {
+                    lhs: spanned(Expr::UnaryOp {
+                        op: crate::common::ast::UnaryOp::Deref,
+                        cond: Box::new(spanned(Expr::Variable("rx"))),
+                    }),
+                    rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(9))),
+                }),
+            ],
+            trailing_expr: None,
+        },
+    };
+
+    let err = check_program(&make_program(vec![func]))
+        .expect_err("assignment through a shared scalar reference should be rejected");
     assert!(matches!(err, TypeError::BorrowConflict { .. }));
 }
