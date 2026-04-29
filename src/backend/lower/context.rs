@@ -106,8 +106,10 @@ impl<'src> LoweringContext<'src> {
         self.var_type_map.insert(name.to_string(), ty);
         self.owned_live_map
             .insert(name.to_string(), is_owned_type(&self.lookup_var_type(name)));
-        self.borrow_live_map
-            .insert(name.to_string(), is_borrow_type(&self.lookup_var_type(name)));
+        self.borrow_live_map.insert(
+            name.to_string(),
+            is_borrow_type(&self.lookup_var_type(name)),
+        );
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.declared_names.insert(name.to_string());
         }
@@ -245,9 +247,7 @@ impl<'src> LoweringContext<'src> {
                     drops.push((name.clone(), reg, ty));
                 }
             }
-            if self.is_borrow_live(name)
-                && is_borrow_type(&self.lookup_var_type(name))
-            {
+            if self.is_borrow_live(name) && is_borrow_type(&self.lookup_var_type(name)) {
                 borrow_ends.push(name.clone());
             }
         }
@@ -274,12 +274,12 @@ impl<'src> LoweringContext<'src> {
 
     pub fn lowered_ref_storage_type(ty: &IType<'src>) -> IType<'src> {
         match ty {
-            IType::Ref(inner) if !matches!(inner.as_ref(), IType::Array { .. }) => IType::Ref(
-                Arc::new(IType::Array {
+            IType::Ref(inner) if !matches!(inner.as_ref(), IType::Array { .. }) => {
+                IType::Ref(Arc::new(IType::Array {
                     element_type: inner.clone(),
                     size: crate::common::types::IValue::Int(1),
-                }),
-            ),
+                }))
+            }
             IType::RefMut(inner) if !matches!(inner.as_ref(), IType::Array { .. }) => {
                 IType::RefMut(Arc::new(IType::Array {
                     element_type: inner.clone(),
@@ -378,7 +378,11 @@ impl<'src> LoweringContext<'src> {
         if let Some(binding) = scalar_binding
             && binding.kind.is_mutable()
         {
-            self.sync_scalar_borrow_owner(&binding.owner_name, binding.cell_reg, binding.pointee_ty);
+            self.sync_scalar_borrow_owner(
+                &binding.owner_name,
+                binding.cell_reg,
+                binding.pointee_ty,
+            );
         }
         self.emit(TirInstr::BorrowEnd { src: reg, ty });
         self.borrow_live_map.insert(name.to_string(), false);

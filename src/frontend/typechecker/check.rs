@@ -9,7 +9,9 @@ use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_e
 use im::HashMap;
 use std::sync::Arc;
 
-fn borrow_binding_target_name<'src>(expr: &Expr<'src>) -> Option<(&'src str, crate::common::ownership::BorrowKind)> {
+fn borrow_binding_target_name<'src>(
+    expr: &Expr<'src>,
+) -> Option<(&'src str, crate::common::ownership::BorrowKind)> {
     match expr {
         Expr::Borrow { kind, expr } => match &expr.0 {
             Expr::Variable(name) => Some((name, *kind)),
@@ -79,7 +81,8 @@ fn reject_region_borrow_escape<'src>(
         return Ok(());
     }
 
-    if expr_depends_on_region_local_array(ctx, value) && !ctx.is_region_scoped_borrow(binding_name) {
+    if expr_depends_on_region_local_array(ctx, value) && !ctx.is_region_scoped_borrow(binding_name)
+    {
         return Err(TypeError::UnsupportedFeature {
             feature:
                 "borrowing region-local arrays into bindings that survive a hosted region block is not yet supported"
@@ -136,7 +139,10 @@ fn resolve_array_reads_in_expr<'src>(
                 (expr.clone(), false)
             }
         }
-        Expr::Borrow { kind, expr: borrowed } => {
+        Expr::Borrow {
+            kind,
+            expr: borrowed,
+        } => {
             let (new_borrowed, resolved) = resolve_array_reads_in_expr(ctx, &borrowed.0);
             if resolved {
                 (
@@ -214,8 +220,7 @@ pub fn check_stmt<'src>(
 
             if array_contains_reference_type(&ann_ty) {
                 return Err(TypeError::UnsupportedFeature {
-                    feature:
-                        "storing references inside arrays is not yet supported".to_string(),
+                    feature: "storing references inside arrays is not yet supported".to_string(),
                     span: ty.1,
                 });
             }
@@ -311,8 +316,7 @@ pub fn check_stmt<'src>(
 
             if array_contains_reference_type(&ann_ty) {
                 return Err(TypeError::UnsupportedFeature {
-                    feature:
-                        "storing references inside arrays is not yet supported".to_string(),
+                    feature: "storing references inside arrays is not yet supported".to_string(),
                     span: ty.1,
                 });
             }
@@ -336,7 +340,8 @@ pub fn check_stmt<'src>(
             };
             let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty, value.1)?;
 
-            let mut new_ctx = move_ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
+            let mut new_ctx =
+                move_ctx.with_mutable(name.to_string(), current_ty.clone(), master_ty);
             if matches!(ann_ty, IType::Ref(_) | IType::RefMut(_))
                 && !matches!(value.0, Expr::Borrow { .. })
             {
@@ -515,13 +520,13 @@ pub fn check_stmt<'src>(
                         apply_whole_value_move(ctx, &rhs.0, &rhs_ty, rhs.1)?
                     };
 
-                    let mut new_ctx =
-                        move_ctx.with_mutable_update(var_name, rhs_ty.clone())
-                            .map_err(|e| TypeError::InvalidAssignment {
-                                variable: var_name.to_string(),
-                                reason: e,
-                                span,
-                            })?;
+                    let mut new_ctx = move_ctx
+                        .with_mutable_update(var_name, rhs_ty.clone())
+                        .map_err(|e| TypeError::InvalidAssignment {
+                            variable: var_name.to_string(),
+                            reason: e,
+                            span,
+                        })?;
 
                     new_ctx = new_ctx.release_borrow_binding(var_name);
                     reject_region_borrow_escape(ctx, var_name, master_base, &rhs.0, rhs.1)?;
@@ -572,7 +577,8 @@ pub fn check_stmt<'src>(
                     let tstmt = TStmt::Assignment {
                         lhs: (tlhs_expr, lhs.1),
                         rhs: trhs,
-                        ownership: if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name) {
+                        ownership: if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name)
+                        {
                             OwnershipMode::Plain
                         } else {
                             explicit_transfer_ownership(ctx.bare_metal, &rhs.0, &rhs_ty)
@@ -635,7 +641,12 @@ pub fn check_stmt<'src>(
 
                     // Check array bounds using the actual index expression
                     crate::frontend::typechecker::check_array_bounds_expr(
-                        ctx, &index.0, &index_ty, &array_size, &base_ty, index.1,
+                        ctx,
+                        &index.0,
+                        &index_ty,
+                        &array_size,
+                        &base_ty,
+                        index.1,
                     )?;
 
                     // Check value type matches element type
@@ -716,7 +727,9 @@ pub fn check_stmt<'src>(
                         } => {
                             let ref_name = match &lhs.0 {
                                 crate::common::ast::Expr::UnaryOp { cond, .. } => match &cond.0 {
-                                    crate::common::ast::Expr::Variable(name) => Some((*name).to_string()),
+                                    crate::common::ast::Expr::Variable(name) => {
+                                        Some((*name).to_string())
+                                    }
                                     _ => None,
                                 },
                                 _ => None,
@@ -725,7 +738,9 @@ pub fn check_stmt<'src>(
                         }
                         _ => {
                             return Err(TypeError::UnsupportedFeature {
-                                feature: "dereference assignment target must be a reference binding".to_string(),
+                                feature:
+                                    "dereference assignment target must be a reference binding"
+                                        .to_string(),
                                 span: lhs.1,
                             });
                         }
@@ -799,9 +814,8 @@ pub fn check_stmt<'src>(
         Stmt::Return { expr } => {
             if !ctx.bare_metal && ctx.in_region_scope() {
                 return Err(TypeError::UnsupportedFeature {
-                    feature:
-                        "returning from inside a hosted region block is not yet supported"
-                            .to_string(),
+                    feature: "returning from inside a hosted region block is not yet supported"
+                        .to_string(),
                     span: expr.1,
                 });
             }
@@ -834,10 +848,10 @@ pub fn check_stmt<'src>(
 
             let move_ctx = apply_whole_value_move(ctx, &expr.0, &ret_ty, expr.1)?;
 
-                    let tstmt = TStmt::Return {
-                        expr: Box::new(texpr),
-                        ownership: explicit_transfer_ownership(ctx.bare_metal, &expr.0, &ret_ty),
-                    };
+            let tstmt = TStmt::Return {
+                expr: Box::new(texpr),
+                ownership: explicit_transfer_ownership(ctx.bare_metal, &expr.0, &ret_ty),
+            };
 
             Ok(((tstmt, span), move_ctx))
         }
@@ -1416,8 +1430,7 @@ pub fn check_function<'src>(
 
         if array_contains_reference_type(ty) {
             return Err(TypeError::UnsupportedFeature {
-                feature:
-                    "storing references inside arrays is not yet supported".to_string(),
+                feature: "storing references inside arrays is not yet supported".to_string(),
                 span: spanned_param.1,
             });
         }
@@ -1622,8 +1635,7 @@ fn check_program_with_options<'src>(
             let ty = ast_type_to_itype(&param.ty)?;
             if array_contains_reference_type(&ty) {
                 return Err(TypeError::UnsupportedFeature {
-                    feature:
-                        "storing references inside arrays is not yet supported".to_string(),
+                    feature: "storing references inside arrays is not yet supported".to_string(),
                     span: spanned_param.1,
                 });
             }
@@ -1640,13 +1652,11 @@ fn check_program_with_options<'src>(
         }
         if array_contains_reference_type(&return_type) {
             return Err(TypeError::UnsupportedFeature {
-                feature:
-                    "storing references inside arrays is not yet supported".to_string(),
+                feature: "storing references inside arrays is not yet supported".to_string(),
                 span: func.return_type.1,
             });
         }
-        let returns_owned =
-            !bare_metal && contains_array_type(&return_type) && func.name != "main";
+        let returns_owned = !bare_metal && contains_array_type(&return_type) && func.name != "main";
         let return_ownership = if returns_owned {
             OwnershipMode::FreshOwned
         } else {
@@ -1702,7 +1712,7 @@ fn check_program_with_options<'src>(
             }
         }
 
-        let parameter_kinds = infer_parameter_kinds(&func);
+        let parameter_kinds = infer_parameter_kinds(func);
 
         let sig = FunctionSignature {
             name: func.name.to_string(),
@@ -2222,7 +2232,8 @@ fn expr_mentions_var<'src>(expr: &Expr<'src>, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|expr| expr_mentions_var(&expr.0, name))
                 || else_block.as_ref().is_some_and(|block| {
-                    block.statements
+                    block
+                        .statements
                         .iter()
                         .any(|stmt| stmt_mentions_var(&stmt.0, name))
                         || block
@@ -2289,7 +2300,10 @@ fn stmt_mentions_var<'src>(stmt: &Stmt<'src>, name: &str) -> bool {
     }
 }
 
-fn invalidate_moved_binding_props<'src>(ctx: &TypingContext<'src>, name: &str) -> TypingContext<'src> {
+fn invalidate_moved_binding_props<'src>(
+    ctx: &TypingContext<'src>,
+    name: &str,
+) -> TypingContext<'src> {
     ctx.retain_propositions(|prop| prop.var != name && !expr_mentions_var(&prop.predicate.0, name))
 }
 
@@ -2355,7 +2369,10 @@ fn apply_whole_value_move<'src>(
     span: Span,
 ) -> Result<TypingContext<'src>, TypeError<'src>> {
     let new_ctx = apply_call_argument_moves(ctx, expr)?;
-    if !new_ctx.bare_metal && contains_array_type(ty) && let Expr::Variable(name) = expr {
+    if !new_ctx.bare_metal
+        && contains_array_type(ty)
+        && let Expr::Variable(name) = expr
+    {
         if new_ctx.is_borrowed(name) {
             return Err(TypeError::BorrowConflict {
                 name: name.to_string(),
@@ -2384,10 +2401,7 @@ fn explicit_transfer_ownership<'src>(
     }
 }
 
-fn expr_depends_on_region_local_array<'src>(
-    ctx: &TypingContext<'src>,
-    expr: &Expr<'src>,
-) -> bool {
+fn expr_depends_on_region_local_array<'src>(ctx: &TypingContext<'src>, expr: &Expr<'src>) -> bool {
     match expr {
         Expr::Variable(name) => ctx.is_region_local_array(name),
         Expr::ArrayInit { .. } => ctx.in_region_scope() && !ctx.bare_metal,
@@ -2420,7 +2434,8 @@ fn expr_depends_on_region_local_array<'src>(
                     .as_ref()
                     .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
                 || else_block.as_ref().is_some_and(|block| {
-                    block.statements
+                    block
+                        .statements
                         .iter()
                         .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
                         || block
@@ -2443,10 +2458,7 @@ fn expr_depends_on_region_local_array<'src>(
     }
 }
 
-fn stmt_depends_on_region_local_array<'src>(
-    ctx: &TypingContext<'src>,
-    stmt: &Stmt<'src>,
-) -> bool {
+fn stmt_depends_on_region_local_array<'src>(ctx: &TypingContext<'src>, stmt: &Stmt<'src>) -> bool {
     match stmt {
         Stmt::Let { value, .. } => expr_depends_on_region_local_array(ctx, &value.0),
         Stmt::Assignment { lhs, rhs } => {
@@ -2469,7 +2481,9 @@ fn stmt_depends_on_region_local_array<'src>(
                     .as_ref()
                     .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
         }
-        Stmt::While { condition, body, .. } => {
+        Stmt::While {
+            condition, body, ..
+        } => {
             expr_depends_on_region_local_array(ctx, &condition.0)
                 || body
                     .statements
@@ -2480,14 +2494,15 @@ fn stmt_depends_on_region_local_array<'src>(
                     .as_ref()
                     .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
         }
-        Stmt::Region { body } => body
-            .statements
-            .iter()
-            .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
-            || body
-                .trailing_expr
-                .as_ref()
-                .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0)),
+        Stmt::Region { body } => {
+            body.statements
+                .iter()
+                .any(|stmt| stmt_depends_on_region_local_array(ctx, &stmt.0))
+                || body
+                    .trailing_expr
+                    .as_ref()
+                    .is_some_and(|expr| expr_depends_on_region_local_array(ctx, &expr.0))
+        }
     }
 }
 

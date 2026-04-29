@@ -101,8 +101,7 @@ pub fn synth_expr<'src>(
                 Expr::Variable(name) => *name,
                 _ => {
                     return Err(TypeError::UnsupportedFeature {
-                        feature: "borrowing non-place expressions is not yet supported"
-                            .to_string(),
+                        feature: "borrowing non-place expressions is not yet supported".to_string(),
                         span: place.1,
                     });
                 }
@@ -157,9 +156,8 @@ pub fn synth_expr<'src>(
                 if ctx.is_borrowed(place_name) {
                     return Err(TypeError::BorrowConflict {
                         name: place_name.to_string(),
-                        reason:
-                            "cannot create a mutable borrow while another borrow is live"
-                                .to_string(),
+                        reason: "cannot create a mutable borrow while another borrow is live"
+                            .to_string(),
                         span: place.1,
                     });
                 }
@@ -197,10 +195,14 @@ pub fn synth_expr<'src>(
             };
 
             let (kind, inner_ty) = match &cond_ty {
-                IType::Ref(inner) => (crate::common::ownership::BorrowKind::Shared, inner.as_ref().clone()),
-                IType::RefMut(inner) => {
-                    (crate::common::ownership::BorrowKind::Mutable, inner.as_ref().clone())
-                }
+                IType::Ref(inner) => (
+                    crate::common::ownership::BorrowKind::Shared,
+                    inner.as_ref().clone(),
+                ),
+                IType::RefMut(inner) => (
+                    crate::common::ownership::BorrowKind::Mutable,
+                    inner.as_ref().clone(),
+                ),
                 _ => {
                     return Err(TypeError::InvalidOperation {
                         operation: "deref".to_string(),
@@ -496,14 +498,7 @@ pub fn synth_expr<'src>(
                 Some(IType::Array { element_type, size }) => {
                     // Check array bounds - returns error if cannot prove safe
                     // Use the actual index expression so SMT can use context propositions
-                    check_array_bounds_expr(
-                        ctx,
-                        &index.0,
-                        &index_ty,
-                        &size,
-                        &base_ty,
-                        index.1,
-                    )?;
+                    check_array_bounds_expr(ctx, &index.0, &index_ty, &size, &base_ty, index.1)?;
 
                     let elem_ty = (*element_type).clone();
                     let texpr = TExpr::Index {
@@ -652,7 +647,8 @@ pub fn synth_expr<'src>(
 
             // Check then block statements, then handle trailing expression
             let (tthen_stmts, then_ctx_out) = check_stmts(&then_ctx, &then_block.statements)?;
-            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr {
+            let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr
+            {
                 let (texpr, ty) = synth_expr(&then_ctx_out, trailing)?;
                 (Some(Box::new(texpr)), Some(ty))
             } else {

@@ -198,7 +198,11 @@ impl<'src> fmt::Display for TypeError<'src> {
             }
 
             TypeError::BorrowConflict { name, reason, span } => {
-                write!(f, "Borrow conflict for `{}` at {:?}: {}", name, span, reason)
+                write!(
+                    f,
+                    "Borrow conflict for `{}` at {:?}: {}",
+                    name, span, reason
+                )
             }
 
             TypeError::UndefinedFunction { name, span } => {

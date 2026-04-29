@@ -111,10 +111,7 @@ fn test_context_with_function() {
             ("x".to_string(), IType::Int),
             ("y".to_string(), IType::Bool),
         ],
-        parameter_kinds: vec![
-            ParameterKind::PlainValue,
-            ParameterKind::PlainValue,
-        ],
+        parameter_kinds: vec![ParameterKind::PlainValue, ParameterKind::PlainValue],
         return_type: IType::Unit,
         return_ownership: crate::common::ownership::OwnershipMode::Plain,
         returns_owned: false,

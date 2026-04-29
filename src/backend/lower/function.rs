@@ -5,8 +5,8 @@
 
 use crate::backend::dtal::VirtualReg;
 use crate::backend::dtal::constraints::Constraint;
-use crate::backend::lower::context::LoweringContext;
 use crate::backend::dtal::convert::expr_to_constraint;
+use crate::backend::lower::context::LoweringContext;
 use crate::backend::lower::expr::lower_expr;
 use crate::backend::lower::stmt::lower_stmts;
 use crate::backend::tir::{Terminator, TirFunction, TirInstr};
@@ -40,27 +40,23 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     lower_stmts(&mut ctx, &func.body.statements);
 
     // Lower the return expression (if any) and create the return terminator
-    let return_value = func
-        .body
-        .trailing_expr
-        .as_ref()
-        .map(|trailing_expr| {
-            let value_reg = lower_expr(&mut ctx, trailing_expr);
-            if func.returns_owned && matches!(&trailing_expr.0, TExpr::Variable { .. }) {
-                let moved_reg = ctx.fresh_reg();
-                ctx.emit(TirInstr::MoveOwned {
-                    dst: moved_reg,
-                    src: value_reg,
-                    ty: func.return_type.clone(),
-                });
-                if let TExpr::Variable { name, .. } = &trailing_expr.0 {
-                    ctx.mark_var_moved(name);
-                }
-                moved_reg
-            } else {
-                value_reg
+    let return_value = func.body.trailing_expr.as_ref().map(|trailing_expr| {
+        let value_reg = lower_expr(&mut ctx, trailing_expr);
+        if func.returns_owned && matches!(&trailing_expr.0, TExpr::Variable { .. }) {
+            let moved_reg = ctx.fresh_reg();
+            ctx.emit(TirInstr::MoveOwned {
+                dst: moved_reg,
+                src: value_reg,
+                ty: func.return_type.clone(),
+            });
+            if let TExpr::Variable { name, .. } = &trailing_expr.0 {
+                ctx.mark_var_moved(name);
             }
-        });
+            moved_reg
+        } else {
+            value_reg
+        }
+    });
 
     ctx.emit_scope_exit_drops();
     ctx.exit_scope();

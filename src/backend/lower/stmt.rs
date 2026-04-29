@@ -143,9 +143,7 @@ fn lower_let<'src>(
 
     // Lower the value expression
     let value_reg = lower_expr(ctx, value);
-    let bound_reg = if ownership.consumes_input()
-        && matches!(&value.0, TExpr::Variable { .. })
-    {
+    let bound_reg = if ownership.consumes_input() && matches!(&value.0, TExpr::Variable { .. }) {
         let moved_reg = ctx.fresh_reg();
         ctx.emit(TirInstr::MoveOwned {
             dst: moved_reg,

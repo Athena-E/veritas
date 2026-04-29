@@ -246,14 +246,18 @@ fn plain_array_calls_lower_to_explicit_tir_borrows_and_borrow_end() {
         .get(&main.entry_block)
         .expect("main entry block should exist");
 
-    assert!(entry
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::BorrowShared { .. })));
-    assert!(entry
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. })));
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::BorrowShared { .. }))
+    );
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
+    );
 }
 
 #[test]
@@ -377,19 +381,19 @@ fn hosted_owned_moves_lower_to_explicit_tir_moves() {
         .get(&main.entry_block)
         .expect("main entry block should exist");
 
-    assert!(entry
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::MoveOwned { .. })));
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::MoveOwned { .. }))
+    );
 
     let call = entry
         .instructions
         .iter()
         .find_map(|instr| match instr {
             TirInstr::Call {
-                func,
-                arg_kinds,
-                ..
+                func, arg_kinds, ..
             } if func == "consume" => Some(arg_kinds.clone()),
             _ => None,
         })
@@ -420,10 +424,12 @@ fn hosted_owned_shadowing_lowers_to_explicit_tir_drop() {
         .get(&main.entry_block)
         .expect("main entry block should exist");
 
-    assert!(entry
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::DropOwned { .. }))
+    );
 }
 
 #[test]
@@ -449,10 +455,12 @@ fn hosted_owned_reassignment_lowers_to_explicit_tir_drop() {
         .get(&main.entry_block)
         .expect("main entry block should exist");
 
-    assert!(entry
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::DropOwned { .. }))
+    );
 }
 
 #[test]
@@ -477,8 +485,10 @@ fn hosted_owned_locals_drop_at_function_exit() {
         .get(&main.entry_block)
         .expect("main entry block should exist");
 
-    assert!(entry
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::DropOwned { .. })));
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::DropOwned { .. }))
+    );
 }

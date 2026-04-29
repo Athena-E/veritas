@@ -674,7 +674,12 @@ mod tests {
             element_type: Arc::new(DtalType::Int),
             size: IndexExpr::Const(4),
         };
-        let callee = make_func("owned_callee", vec![], array_ty.clone(), vec![make_block(".entry", vec![DtalInstr::Ret])]);
+        let callee = make_func(
+            "owned_callee",
+            vec![],
+            array_ty.clone(),
+            vec![make_block(".entry", vec![DtalInstr::Ret])],
+        );
         let program = make_program(vec![callee]);
         let mut state = TypeState::new();
 
@@ -692,9 +697,11 @@ mod tests {
         .unwrap();
 
         assert!(state.owned_registers.contains(&r0()));
-        assert!(state
-            .owned_registers
-            .contains(&Reg::Physical(PhysicalReg::LR)));
+        assert!(
+            state
+                .owned_registers
+                .contains(&Reg::Physical(PhysicalReg::LR))
+        );
     }
 
     #[test]
@@ -1108,7 +1115,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(state.mutable_borrow_object_ids.get(&v(1)).copied(), Some(61));
+        assert_eq!(
+            state.mutable_borrow_object_ids.get(&v(1)).copied(),
+            Some(61)
+        );
         assert!(state.owned_registers.contains(&v(0)));
     }
 
@@ -1218,7 +1228,10 @@ mod tests {
                             imm: 0,
                             ty: DtalType::Int,
                         },
-                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Cmp {
+                            lhs: v(9),
+                            rhs: v(9),
+                        },
                         DtalInstr::Branch {
                             cond: crate::backend::dtal::instr::CmpOp::Eq,
                             target: ".then".to_string(),
@@ -1277,7 +1290,10 @@ mod tests {
                             imm: 0,
                             ty: DtalType::Int,
                         },
-                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Cmp {
+                            lhs: v(9),
+                            rhs: v(9),
+                        },
                         DtalInstr::Branch {
                             cond: crate::backend::dtal::instr::CmpOp::Eq,
                             target: ".then".to_string(),
@@ -1348,7 +1364,10 @@ mod tests {
                             imm: 0,
                             ty: DtalType::Int,
                         },
-                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Cmp {
+                            lhs: v(9),
+                            rhs: v(9),
+                        },
                         DtalInstr::Branch {
                             cond: crate::backend::dtal::instr::CmpOp::Eq,
                             target: ".then".to_string(),
@@ -1419,7 +1438,10 @@ mod tests {
                 make_block(
                     ".header",
                     vec![
-                        DtalInstr::Cmp { lhs: v(9), rhs: v(9) },
+                        DtalInstr::Cmp {
+                            lhs: v(9),
+                            rhs: v(9),
+                        },
                         DtalInstr::Branch {
                             cond: crate::backend::dtal::instr::CmpOp::Eq,
                             target: ".exit".to_string(),
@@ -2821,14 +2843,11 @@ mod tests {
         // The callee itself will fail verification (int(1) ≠ Bool), so we
         // only check the caller here by verifying the specific error isn't
         // a ReturnTypeMismatch from the caller
-        if let Err(ref e) = result {
-            // Should fail in callee ("returns_bool"), not caller
-            if let VerifyError::ReturnTypeMismatch { function, .. } = e {
-                assert_eq!(
-                    function, "returns_bool",
-                    "Error should be in callee, not caller"
-                );
-            }
+        if let Err(VerifyError::ReturnTypeMismatch { function, .. }) = result {
+            assert_eq!(
+                function, "returns_bool",
+                "Error should be in callee, not caller"
+            );
         }
     }
 

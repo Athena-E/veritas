@@ -356,14 +356,18 @@ fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
 
     let tir_func = lower_function(&func);
     let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
-    assert!(entry_block
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::BorrowShared { .. })));
-    assert!(entry_block
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. })));
+    assert!(
+        entry_block
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::BorrowShared { .. }))
+    );
+    assert!(
+        entry_block
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
+    );
 }
 
 #[test]
@@ -432,10 +436,12 @@ fn test_lower_direct_scalar_borrow_call_materializes_hidden_cell_and_ends_it() {
         .count();
     assert_eq!(borrow_shared_count, 1);
     assert_eq!(borrow_end_count, 1);
-    assert!(entry_block
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, TirInstr::AllocArray { size: 1, .. })));
+    assert!(
+        entry_block
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, TirInstr::AllocArray { size: 1, .. }))
+    );
     assert!(entry_block.instructions.iter().any(|instr| matches!(
         instr,
         TirInstr::Call {

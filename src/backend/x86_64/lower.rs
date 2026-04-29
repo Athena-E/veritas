@@ -125,7 +125,9 @@ fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
             | DtalInstr::Alloca { dst, .. }
             | DtalInstr::PortIn { dst, .. } => matches!(dst, Reg::Physical(PhysicalReg::R12)),
             DtalInstr::Push { src, .. } => matches!(src, Reg::Physical(PhysicalReg::R12)),
-            DtalInstr::Load { dst, base, offset, .. } => {
+            DtalInstr::Load {
+                dst, base, offset, ..
+            } => {
                 matches!(dst, Reg::Physical(PhysicalReg::R12))
                     || matches!(base, Reg::Physical(PhysicalReg::R12))
                     || matches!(offset, Reg::Physical(PhysicalReg::R12))

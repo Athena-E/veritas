@@ -423,7 +423,12 @@ impl<'src> TypingContext<'src> {
         self.moved_bindings.contains(name)
     }
 
-    pub fn add_borrow_binding(&self, binding_name: &str, owner_name: &str, kind: BorrowKind) -> Self {
+    pub fn add_borrow_binding(
+        &self,
+        binding_name: &str,
+        owner_name: &str,
+        kind: BorrowKind,
+    ) -> Self {
         let mut new_ctx = self.release_borrow_binding(binding_name);
         let mut state = new_ctx
             .active_borrows

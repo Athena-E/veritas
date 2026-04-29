@@ -25,7 +25,9 @@ fn ref_mut_int_type() -> Spanned<Type<'static>> {
 fn int_array_type(size: i128) -> Spanned<Type<'static>> {
     spanned(Type::Array {
         element_type: Box::new(int_type()),
-        size: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(size)))),
+        size: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(
+            size,
+        )))),
     })
 }
 
@@ -127,12 +129,8 @@ fn borrow_of_temporary_is_rejected() {
                     kind: BorrowKind::Shared,
                     expr: Box::new(spanned(Expr::BinOp {
                         op: crate::common::ast::BinOp::Add,
-                        lhs: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(
-                            1,
-                        )))),
-                        rhs: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(
-                            2,
-                        )))),
+                        lhs: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(1)))),
+                        rhs: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(2)))),
                     })),
                 }),
             })],
@@ -418,8 +416,12 @@ fn moving_borrowed_array_is_rejected() {
                     name: "arr",
                     ty: int_array_type(1),
                     value: spanned(Expr::ArrayInit {
-                        value: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(1)))),
-                        length: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(1)))),
+                        value: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(
+                            1,
+                        )))),
+                        length: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(
+                            1,
+                        )))),
                     }),
                 }),
                 spanned(Stmt::Let {
@@ -464,7 +466,9 @@ fn shared_borrow_ends_at_if_block_exit() {
                     value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
                 }),
                 spanned(Stmt::Expr(spanned(Expr::If {
-                    cond: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Bool(true)))),
+                    cond: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Bool(
+                        true,
+                    )))),
                     then_block: crate::common::ast::Block {
                         statements: vec![spanned(Stmt::Let {
                             is_mut: false,

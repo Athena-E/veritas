@@ -32,10 +32,7 @@ pub enum TirInstr<'src> {
     },
 
     /// drop src (ownership destruction)
-    DropOwned {
-        src: VirtualReg,
-        ty: IType<'src>,
-    },
+    DropOwned { src: VirtualReg, ty: IType<'src> },
 
     /// dst = shared borrow src
     BorrowShared {
@@ -52,10 +49,7 @@ pub enum TirInstr<'src> {
     },
 
     /// end shared borrow held in src
-    BorrowEnd {
-        src: VirtualReg,
-        ty: IType<'src>,
-    },
+    BorrowEnd { src: VirtualReg, ty: IType<'src> },
 
     /// dst = lhs op rhs
     BinOp {
@@ -111,14 +105,10 @@ pub enum TirInstr<'src> {
     },
 
     /// Enter a nested lexical region, yielding a region handle.
-    RegionEnter {
-        dst: VirtualReg,
-    },
+    RegionEnter { dst: VirtualReg },
 
     /// Leave a nested lexical region.
-    RegionLeave {
-        region: VirtualReg,
-    },
+    RegionLeave { region: VirtualReg },
 
     /// Assume a constraint (from branch or precondition)
     AssumeConstraint { constraint: Constraint },

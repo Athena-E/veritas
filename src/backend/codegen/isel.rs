@@ -141,13 +141,15 @@ pub fn lower_instruction<'src>(
         } => {
             lower_call(
                 instrs,
-                dst.as_ref().copied(),
-                func,
-                args,
-                arg_types,
-                arg_kinds,
-                *ownership,
-                result_ty,
+                LowerCall {
+                    dst: dst.as_ref().copied(),
+                    func,
+                    args,
+                    arg_types,
+                    arg_kinds,
+                    ownership: *ownership,
+                    result_ty,
+                },
             );
         }
 
@@ -467,18 +469,29 @@ fn lower_unaryop<'src>(
     }
 }
 
-/// Lower a function call
-fn lower_call<'src>(
-    instrs: &mut Vec<DtalInstr>,
+struct LowerCall<'a, 'src> {
     dst: Option<crate::backend::dtal::VirtualReg>,
-    func: &str,
-    args: &[crate::backend::dtal::VirtualReg],
-    arg_types: &[crate::common::types::IType<'src>],
-    arg_kinds: &[ParameterKind],
+    func: &'a str,
+    args: &'a [crate::backend::dtal::VirtualReg],
+    arg_types: &'a [crate::common::types::IType<'src>],
+    arg_kinds: &'a [ParameterKind],
     ownership: OwnershipMode,
-    result_ty: &crate::common::types::IType<'src>,
-) {
+    result_ty: &'a crate::common::types::IType<'src>,
+}
+
+/// Lower a function call
+fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
     use crate::backend::dtal::regs::PhysicalReg;
+
+    let LowerCall {
+        dst,
+        func,
+        args,
+        arg_types,
+        arg_kinds,
+        ownership,
+        result_ty,
+    } = call;
 
     let dtal_result_ty = DtalType::from_itype(result_ty);
 

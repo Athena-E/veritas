@@ -903,7 +903,11 @@ impl<'a> DtalParser<'a> {
             target: tokens[1].to_string(),
             arg_kinds: tokens
                 .get(2)
-                .and_then(|token| token.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')))
+                .and_then(|token| {
+                    token
+                        .strip_prefix('[')
+                        .and_then(|rest| rest.strip_suffix(']'))
+                })
                 .map(|effects| {
                     if effects.is_empty() {
                         Ok(Vec::new())
@@ -915,10 +919,10 @@ impl<'a> DtalParser<'a> {
                                 "owned" => Ok(ParameterKind::OwnedValue),
                                 "shared" => Ok(ParameterKind::SharedBorrow),
                                 "mutable" => Ok(ParameterKind::MutableBorrow),
-                                other => Err(self.err(format!(
-                                    "invalid call parameter kind '{}'",
-                                    other
-                                ))),
+                                other => {
+                                    Err(self
+                                        .err(format!("invalid call parameter kind '{}'", other)))
+                                }
                             })
                             .collect()
                     }

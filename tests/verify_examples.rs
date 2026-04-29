@@ -108,8 +108,14 @@ verify_example!(e2e_32_shared_borrow, "32_shared_borrow.veri");
 verify_example!(e2e_33_mutable_borrow, "33_mutable_borrow.veri");
 verify_example!(e2e_34_shared_scalar_deref, "34_shared_scalar_deref.veri");
 verify_example!(e2e_35_mutable_scalar_deref, "35_mutable_scalar_deref.veri");
-verify_example!(e2e_36_shared_scalar_borrow_call, "36_shared_scalar_borrow_call.veri");
-verify_example!(e2e_37_mutable_scalar_borrow_call, "37_mutable_scalar_borrow_call.veri");
+verify_example!(
+    e2e_36_shared_scalar_borrow_call,
+    "36_shared_scalar_borrow_call.veri"
+);
+verify_example!(
+    e2e_37_mutable_scalar_borrow_call,
+    "37_mutable_scalar_borrow_call.veri"
+);
 
 // ============================================================================
 // Error cases: should fail during compilation

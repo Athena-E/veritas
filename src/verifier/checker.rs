@@ -309,28 +309,28 @@ pub fn verify_instruction(
             };
 
             for (index, arg_kind) in arg_kinds.iter().enumerate() {
-            if !arg_kind.is_owned_value() {
-                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
-                    let param_reg = Reg::Physical(param_reg);
-                    clear_owned(param_reg, state);
-                    clear_shared_borrow(param_reg, state);
-                    clear_mutable_borrow(param_reg, state);
-                }
-                continue;
-            }
-                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
-                    let param_reg = Reg::Physical(param_reg);
-                        verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
-                        verify_object_not_shared_borrowed(
-                            param_reg,
-                            state,
-                            block_label,
-                            "call_consume_arg",
-                        )?;
+                if !arg_kind.is_owned_value() {
+                    if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                        let param_reg = Reg::Physical(param_reg);
                         clear_owned(param_reg, state);
                         clear_shared_borrow(param_reg, state);
                         clear_mutable_borrow(param_reg, state);
-                        consume_reg(param_reg, state);
+                    }
+                    continue;
+                }
+                if let Some(param_reg) = PhysicalReg::param_regs().get(index).copied() {
+                    let param_reg = Reg::Physical(param_reg);
+                    verify_owned_available(param_reg, state, block_label, "call_consume_arg")?;
+                    verify_object_not_shared_borrowed(
+                        param_reg,
+                        state,
+                        block_label,
+                        "call_consume_arg",
+                    )?;
+                    clear_owned(param_reg, state);
+                    clear_shared_borrow(param_reg, state);
+                    clear_mutable_borrow(param_reg, state);
+                    consume_reg(param_reg, state);
                 }
             }
 
@@ -410,8 +410,12 @@ pub fn verify_instruction(
             if let Some(object_id) = state.owned_object_ids.get(&rax).copied() {
                 assign_owned_object(Reg::Physical(PhysicalReg::R2), object_id, state);
             } else {
-                state.owned_registers.remove(&Reg::Physical(PhysicalReg::R2));
-                state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::R2));
+                state
+                    .owned_registers
+                    .remove(&Reg::Physical(PhysicalReg::R2));
+                state
+                    .owned_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::R2));
                 state
                     .shared_borrow_object_ids
                     .remove(&Reg::Physical(PhysicalReg::R2));
@@ -454,12 +458,16 @@ pub fn verify_instruction(
                 state.owned_spill_object_ids.remove(offset);
             }
             if let Some(object_id) = state.shared_borrow_object_ids.get(src).copied() {
-                state.shared_borrow_spill_object_ids.insert(*offset, object_id);
+                state
+                    .shared_borrow_spill_object_ids
+                    .insert(*offset, object_id);
             } else {
                 state.shared_borrow_spill_object_ids.remove(offset);
             }
             if let Some(object_id) = state.mutable_borrow_object_ids.get(src).copied() {
-                state.mutable_borrow_spill_object_ids.insert(*offset, object_id);
+                state
+                    .mutable_borrow_spill_object_ids
+                    .insert(*offset, object_id);
             } else {
                 state.mutable_borrow_spill_object_ids.remove(offset);
             }
@@ -584,12 +592,12 @@ fn verify_borrow_available(
 
 fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
     match reg {
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => Some(Reg::Physical(
-            crate::backend::dtal::regs::PhysicalReg::LR,
-        )),
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => Some(Reg::Physical(
-            crate::backend::dtal::regs::PhysicalReg::R0,
-        )),
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => {
+            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
+        }
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => {
+            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
+        }
         _ => None,
     }
 }
@@ -653,9 +661,7 @@ fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState)
             Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
         )
     );
-    if is_abi_return_alias
-        && let Some(object_id) = state.owned_object_ids.get(&src).copied()
-    {
+    if is_abi_return_alias && let Some(object_id) = state.owned_object_ids.get(&src).copied() {
         assign_owned_object(dst, object_id, state);
     } else {
         clear_owned(dst, state);
@@ -717,7 +723,11 @@ fn set_owned_from_type(reg: Reg, ty: &DtalType, state: &mut TypeState, fresh: bo
         let object_id = if fresh {
             fresh_object_id(state)
         } else {
-            state.owned_object_ids.get(&reg).copied().unwrap_or_else(|| fresh_object_id(state))
+            state
+                .owned_object_ids
+                .get(&reg)
+                .copied()
+                .unwrap_or_else(|| fresh_object_id(state))
         };
         assign_owned_object(reg, object_id, state);
     } else {
@@ -753,8 +763,13 @@ fn verify_plain_mov_does_not_duplicate_owned(
     if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
         let same_alias_pair = matches!(
             (src, dst),
-            (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
-                | (Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0), Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
+            (
+                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
+                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+            ) | (
+                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+            )
         ) && state.owned_object_ids.get(&dst).copied() == Some(object_id);
         let same_register = src == dst;
         if !same_alias_pair && !same_register {
@@ -1418,7 +1433,9 @@ fn verify_load(
     // If base has an array type, or a reference to an array, derive element
     // type and perform bounds checking.
     let array_view = match &base_ty {
-        DtalType::Array { element_type, size } => Some((element_type.as_ref().clone(), size.clone())),
+        DtalType::Array { element_type, size } => {
+            Some((element_type.as_ref().clone(), size.clone()))
+        }
         DtalType::Ref(inner) | DtalType::RefMut(inner) => match inner.as_ref() {
             DtalType::Array { element_type, size } => {
                 Some((element_type.as_ref().clone(), size.clone()))
@@ -1492,7 +1509,9 @@ fn verify_store(
     // If base has an array type, or a mutable reference to an array, perform
     // bounds checking and emit axioms.
     let array_view = match &base_ty {
-        DtalType::Array { element_type, size } => Some((element_type.as_ref().clone(), size.clone())),
+        DtalType::Array { element_type, size } => {
+            Some((element_type.as_ref().clone(), size.clone()))
+        }
         DtalType::RefMut(inner) => match inner.as_ref() {
             DtalType::Array { element_type, size } => {
                 Some((element_type.as_ref().clone(), size.clone()))
@@ -1665,14 +1684,15 @@ fn verify_type_annotation(
         // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
         // TypeAnnotation from physalloc refines them to their actual types.
         // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
-        let is_pointer_refinement = matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
-            && matches!(
-                ty,
-                DtalType::Array { .. }
-                    | DtalType::Ref(_)
-                    | DtalType::RefMut(_)
-                    | DtalType::Master(_)
-            );
+        let is_pointer_refinement =
+            matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
+                && matches!(
+                    ty,
+                    DtalType::Array { .. }
+                        | DtalType::Ref(_)
+                        | DtalType::RefMut(_)
+                        | DtalType::Master(_)
+                );
 
         let is_prologue_refinement = matches!(
             existing_ty,

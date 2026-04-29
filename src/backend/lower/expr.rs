@@ -215,7 +215,11 @@ pub fn lower_expr<'src>(
             dst
         }
 
-        TExpr::Borrow { kind, expr: place, ty } => lower_borrow_expr(ctx, *kind, place, ty),
+        TExpr::Borrow {
+            kind,
+            expr: place,
+            ty,
+        } => lower_borrow_expr(ctx, *kind, place, ty),
 
         TExpr::Call {
             func_name,
@@ -361,110 +365,109 @@ fn lower_call<'src>(
     let lowered_args: Vec<(VirtualReg, IType<'src>)> = args
         .iter()
         .zip(arg_kinds.iter())
-        .map(|(arg, arg_kind)| {
-            match arg_kind {
-                ParameterKind::PlainValue => (lower_expr(ctx, arg), arg.0.get_type().clone()),
-                ParameterKind::OwnedValue => {
-                    let arg_reg = lower_expr(ctx, arg);
-                    if matches!(&arg.0, TExpr::Variable { .. })
-                        && matches!(arg.0.get_type(), IType::Array { .. })
-                    {
-                        let moved_reg = ctx.fresh_reg();
-                        ctx.emit(TirInstr::MoveOwned {
-                            dst: moved_reg,
-                            src: arg_reg,
-                            ty: arg.0.get_type().clone(),
+        .map(|(arg, arg_kind)| match arg_kind {
+            ParameterKind::PlainValue => (lower_expr(ctx, arg), arg.0.get_type().clone()),
+            ParameterKind::OwnedValue => {
+                let arg_reg = lower_expr(ctx, arg);
+                if matches!(&arg.0, TExpr::Variable { .. })
+                    && matches!(arg.0.get_type(), IType::Array { .. })
+                {
+                    let moved_reg = ctx.fresh_reg();
+                    ctx.emit(TirInstr::MoveOwned {
+                        dst: moved_reg,
+                        src: arg_reg,
+                        ty: arg.0.get_type().clone(),
+                    });
+                    if let TExpr::Variable { name, .. } = &arg.0 {
+                        ctx.mark_var_moved(name);
+                    }
+                    (moved_reg, arg.0.get_type().clone())
+                } else {
+                    (arg_reg, arg.0.get_type().clone())
+                }
+            }
+            ParameterKind::SharedBorrow => {
+                if let TExpr::Borrow {
+                    kind: crate::common::ownership::BorrowKind::Shared,
+                    expr: place,
+                    ..
+                } = &arg.0
+                {
+                    if matches!(place.0.get_type(), IType::Array { .. }) {
+                        return (lower_expr(ctx, place), place.0.get_type().clone());
+                    }
+                    if let TExpr::Variable { name, .. } = &place.0 {
+                        let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                            panic!(
+                                "Undefined scalar borrow owner during call lowering: {}",
+                                name
+                            )
                         });
-                        if let TExpr::Variable { name, .. } = &arg.0 {
-                            ctx.mark_var_moved(name);
-                        }
-                        (moved_reg, arg.0.get_type().clone())
-                    } else {
-                        (arg_reg, arg.0.get_type().clone())
+                        let (borrow_reg, _cell_reg, lowered_ref_ty) = ctx
+                            .create_scalar_borrow_value(
+                                owner_reg,
+                                place.0.get_type().clone(),
+                                crate::common::ownership::BorrowKind::Shared,
+                            );
+                        borrow_end_regs.push((borrow_reg, lowered_ref_ty.clone(), None));
+                        return (borrow_reg, lowered_ref_ty);
                     }
                 }
-                ParameterKind::SharedBorrow => {
-                    if let TExpr::Borrow {
-                        kind: crate::common::ownership::BorrowKind::Shared,
-                        expr: place,
-                        ..
-                    } = &arg.0
-                    {
-                        if matches!(place.0.get_type(), IType::Array { .. }) {
-                            return (lower_expr(ctx, place), place.0.get_type().clone());
-                        }
-                        if let TExpr::Variable { name, .. } = &place.0 {
-                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
-                                panic!(
-                                    "Undefined scalar borrow owner during call lowering: {}",
-                                    name
-                                )
-                            });
-                            let (borrow_reg, _cell_reg, lowered_ref_ty) =
-                                ctx.create_scalar_borrow_value(
-                                    owner_reg,
-                                    place.0.get_type().clone(),
-                                    crate::common::ownership::BorrowKind::Shared,
-                                );
-                            borrow_end_regs.push((borrow_reg, lowered_ref_ty.clone(), None));
-                            return (borrow_reg, lowered_ref_ty);
-                        }
+                let arg_reg = lower_expr(ctx, arg);
+                let borrowed_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::BorrowShared {
+                    dst: borrowed_reg,
+                    src: arg_reg,
+                    ty: arg.0.get_type().clone(),
+                });
+                borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
+                (borrowed_reg, arg.0.get_type().clone())
+            }
+            ParameterKind::MutableBorrow => {
+                if let TExpr::Borrow {
+                    kind: crate::common::ownership::BorrowKind::Mutable,
+                    expr: place,
+                    ..
+                } = &arg.0
+                {
+                    if matches!(place.0.get_type(), IType::Array { .. }) {
+                        return (lower_expr(ctx, place), place.0.get_type().clone());
                     }
-                    let arg_reg = lower_expr(ctx, arg);
-                    let borrowed_reg = ctx.fresh_reg();
-                    ctx.emit(TirInstr::BorrowShared {
-                        dst: borrowed_reg,
-                        src: arg_reg,
-                        ty: arg.0.get_type().clone(),
-                    });
-                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
-                    (borrowed_reg, arg.0.get_type().clone())
-                }
-                ParameterKind::MutableBorrow => {
-                    if let TExpr::Borrow {
-                        kind: crate::common::ownership::BorrowKind::Mutable,
-                        expr: place,
-                        ..
-                    } = &arg.0
-                    {
-                        if matches!(place.0.get_type(), IType::Array { .. }) {
-                            return (lower_expr(ctx, place), place.0.get_type().clone());
-                        }
-                        if let TExpr::Variable { name, .. } = &place.0 {
-                            let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
-                                panic!(
-                                    "Undefined scalar mutable borrow owner during call lowering: {}",
-                                    name
-                                )
-                            });
-                            let (borrow_reg, cell_reg, lowered_ref_ty) =
-                                ctx.create_scalar_borrow_value(
-                                    owner_reg,
-                                    place.0.get_type().clone(),
-                                    crate::common::ownership::BorrowKind::Mutable,
-                                );
-                            borrow_end_regs.push((
-                                borrow_reg,
-                                lowered_ref_ty.clone(),
-                                Some((name.clone(), cell_reg, place.0.get_type().clone())),
-                            ));
-                            return (borrow_reg, lowered_ref_ty);
-                        }
+                    if let TExpr::Variable { name, .. } = &place.0 {
+                        let owner_reg = ctx.lookup_var(name).unwrap_or_else(|| {
+                            panic!(
+                                "Undefined scalar mutable borrow owner during call lowering: {}",
+                                name
+                            )
+                        });
+                        let (borrow_reg, cell_reg, lowered_ref_ty) = ctx
+                            .create_scalar_borrow_value(
+                                owner_reg,
+                                place.0.get_type().clone(),
+                                crate::common::ownership::BorrowKind::Mutable,
+                            );
+                        borrow_end_regs.push((
+                            borrow_reg,
+                            lowered_ref_ty.clone(),
+                            Some((name.clone(), cell_reg, place.0.get_type().clone())),
+                        ));
+                        return (borrow_reg, lowered_ref_ty);
                     }
-                    let arg_reg = lower_expr(ctx, arg);
-                    let borrowed_reg = ctx.fresh_reg();
-                    ctx.emit(TirInstr::BorrowMut {
-                        dst: borrowed_reg,
-                        src: arg_reg,
-                        ty: arg.0.get_type().clone(),
-                    });
-                    borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
-                    (borrowed_reg, arg.0.get_type().clone())
                 }
+                let arg_reg = lower_expr(ctx, arg);
+                let borrowed_reg = ctx.fresh_reg();
+                ctx.emit(TirInstr::BorrowMut {
+                    dst: borrowed_reg,
+                    src: arg_reg,
+                    ty: arg.0.get_type().clone(),
+                });
+                borrow_end_regs.push((borrowed_reg, arg.0.get_type().clone(), None));
+                (borrowed_reg, arg.0.get_type().clone())
             }
         })
         .collect();
-    let (arg_regs, arg_types): (Vec<VirtualReg>, Vec<IType<'src>>) = lowered_args.into_iter().unzip();
+    let (arg_regs, arg_types): (Vec<VirtualReg>, Vec<IType<'src>>) =
+        lowered_args.into_iter().unzip();
 
     // For unit-returning functions, don't try to capture the return value
     if matches!(ty, IType::Unit) {
@@ -840,14 +843,16 @@ pub fn lower_if_expr<'src>(
     // Compare vars_after_then and vars_after_else with vars_before_then
     create_phi_nodes_for_modified_vars(
         ctx,
-        &vars_before_then,
-        &vars_after_then,
-        &vars_after_else,
-        &var_types_before_then,
-        &var_types_after_then,
-        &var_types_after_else,
-        then_end_block,
-        else_end_block,
+        BranchPhiInputs {
+            vars_before: &vars_before_then,
+            vars_after_then: &vars_after_then,
+            vars_after_else: &vars_after_else,
+            var_types_before: &var_types_before_then,
+            var_types_after_then: &var_types_after_then,
+            var_types_after_else: &var_types_after_else,
+            then_block: then_end_block,
+            else_block: else_end_block,
+        },
     );
 
     if matches!(ty, IType::Unit) {
@@ -922,18 +927,33 @@ fn lower_block_with_result<'src>(
     dst
 }
 
+struct BranchPhiInputs<'a, 'src> {
+    vars_before: &'a std::collections::BTreeMap<String, VirtualReg>,
+    vars_after_then: &'a std::collections::BTreeMap<String, VirtualReg>,
+    vars_after_else: &'a std::collections::BTreeMap<String, VirtualReg>,
+    var_types_before: &'a std::collections::BTreeMap<String, IType<'src>>,
+    var_types_after_then: &'a std::collections::BTreeMap<String, IType<'src>>,
+    var_types_after_else: &'a std::collections::BTreeMap<String, IType<'src>>,
+    then_block: BlockId,
+    else_block: BlockId,
+}
+
 /// Create phi nodes for variables that were modified differently in two branches
 fn create_phi_nodes_for_modified_vars<'src>(
     ctx: &mut LoweringContext<'src>,
-    vars_before: &std::collections::BTreeMap<String, VirtualReg>,
-    vars_after_then: &std::collections::BTreeMap<String, VirtualReg>,
-    vars_after_else: &std::collections::BTreeMap<String, VirtualReg>,
-    var_types_before: &std::collections::BTreeMap<String, IType<'src>>,
-    var_types_after_then: &std::collections::BTreeMap<String, IType<'src>>,
-    var_types_after_else: &std::collections::BTreeMap<String, IType<'src>>,
-    then_block: BlockId,
-    else_block: BlockId,
+    inputs: BranchPhiInputs<'_, 'src>,
 ) {
+    let BranchPhiInputs {
+        vars_before,
+        vars_after_then,
+        vars_after_else,
+        var_types_before,
+        var_types_after_then,
+        var_types_after_else,
+        then_block,
+        else_block,
+    } = inputs;
+
     // Find variables that were modified in either branch
     for (name, &before_reg) in vars_before {
         let then_reg = vars_after_then.get(name).copied().unwrap_or(before_reg);

@@ -57,7 +57,9 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
                 entry_state.mutable_borrow_object_ids.remove(reg);
             } else if param_kind.is_mutable_borrow() && matches!(ty, DtalType::Array { .. }) {
                 let object_id = fresh_object_id(&mut entry_state);
-                entry_state.mutable_borrow_object_ids.insert(*reg, object_id);
+                entry_state
+                    .mutable_borrow_object_ids
+                    .insert(*reg, object_id);
                 entry_state.owned_registers.remove(reg);
                 entry_state.owned_object_ids.remove(reg);
                 entry_state.shared_borrow_object_ids.remove(reg);
@@ -393,7 +395,10 @@ fn join_states(
     }
 
     for reg in result.register_types.keys() {
-        if pred_states.iter().all(|state| state.owned_registers.contains(reg)) {
+        if pred_states
+            .iter()
+            .all(|state| state.owned_registers.contains(reg))
+        {
             result.owned_registers.insert(*reg);
         }
     }
@@ -469,8 +474,7 @@ fn join_states(
                     .next();
                 if let Some(object_id) = first_object_id
                     && pred_states.iter().all(|state| {
-                        state.owned_stack_object_ids.get(idx).cloned().flatten()
-                            == Some(object_id)
+                        state.owned_stack_object_ids.get(idx).cloned().flatten() == Some(object_id)
                     })
                 {
                     Some(object_id)
@@ -483,11 +487,21 @@ fn join_states(
             .map(|idx| {
                 let first_object_id = pred_states
                     .iter()
-                    .filter_map(|state| state.shared_borrow_stack_object_ids.get(idx).cloned().flatten())
+                    .filter_map(|state| {
+                        state
+                            .shared_borrow_stack_object_ids
+                            .get(idx)
+                            .cloned()
+                            .flatten()
+                    })
                     .next();
                 if let Some(object_id) = first_object_id
                     && pred_states.iter().all(|state| {
-                        state.shared_borrow_stack_object_ids.get(idx).cloned().flatten()
+                        state
+                            .shared_borrow_stack_object_ids
+                            .get(idx)
+                            .cloned()
+                            .flatten()
                             == Some(object_id)
                     })
                 {
@@ -501,11 +515,21 @@ fn join_states(
             .map(|idx| {
                 let first_object_id = pred_states
                     .iter()
-                    .filter_map(|state| state.mutable_borrow_stack_object_ids.get(idx).cloned().flatten())
+                    .filter_map(|state| {
+                        state
+                            .mutable_borrow_stack_object_ids
+                            .get(idx)
+                            .cloned()
+                            .flatten()
+                    })
                     .next();
                 if let Some(object_id) = first_object_id
                     && pred_states.iter().all(|state| {
-                        state.mutable_borrow_stack_object_ids.get(idx).cloned().flatten()
+                        state
+                            .mutable_borrow_stack_object_ids
+                            .get(idx)
+                            .cloned()
+                            .flatten()
                             == Some(object_id)
                     })
                 {
@@ -1080,10 +1104,18 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                     .mutable_borrow_object_ids
                     .remove(&Reg::Physical(PhysicalReg::LR));
             } else {
-                state.owned_registers.remove(&Reg::Physical(PhysicalReg::R0));
-                state.owned_registers.remove(&Reg::Physical(PhysicalReg::LR));
-                state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::R0));
-                state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::LR));
+                state
+                    .owned_registers
+                    .remove(&Reg::Physical(PhysicalReg::R0));
+                state
+                    .owned_registers
+                    .remove(&Reg::Physical(PhysicalReg::LR));
+                state
+                    .owned_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::R0));
+                state
+                    .owned_object_ids
+                    .remove(&Reg::Physical(PhysicalReg::LR));
                 state
                     .shared_borrow_object_ids
                     .remove(&Reg::Physical(PhysicalReg::R0));
@@ -1097,8 +1129,12 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                     .mutable_borrow_object_ids
                     .remove(&Reg::Physical(PhysicalReg::LR));
             }
-            state.consumed_registers.remove(&Reg::Physical(PhysicalReg::R0));
-            state.consumed_registers.remove(&Reg::Physical(PhysicalReg::LR));
+            state
+                .consumed_registers
+                .remove(&Reg::Physical(PhysicalReg::R0));
+            state
+                .consumed_registers
+                .remove(&Reg::Physical(PhysicalReg::LR));
         }
         DtalInstr::Cmp { lhs, rhs } => {
             state.last_cmp = Some(CmpOperands::RegReg(*lhs, *rhs));
@@ -1162,10 +1198,18 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R2), DtalType::Int);
-            state.owned_registers.remove(&Reg::Physical(PhysicalReg::LR));
-            state.owned_registers.remove(&Reg::Physical(PhysicalReg::R2));
-            state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::LR));
-            state.owned_object_ids.remove(&Reg::Physical(PhysicalReg::R2));
+            state
+                .owned_registers
+                .remove(&Reg::Physical(PhysicalReg::LR));
+            state
+                .owned_registers
+                .remove(&Reg::Physical(PhysicalReg::R2));
+            state
+                .owned_object_ids
+                .remove(&Reg::Physical(PhysicalReg::LR));
+            state
+                .owned_object_ids
+                .remove(&Reg::Physical(PhysicalReg::R2));
             state
                 .shared_borrow_object_ids
                 .remove(&Reg::Physical(PhysicalReg::LR));
@@ -1178,8 +1222,12 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .mutable_borrow_object_ids
                 .remove(&Reg::Physical(PhysicalReg::R2));
-            state.consumed_registers.remove(&Reg::Physical(PhysicalReg::LR));
-            state.consumed_registers.remove(&Reg::Physical(PhysicalReg::R2));
+            state
+                .consumed_registers
+                .remove(&Reg::Physical(PhysicalReg::LR));
+            state
+                .consumed_registers
+                .remove(&Reg::Physical(PhysicalReg::R2));
         }
         DtalInstr::PortIn { dst, .. } => {
             state.register_types.insert(*dst, DtalType::Int);
@@ -1199,12 +1247,16 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 state.owned_spill_object_ids.remove(offset);
             }
             if let Some(object_id) = state.shared_borrow_object_ids.get(src).copied() {
-                state.shared_borrow_spill_object_ids.insert(*offset, object_id);
+                state
+                    .shared_borrow_spill_object_ids
+                    .insert(*offset, object_id);
             } else {
                 state.shared_borrow_spill_object_ids.remove(offset);
             }
             if let Some(object_id) = state.mutable_borrow_object_ids.get(src).copied() {
-                state.mutable_borrow_spill_object_ids.insert(*offset, object_id);
+                state
+                    .mutable_borrow_spill_object_ids
+                    .insert(*offset, object_id);
             } else {
                 state.mutable_borrow_spill_object_ids.remove(offset);
             }
@@ -1254,7 +1306,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                     .register_types
                     .entry(Reg::Physical(*preg))
                     .or_insert(DtalType::Int);
-                state.mutable_borrow_object_ids.remove(&Reg::Physical(*preg));
+                state
+                    .mutable_borrow_object_ids
+                    .remove(&Reg::Physical(*preg));
                 state.consumed_registers.remove(&Reg::Physical(*preg));
             }
         }
@@ -1285,12 +1339,12 @@ fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
 
 fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
     match reg {
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => Some(Reg::Physical(
-            crate::backend::dtal::regs::PhysicalReg::LR,
-        )),
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => Some(Reg::Physical(
-            crate::backend::dtal::regs::PhysicalReg::R0,
-        )),
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => {
+            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
+        }
+        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => {
+            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
+        }
         _ => None,
     }
 }
@@ -1330,9 +1384,7 @@ fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState)
             Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
         )
     );
-    if is_abi_return_alias
-        && let Some(object_id) = state.owned_object_ids.get(&src).copied()
-    {
+    if is_abi_return_alias && let Some(object_id) = state.owned_object_ids.get(&src).copied() {
         state.owned_registers.insert(dst);
         state.owned_object_ids.insert(dst, object_id);
     } else {

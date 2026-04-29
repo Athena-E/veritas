@@ -20,9 +20,9 @@ use crate::backend::dtal::instr::{
     BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
 };
 use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-use crate::backend::regalloc::liveness::LivenessAnalysis;
 use crate::backend::dtal::types::DtalType;
 use crate::backend::regalloc::allocator::AllocationResult;
+use crate::backend::regalloc::liveness::LivenessAnalysis;
 use crate::backend::x86_64::regs::{Location, X86Reg};
 use std::collections::HashSet;
 
@@ -500,12 +500,14 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             allocate_instruction(
                 &mut instrs,
                 instr,
-                alloc,
-                func,
-                &callee_saved_regs,
-                &caller_saved_to_save,
-                callee_saved_regs.len(),
-                instr_liveness.get(instr_idx),
+                AllocationContext {
+                    alloc,
+                    func,
+                    callee_saved: &callee_saved_regs,
+                    caller_saved: &caller_saved_to_save,
+                    callee_saved_count: callee_saved_regs.len(),
+                    live_after: instr_liveness.get(instr_idx),
+                },
             );
         }
 
@@ -575,17 +577,30 @@ fn is_dead_dst(reg: &Reg, alloc: &AllocationResult) -> bool {
     }
 }
 
+struct AllocationContext<'a> {
+    alloc: &'a AllocationResult,
+    func: &'a DtalFunction,
+    callee_saved: &'a [Reg],
+    caller_saved: &'a [Reg],
+    callee_saved_count: usize,
+    live_after: Option<&'a HashSet<VirtualReg>>,
+}
+
 /// Translate a single virtual-register instruction to physical-register instructions.
 fn allocate_instruction(
     instrs: &mut Vec<DtalInstr>,
     instr: &DtalInstr,
-    alloc: &AllocationResult,
-    func: &DtalFunction,
-    callee_saved: &[Reg],
-    caller_saved: &[Reg],
-    callee_saved_count: usize,
-    live_after: Option<&HashSet<VirtualReg>>,
+    ctx: AllocationContext<'_>,
 ) {
+    let AllocationContext {
+        alloc,
+        func,
+        callee_saved,
+        caller_saved,
+        callee_saved_count,
+        live_after,
+    } = ctx;
+
     // Skip instructions with dead destinations (register not allocated = never used)
     match instr {
         DtalInstr::MovImm { dst, .. }
@@ -971,11 +986,7 @@ fn allocate_instruction(
                 offset_reg = None;
             }
             let other_reg = match &other_loc {
-                PhysLoc::Reg(r)
-                    if Some(*r) != base_reg && Some(*r) != offset_reg =>
-                {
-                    *r
-                }
+                PhysLoc::Reg(r) if Some(*r) != base_reg && Some(*r) != offset_reg => *r,
                 _ => {
                     let scratch = pick_scratch(
                         &base_reg
@@ -1037,11 +1048,7 @@ fn allocate_instruction(
                 offset_reg = None;
             }
             let src_reg = match &src_loc {
-                PhysLoc::Reg(r)
-                    if Some(*r) != base_reg && Some(*r) != offset_reg =>
-                {
-                    *r
-                }
+                PhysLoc::Reg(r) if Some(*r) != base_reg && Some(*r) != offset_reg => *r,
                 _ => {
                     let scratch = pick_scratch(
                         &base_reg
