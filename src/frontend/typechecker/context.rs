@@ -94,6 +94,11 @@ pub struct TypingContext<'src> {
     // retarget to region-local arrays without escaping.
     region_scoped_arrays: Vec<HashSet<String>>,
 
+    // Reference bindings introduced within the currently active nested region
+    // scopes. These bindings are local to the region and therefore may safely
+    // point at region-local storage without escaping the region.
+    region_scoped_borrows: Vec<HashSet<String>>,
+
     // Bindings whose ownership has been moved away and therefore cannot be
     // read again until they are reinitialized.
     moved_bindings: HashSet<String>,
@@ -126,6 +131,7 @@ impl<'src> TypingContext<'src> {
             region_depth: 0,
             region_local_arrays: Vec::new(),
             region_scoped_arrays: Vec::new(),
+            region_scoped_borrows: Vec::new(),
             moved_bindings: HashSet::new(),
             active_borrows: HashMap::new(),
             borrow_bindings: HashMap::new(),
@@ -149,6 +155,7 @@ impl<'src> TypingContext<'src> {
             region_depth: 0,
             region_local_arrays: Vec::new(),
             region_scoped_arrays: Vec::new(),
+            region_scoped_borrows: Vec::new(),
             moved_bindings: HashSet::new(),
             active_borrows: HashMap::new(),
             borrow_bindings: HashMap::new(),
@@ -177,6 +184,7 @@ impl<'src> TypingContext<'src> {
         new_ctx.region_depth += 1;
         new_ctx.region_local_arrays.push(HashSet::new());
         new_ctx.region_scoped_arrays.push(HashSet::new());
+        new_ctx.region_scoped_borrows.push(HashSet::new());
         new_ctx
     }
 
@@ -199,6 +207,7 @@ impl<'src> TypingContext<'src> {
 
         merged.region_local_arrays = self.region_local_arrays.clone();
         merged.region_scoped_arrays = self.region_scoped_arrays.clone();
+        merged.region_scoped_borrows = self.region_scoped_borrows.clone();
         merged.moved_bindings = region_ctx.moved_bindings.clone();
         merged.active_borrows = self.active_borrows.clone();
         merged.borrow_bindings = self.borrow_bindings.clone();
@@ -241,6 +250,21 @@ impl<'src> TypingContext<'src> {
 
     pub fn is_region_scoped_array(&self, name: &str) -> bool {
         self.region_scoped_arrays
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+    }
+
+    pub fn mark_region_scoped_borrow(&self, name: &str) -> Self {
+        let mut new_ctx = self.clone();
+        if let Some(scope) = new_ctx.region_scoped_borrows.last_mut() {
+            scope.insert(name.to_string());
+        }
+        new_ctx
+    }
+
+    pub fn is_region_scoped_borrow(&self, name: &str) -> bool {
+        self.region_scoped_borrows
             .iter()
             .rev()
             .any(|scope| scope.contains(name))
@@ -557,6 +581,15 @@ impl<'src> TypingContext<'src> {
                 joined_scope.extend(scope.iter().cloned());
             } else {
                 joined.region_scoped_arrays.push(scope.clone());
+            }
+        }
+
+        joined.region_scoped_borrows = ctx1.region_scoped_borrows.clone();
+        for (scope_idx, scope) in ctx2.region_scoped_borrows.iter().enumerate() {
+            if let Some(joined_scope) = joined.region_scoped_borrows.get_mut(scope_idx) {
+                joined_scope.extend(scope.iter().cloned());
+            } else {
+                joined.region_scoped_borrows.push(scope.clone());
             }
         }
 

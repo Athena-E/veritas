@@ -257,6 +257,49 @@ fn plain_array_calls_lower_to_explicit_tir_borrows_and_borrow_end() {
 }
 
 #[test]
+fn hosted_region_allows_local_reference_to_region_local_array() {
+    let src = r#"
+        fn main() -> int {
+            region {
+                let arr: [int; 4] = [0; 4];
+                let r: &[int; 4] = &arr;
+            }
+            0
+        }
+    "#;
+
+    let program = parse_program(src);
+    check_program(&program).expect("local references to region-local arrays should stay local");
+}
+
+#[test]
+fn hosted_region_rejects_assigning_region_local_borrow_to_outer_reference_binding() {
+    let src = r#"
+        fn main() -> int {
+            let arr: [int; 4] = [0; 4];
+            let mut r: &[int; 4] = &arr;
+            region {
+                let tmp: [int; 4] = [1; 4];
+                r = &tmp;
+            }
+            0
+        }
+    "#;
+
+    let program = parse_program(src);
+    let err = check_program(&program).expect_err(
+        "borrowing region-local arrays into outer reference bindings should be rejected",
+    );
+
+    match err {
+        TypeError::UnsupportedFeature { feature, .. } => {
+            assert!(feature.contains("hosted region block"));
+        }
+        other => panic!("expected UnsupportedFeature, got {other:?}"),
+    }
+}
+
+#[test]
 fn consuming_signature_marks_call_argument_as_consumed() {
     let span = SimpleSpan::new(0, 0);
     let array_ty = IType::Array {

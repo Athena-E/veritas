@@ -49,6 +49,37 @@ fn reject_mutating_borrowed_owner<'src>(
     Ok(())
 }
 
+fn is_reference_type<'src>(ty: &IType<'src>) -> bool {
+    matches!(ty, IType::Ref(_) | IType::RefMut(_))
+}
+
+fn reject_region_borrow_escape<'src>(
+    ctx: &TypingContext<'src>,
+    binding_name: &str,
+    binding_ty: &IType<'src>,
+    value: &Expr<'src>,
+    span: Span,
+) -> Result<(), TypeError<'src>> {
+    if ctx.bare_metal || !ctx.in_region_scope() || !is_reference_type(binding_ty) {
+        return Ok(());
+    }
+
+    if !matches!(value, Expr::Borrow { .. }) {
+        return Ok(());
+    }
+
+    if expr_depends_on_region_local_array(ctx, value) && !ctx.is_region_scoped_borrow(binding_name) {
+        return Err(TypeError::UnsupportedFeature {
+            feature:
+                "borrowing region-local arrays into bindings that survive a hosted region block is not yet supported"
+                    .to_string(),
+            span,
+        });
+    }
+
+    Ok(())
+}
+
 /// Recursively walk an expression and replace `arr[i]` subexpressions with their
 /// resolved concrete values from the typing context. Returns `(resolved_expr, any_resolved)`.
 fn resolve_array_reads_in_expr<'src>(
@@ -202,6 +233,10 @@ pub fn check_stmt<'src>(
             if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
                 new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
             }
+            if !ctx.bare_metal && ctx.in_region_scope() && is_reference_type(&ann_ty) {
+                new_ctx = new_ctx.mark_region_scoped_borrow(name);
+            }
+            reject_region_borrow_escape(&new_ctx, name, &ann_ty, &value.0, value.1)?;
             if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&value_ty) {
                 new_ctx = new_ctx.mark_region_scoped_array(name);
             }
@@ -302,6 +337,10 @@ pub fn check_stmt<'src>(
             if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
                 new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
             }
+            if !ctx.bare_metal && ctx.in_region_scope() && is_reference_type(&ann_ty) {
+                new_ctx = new_ctx.mark_region_scoped_borrow(name);
+            }
+            reject_region_borrow_escape(&new_ctx, name, &ann_ty, &value.0, value.1)?;
             if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&current_ty) {
                 new_ctx = new_ctx.mark_region_scoped_array(name);
             }
@@ -436,6 +475,19 @@ pub fn check_stmt<'src>(
                         _ => &binding.master_type,
                     };
 
+                    if !ctx.bare_metal
+                        && ctx.in_region_scope()
+                        && is_reference_type(master_base)
+                        && !ctx.is_region_scoped_borrow(var_name)
+                    {
+                        return Err(TypeError::UnsupportedFeature {
+                            feature:
+                                "reassigning reference bindings that outlive a hosted region block is not yet supported"
+                                    .to_string(),
+                            span: rhs.1,
+                        });
+                    }
+
                     if !check_expr_satisfies_refined(ctx, &rhs.0, &rhs_ty, master_base) {
                         return Err(TypeError::TypeMismatch {
                             expected: master_base.clone(),
@@ -461,6 +513,7 @@ pub fn check_stmt<'src>(
                             })?;
 
                     new_ctx = new_ctx.release_borrow_binding(var_name);
+                    reject_region_borrow_escape(ctx, var_name, master_base, &rhs.0, rhs.1)?;
                     if matches!(master_base, IType::Ref(_) | IType::RefMut(_))
                         && !matches!(rhs.0, Expr::Borrow { .. })
                     {
