@@ -296,7 +296,39 @@ impl<'src> LoweringContext<'src> {
         pointee_ty: IType<'src>,
         kind: BorrowKind,
     ) -> (VirtualReg, VirtualReg, IType<'src>) {
+        let (cell_reg, cell_ty) = self.create_scalar_borrow_cell(owner_reg, pointee_ty.clone());
+        let lowered_ref_ty = match kind {
+            BorrowKind::Shared => IType::Ref(Arc::new(cell_ty.clone())),
+            BorrowKind::Mutable => IType::RefMut(Arc::new(cell_ty.clone())),
+        };
+
+        let borrow_reg = self.fresh_reg();
+        match kind {
+            BorrowKind::Shared => self.emit(TirInstr::BorrowShared {
+                dst: borrow_reg,
+                src: cell_reg,
+                ty: lowered_ref_ty.clone(),
+            }),
+            BorrowKind::Mutable => self.emit(TirInstr::BorrowMut {
+                dst: borrow_reg,
+                src: cell_reg,
+                ty: lowered_ref_ty.clone(),
+            }),
+        }
+
+        (borrow_reg, cell_reg, lowered_ref_ty)
+    }
+
+    pub fn create_scalar_borrow_cell(
+        &mut self,
+        owner_reg: VirtualReg,
+        pointee_ty: IType<'src>,
+    ) -> (VirtualReg, IType<'src>) {
         let cell_reg = self.fresh_reg();
+        let cell_ty = IType::Array {
+            element_type: Arc::new(pointee_ty.clone()),
+            size: crate::common::types::IValue::Int(1),
+        };
         self.emit(TirInstr::AllocArray {
             dst: cell_reg,
             element_ty: pointee_ty.clone(),
@@ -317,32 +349,7 @@ impl<'src> LoweringContext<'src> {
             bounds_constraint: Constraint::True,
         });
 
-        let lowered_ref_ty = match kind {
-            BorrowKind::Shared => IType::Ref(Arc::new(IType::Array {
-                element_type: Arc::new(pointee_ty.clone()),
-                size: crate::common::types::IValue::Int(1),
-            })),
-            BorrowKind::Mutable => IType::RefMut(Arc::new(IType::Array {
-                element_type: Arc::new(pointee_ty.clone()),
-                size: crate::common::types::IValue::Int(1),
-            })),
-        };
-
-        let borrow_reg = self.fresh_reg();
-        match kind {
-            BorrowKind::Shared => self.emit(TirInstr::BorrowShared {
-                dst: borrow_reg,
-                src: cell_reg,
-                ty: lowered_ref_ty.clone(),
-            }),
-            BorrowKind::Mutable => self.emit(TirInstr::BorrowMut {
-                dst: borrow_reg,
-                src: cell_reg,
-                ty: lowered_ref_ty.clone(),
-            }),
-        }
-
-        (borrow_reg, cell_reg, lowered_ref_ty)
+        (cell_reg, cell_ty)
     }
 
     pub fn sync_scalar_borrow_owner(

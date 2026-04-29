@@ -58,6 +58,24 @@ macro_rules! expect_compile_error {
     };
 }
 
+macro_rules! expect_verification_failure {
+    ($name:ident, $file:expr) => {
+        #[test]
+        #[ignore = "slow end-to-end verification suite; run explicitly"]
+        fn $name() {
+            let source = include_str!(concat!("../src/examples/", $file));
+            let output = compile_verbose(source)
+                .unwrap_or_else(|e| panic!("{}: expected compile success, got {}", $file, e));
+            let result = verify_dtal(&output.dtal_program);
+            assert!(
+                result.is_err(),
+                "{}: expected verification failure but verification succeeded",
+                $file
+            );
+        }
+    };
+}
+
 // ============================================================================
 // Success cases: compile + verify (29 tests)
 // ============================================================================
@@ -80,12 +98,21 @@ verify_example!(e2e_15_array_init, "15_array_init.veri");
 verify_example!(e2e_16_array_assignment, "16_array_assignment.veri");
 verify_example!(e2e_17_preconditions, "17_preconditions.veri");
 verify_example!(e2e_18_precondition_use, "18_precondition_use.veri");
+verify_example!(e2e_18_quantifiers, "18_quantifiers.veri");
 verify_example!(e2e_19_loop_invariant, "19_loop_invariant.veri");
 verify_example!(e2e_19_quantifier_showcase, "19_quantifier_showcase.veri");
 verify_example!(e2e_21_safe_division, "21_safe_division.veri");
 verify_example!(e2e_22_bubble_sort, "22_bubble_sort.veri");
+verify_example!(e2e_23_modulo, "23_modulo.veri");
+verify_example!(e2e_24_while_loop, "24_while_loop.veri");
+verify_example!(e2e_25_modulo_while, "25_modulo_while.veri");
+verify_example!(e2e_26_io, "26_io.veri");
+verify_example!(e2e_27_digit_sum_io, "27_digit_sum_io.veri");
+verify_example!(e2e_28_read_input, "28_read_input.veri");
 verify_example!(e2e_add, "add.veri");
+verify_example!(e2e_bubble_sort, "bubble_sort.veri");
 verify_example!(e2e_linear_search, "linear_search.veri");
+verify_example!(e2e_serial_driver, "serial_driver.veri");
 verify_example!(e2e_smt_minimal, "smt_minimal_annotations.veri");
 verify_example!(e2e_smt_synthesis, "smt_synthesis_tests.veri");
 
@@ -116,6 +143,11 @@ verify_example!(
     e2e_37_mutable_scalar_borrow_call,
     "37_mutable_scalar_borrow_call.veri"
 );
+
+// These examples currently compile but exceed the verifier's supported join/type model.
+expect_verification_failure!(e2e_verify_fail_20_binary_search, "20_binary_search.veri");
+expect_verification_failure!(e2e_verify_fail_28_nested_array, "28_nested_array.veri");
+expect_verification_failure!(e2e_verify_fail_binary_search, "binary_search.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation
