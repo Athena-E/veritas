@@ -78,6 +78,22 @@ print(result)
 PY
 }
 
+run_and_capture() {
+    local bin="$1"
+    local stdout_file="$2"
+    local stderr_file="$3"
+
+    python3 - "$bin" "$stdout_file" "$stderr_file" <<'PY'
+import subprocess
+import sys
+
+bin_path, stdout_path, stderr_path = sys.argv[1:4]
+with open(stdout_path, "wb") as stdout_fh, open(stderr_path, "wb") as stderr_fh:
+    result = subprocess.run([bin_path], stdout=stdout_fh, stderr=stderr_fh, check=False)
+print(result.returncode)
+PY
+}
+
 write_invocation_log() {
     {
         echo ""
@@ -317,55 +333,85 @@ run_binary_size_bench() {
 run_runtime_bench() {
     log "=== Runtime Correctness Comparison ==="
 
+    local cases_file="eval/runtime_cases.tsv"
     local csv="$RESULTS_DIR/runtime_correctness.csv"
-    echo "program,veritas_exit,gcc_O0_exit,gcc_O2_exit,note" > "$csv"
+    local raw_dir="$RAW_DIR/runtime"
+    mkdir -p "$raw_dir"
+    echo "case_id,source,mode,expected,observed,compile_status,run_exit_code,status,stdout_file,stderr_file,note" > "$csv"
 
-    declare -A c_map
-    c_map[01_simple]="simple_arithmetic"
-    c_map[07_function_calls]="function_calls"
-    c_map[14_for_loops]="for_loops"
-    c_map[bubble_sort]="bubble_sort"
+    while IFS=$'\t' read -r case_id source mode expected note; do
+        local bin stdout_file stderr_file compile_status run_exit_code observed status first_line
 
-    for veri_name in "${!c_map[@]}"; do
-        local c_name veri_file c_file veri_exit gcc_O0_exit gcc_O2_exit match
-        c_name="${c_map[$veri_name]}"
-        veri_file="src/examples/${veri_name}.veri"
-        c_file="eval/c_equivalents/${c_name}.c"
+        [ -n "$case_id" ] || continue
+        case "$case_id" in
+            \#*) continue ;;
+        esac
 
-        [ -f "$veri_file" ] || continue
-        [ -f "$c_file" ] || continue
+        log "  $case_id..."
 
-        log "  $veri_name..."
+        if [ ! -f "$source" ]; then
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                "$case_id" "$source" "$mode" "$expected" "missing_source" "missing" "N/A" "FAIL" "" "" "$note" >> "$csv"
+            continue
+        fi
 
-        "$VERITAS" "$veri_file" -o "$TMPDIR/veri_run" --bench >/dev/null 2>&1 || continue
-        if "$TMPDIR/veri_run" >/dev/null 2>&1; then
-            veri_exit="0"
+        bin="$TMPDIR/${case_id}_veri"
+        stdout_file="$raw_dir/${case_id}.stdout"
+        stderr_file="$raw_dir/${case_id}.stderr"
+
+        if "$VERITAS" "$source" -o "$bin" >/dev/null 2>&1; then
+            compile_status="ok"
         else
-            veri_exit="$?"
+            compile_status="compile_fail"
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                "$case_id" "$source" "$mode" "$expected" "compile_failed" "$compile_status" "N/A" "FAIL" "" "" "$note" >> "$csv"
+            continue
         fi
 
-        gcc -O0 -o "$TMPDIR/gcc_O0_run" "$c_file" 2>/dev/null || continue
-        if "$TMPDIR/gcc_O0_run" >/dev/null 2>&1; then
-            gcc_O0_exit="0"
-        else
-            gcc_O0_exit="$?"
-        fi
+        run_exit_code="$(run_and_capture "$bin" "$stdout_file" "$stderr_file")"
 
-        gcc -O2 -o "$TMPDIR/gcc_O2_run" "$c_file" 2>/dev/null || continue
-        if "$TMPDIR/gcc_O2_run" >/dev/null 2>&1; then
-            gcc_O2_exit="0"
-        else
-            gcc_O2_exit="$?"
-        fi
+        case "$mode" in
+            exit)
+                observed="exit=$run_exit_code"
+                ;;
+            checksum)
+                if [ -s "$stderr_file" ]; then
+                    first_line="$(sed -n '1p' "$stderr_file")"
+                else
+                    first_line="$(sed -n '1p' "$stdout_file")"
+                fi
 
-        match="MATCH"
-        if [ "$veri_exit" != "$gcc_O0_exit" ]; then
-            match="MISMATCH"
-        fi
+                case "$first_line" in
+                    checksum=*)
+                        observed="$first_line"
+                        ;;
+                    *)
+                        observed="checksum=$first_line"
+                        ;;
+                esac
+                ;;
+            *)
+                observed="unsupported_mode:$mode"
+                ;;
+        esac
 
-        printf '%s,%s,%s,%s,%s\n' \
-            "$veri_name" "$veri_exit" "$gcc_O0_exit" "$gcc_O2_exit" "$match" >> "$csv"
-    done
+        status="FAIL"
+        case "$mode" in
+            exit)
+                if [ "$observed" = "$expected" ]; then
+                    status="PASS"
+                fi
+                ;;
+            checksum)
+                if [ "$observed" = "$expected" ] && [ "$run_exit_code" -ge 0 ] && [ "$run_exit_code" -lt 128 ]; then
+                    status="PASS"
+                fi
+                ;;
+        esac
+
+        printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+            "$case_id" "$source" "$mode" "$expected" "$observed" "$compile_status" "$run_exit_code" "$status" "$stdout_file" "$stderr_file" "$note" >> "$csv"
+    done < "$cases_file"
 
     log "  -> $csv"
 }
@@ -380,25 +426,19 @@ run_verifier_matrix() {
     resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
     local csv="$RESULTS_DIR/verifier_matrix.csv"
-    echo "suite,file,frontend_ok,verifier_ok,exit_code,frontend_smt_queries,verifier_smt_queries" > "$csv"
+    echo "suite,file,frontend_ok,verifier_ok,frontend_smt_queries,verifier_smt_queries" > "$csv"
 
     while IFS= read -r f; do
-        local name fe_ok fe_queries exit_code ver_ok ver_queries json json_v
+        local name fe_ok fe_queries ver_ok ver_queries json json_v
         name="$(basename "$f" .veri)"
         log "  $name..."
 
         if json="$("$VERITAS" "$f" -o "$TMPDIR/vm_out" --bench 2>/dev/null)"; then
             fe_ok="yes"
             fe_queries="$(echo "$json" | jfield frontend_smt_queries)"
-            if "$TMPDIR/vm_out" >/dev/null 2>&1; then
-                exit_code="0"
-            else
-                exit_code="$?"
-            fi
         else
             fe_ok="no"
             fe_queries="N/A"
-            exit_code="N/A"
         fi
 
         if json_v="$("$VERITAS" "$f" --verify -o "$TMPDIR/vm_out_v" --bench 2>/dev/null)"; then
@@ -409,8 +449,8 @@ run_verifier_matrix() {
             ver_queries="N/A"
         fi
 
-        printf '%s,%s,%s,%s,%s,%s,%s\n' \
-            "$suite_name" "$name" "$fe_ok" "$ver_ok" "$exit_code" "$fe_queries" "$ver_queries" >> "$csv"
+        printf '%s,%s,%s,%s,%s,%s\n' \
+            "$suite_name" "$name" "$fe_ok" "$ver_ok" "$fe_queries" "$ver_queries" >> "$csv"
     done < "$suite_file"
 
     log "  -> $csv"
