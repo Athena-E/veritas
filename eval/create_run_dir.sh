@@ -5,11 +5,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 RUNS_ROOT="$SCRIPT_DIR/runs"
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
 
 label="${1:-manual}"
 safe_label="$(printf '%s' "$label" | tr ' /:' '___' | tr -cd '[:alnum:]_.-')"
 timestamp="$(date -u +%Y%m%d_%H%M%S)"
 run_dir="$RUNS_ROOT/${timestamp}_${safe_label}"
+pre_run_status="$TMPDIR/git_status.txt"
+
+cd "$REPO_ROOT"
+git status --short > "$pre_run_status"
 
 mkdir -p "$run_dir/raw" "$run_dir/derived" "$run_dir/logs" "$run_dir/manifests"
 
@@ -32,8 +38,6 @@ write_kv() {
     echo "# Source this file or parse it as shell-style key/value data."
 } > "$metadata_file"
 
-cd "$REPO_ROOT"
-
 write_kv RUN_LABEL "$label"
 write_kv RUN_TIMESTAMP_UTC "$timestamp"
 write_kv REPO_ROOT "$REPO_ROOT"
@@ -53,7 +57,7 @@ if command_exists lscpu; then
     write_kv CPU_MODEL "$(lscpu | awk -F: '/Model name:/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')"
 fi
 
-git status --short > "$status_file"
+cp "$pre_run_status" "$status_file"
 cp "$SCRIPT_DIR"/suites/*.txt "$run_dir/manifests/"
 cp "$SCRIPT_DIR"/suites/README.md "$run_dir/manifests/"
 

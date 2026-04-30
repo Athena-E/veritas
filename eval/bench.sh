@@ -1,152 +1,256 @@
 #!/usr/bin/env bash
 # Veritas Evaluation Benchmark Harness
-# Produces CSV output for compilation time, verification, code quality, and SMT stats
 #
-# Usage: ./eval/bench.sh [--all | --compile | --verify | --codegen | --errors | --binary-size]
-# Default: --all
+# This harness is manifest-driven and writes outputs into a reproducible run
+# directory under eval/runs/.
+#
+# Usage:
+#   ./eval/bench.sh [--all | --compile | --timing | --verify | --errors |
+#                    --binary-size | --runtime | --loc]
+#
+# Environment:
+#   BENCH_LABEL=<label>      label for the run directory
+#   BENCH_RUN_DIR=<path>     existing run directory to reuse
+#   BENCH_RUNS=<n>           hyperfine run count / repeated run count
+#   BENCH_WARMUP=<n>         hyperfine warmup count
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$REPO_ROOT"
 
 VERITAS="target/release/veritas"
-RESULTS_DIR="eval/results"
-TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR" EXIT
+SUITE_RESOLVER="$SCRIPT_DIR/resolve_suite.sh"
+CREATE_RUN_DIR="$SCRIPT_DIR/create_run_dir.sh"
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
 
-RUNS=${BENCH_RUNS:-5}  # number of timing runs for averages
+RUNS="${BENCH_RUNS:-10}"
+WARMUP="${BENCH_WARMUP:-3}"
+MODE="${1:---all}"
+RUN_LABEL="${BENCH_LABEL:-${MODE#--}}"
 
-mkdir -p "$RESULTS_DIR"
+if [ -n "${BENCH_RUN_DIR:-}" ]; then
+    RUN_DIR="$BENCH_RUN_DIR"
+else
+    RUN_DIR="$("$CREATE_RUN_DIR" "$RUN_LABEL")"
+fi
 
-# JSON field extractor using python
+RAW_DIR="$RUN_DIR/raw"
+RESULTS_DIR="$RUN_DIR/derived"
+LOGS_DIR="$RUN_DIR/logs"
+
+mkdir -p "$RAW_DIR" "$RESULTS_DIR" "$LOGS_DIR"
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+log() {
+    printf '%s\n' "$*" >&2
+}
+
 jfield() {
-    python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('$1','N/A'))"
+    python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('$1', 'N/A'))"
 }
 
-# Ensure release build is up to date
-echo "Building veritas (release)..." >&2
-cargo build --release -q 2>&1 >&2
-
-# ============================================================
-# Helper functions
-# ============================================================
-
-median() {
-    # Read numbers from stdin, output median
-    sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'
-}
-
-bench_compile() {
+json_field() {
     local file="$1"
-    local flags="$2"
-    local out="$3"
+    local expr="$2"
+    python3 - "$file" "$expr" <<'PY'
+import json
+import sys
 
-    local times=()
-    for _ in $(seq 1 "$RUNS"); do
-        local t
-        t=$( { /usr/bin/time -f "%e" "$VERITAS" "$file" $flags -o "$TMPDIR/out" --bench 2>&1 1>"$TMPDIR/json"; } 2>&1 )
-        times+=("$t")
-    done
+path = sys.argv[1]
+expr = sys.argv[2]
 
-    # Use the last JSON output for SMT stats
-    cat "$TMPDIR/json"
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+result = data
+for part in expr.split("."):
+    if part.isdigit():
+        result = result[int(part)]
+    else:
+        result = result[part]
+print(result)
+PY
 }
 
-# ============================================================
-# 1. Compilation benchmarks (all examples, with/without verify)
-# ============================================================
+write_invocation_log() {
+    {
+        echo ""
+        echo "# bench.sh invocation"
+        printf '%q ' "$0" "$@"
+        echo ""
+    } >> "$RUN_DIR/commands.sh"
+}
+
+resolve_suite() {
+    local manifest="$1"
+    local output_name="$2"
+    local output_path="$RAW_DIR/$output_name"
+    bash "$SUITE_RESOLVER" "$manifest" | tee "$output_path"
+}
+
+suite_stem() {
+    local manifest="$1"
+    basename "$manifest" .txt
+}
+
+append_hyperfine_summary() {
+    local export_json="$1"
+    local suite="$2"
+    local file="$3"
+    local variant="$4"
+    local status="$5"
+    local csv="$6"
+
+    local mean stddev min max user system
+    mean="$(json_field "$export_json" "results.0.mean")"
+    stddev="$(json_field "$export_json" "results.0.stddev")"
+    min="$(json_field "$export_json" "results.0.min")"
+    max="$(json_field "$export_json" "results.0.max")"
+    user="$(json_field "$export_json" "results.0.user")"
+    system="$(json_field "$export_json" "results.0.system")"
+
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$suite" "$file" "$variant" "$status" "$mean" "$stddev" "$min" "$max" "$user" "$system" >> "$csv"
+}
+
+ensure_release_build() {
+    log "Building veritas (release)..."
+    cargo build --release -q
+}
 
 run_compile_bench() {
-    echo "=== Compilation Benchmarks ===" >&2
-    echo "file,compile_ms,verify_ms,frontend_smt_queries,frontend_smt_ms,verifier_smt_queries,verifier_smt_ms,binary_bytes" > "$RESULTS_DIR/compilation.csv"
+    log "=== Compilation Benchmarks ==="
 
-    for f in src/examples/*.veri; do
-        name=$(basename "$f" .veri)
-        echo "  $name..." >&2
+    local suite_manifest="eval/suites/feature_suite.txt"
+    local suite_name
+    suite_name="$(suite_stem "$suite_manifest")"
+    local suite_file="$TMPDIR/${suite_name}.txt"
+    resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
-        # Without verification
-        json=$("$VERITAS" "$f" -o "$TMPDIR/out" --bench 2>/dev/null || echo '{"error":true}')
+    local raw_jsonl="$RAW_DIR/compilation_${suite_name}.jsonl"
+    local csv="$RESULTS_DIR/compilation.csv"
+    : > "$raw_jsonl"
+    echo "suite,file,compile_ms,verify_ms,frontend_smt_queries,frontend_smt_ms,verifier_smt_queries,verifier_smt_ms,binary_bytes,verify_status" > "$csv"
+
+    while IFS= read -r f; do
+        local name
+        name="$(basename "$f" .veri)"
+        log "  $name..."
+
+        local json json_v compile_ms verify_ms fe_queries fe_ms ver_queries ver_ms binary verify_status
+        json="$("$VERITAS" "$f" -o "$TMPDIR/out" --bench 2>/dev/null || echo '{"error":true}')"
+        printf '%s\n' "$json" >> "$raw_jsonl"
         if echo "$json" | grep -q '"error"'; then
-            echo "    SKIP (compile error)" >&2
+            log "    SKIP (compile error)"
             continue
         fi
 
-        compile_ms=$(echo "$json" | jfield compile_ms)
-        fe_queries=$(echo "$json" | jfield frontend_smt_queries)
-        fe_ms=$(echo "$json" | jfield frontend_smt_ms)
-        binary=$(echo "$json" | jfield binary_bytes)
+        compile_ms="$(echo "$json" | jfield compile_ms)"
+        fe_queries="$(echo "$json" | jfield frontend_smt_queries)"
+        fe_ms="$(echo "$json" | jfield frontend_smt_ms)"
+        binary="$(echo "$json" | jfield binary_bytes)"
 
-        # With verification (may fail)
-        json_v=$("$VERITAS" "$f" --verify -o "$TMPDIR/out_v" --bench 2>/dev/null || echo '{"verify_failed":true}')
+        json_v="$("$VERITAS" "$f" --verify -o "$TMPDIR/out_v" --bench 2>/dev/null || echo '{"verify_failed":true}')"
+        printf '%s\n' "$json_v" >> "$raw_jsonl"
+
         if echo "$json_v" | grep -q '"verify_failed"'; then
             verify_ms="FAIL"
             ver_queries="FAIL"
             ver_ms="FAIL"
+            verify_status="fail"
         else
-            verify_ms=$(echo "$json_v" | jfield verify_ms)
-            ver_queries=$(echo "$json_v" | jfield verifier_smt_queries)
-            ver_ms=$(echo "$json_v" | jfield verifier_smt_ms)
+            verify_ms="$(echo "$json_v" | jfield verify_ms)"
+            ver_queries="$(echo "$json_v" | jfield verifier_smt_queries)"
+            ver_ms="$(echo "$json_v" | jfield verifier_smt_ms)"
+            verify_status="pass"
         fi
 
-        echo "$name,$compile_ms,$verify_ms,$fe_queries,$fe_ms,$ver_queries,$ver_ms,$binary" >> "$RESULTS_DIR/compilation.csv"
-    done
+        printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+            "$suite_name" "$name" "$compile_ms" "$verify_ms" "$fe_queries" "$fe_ms" \
+            "$ver_queries" "$ver_ms" "$binary" "$verify_status" >> "$csv"
+    done < "$suite_file"
 
-    echo "  -> $RESULTS_DIR/compilation.csv" >&2
+    log "  -> $csv"
 }
-
-# ============================================================
-# 2. Multi-run timing benchmarks (statistical)
-# ============================================================
 
 run_timing_bench() {
-    echo "=== Timing Benchmarks ($RUNS runs each) ===" >&2
-    echo "file,run,compile_ms,verify_ms" > "$RESULTS_DIR/timing.csv"
+    log "=== Hyperfine Timing Benchmarks ==="
 
-    # Select representative programs of varying complexity
-    local programs=(
-        src/examples/01_simple.veri
-        src/examples/07_function_calls.veri
-        src/examples/14_for_loops.veri
-        src/examples/17_preconditions.veri
-        src/examples/19_loop_invariant.veri
-        src/examples/22_bubble_sort.veri
-        src/examples/bubble_sort.veri
-    )
+    if ! command_exists hyperfine; then
+        log "hyperfine is required for --timing"
+        exit 1
+    fi
 
-    for f in "${programs[@]}"; do
-        [ -f "$f" ] || continue
-        name=$(basename "$f" .veri)
-        echo "  $name ($RUNS runs)..." >&2
+    local suite_manifest="eval/suites/verification_stress_suite.txt"
+    local suite_name
+    suite_name="$(suite_stem "$suite_manifest")"
+    local suite_file="$TMPDIR/${suite_name}.txt"
+    resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
-        for run in $(seq 1 "$RUNS"); do
-            json=$("$VERITAS" "$f" -o "$TMPDIR/out" --bench 2>/dev/null || echo '{}')
-            compile_ms=$(echo "$json" | jfield compile_ms 2>/dev/null || echo "ERR")
-            echo "$name,$run,$compile_ms," >> "$RESULTS_DIR/timing.csv"
-        done
+    local csv="$RESULTS_DIR/timing.csv"
+    local raw_dir="$RAW_DIR/hyperfine"
+    mkdir -p "$raw_dir"
+    echo "suite,file,variant,status,mean_s,stddev_s,min_s,max_s,user_s,system_s" > "$csv"
 
-        # Also time with verification
-        for run in $(seq 1 "$RUNS"); do
-            json=$("$VERITAS" "$f" --verify -o "$TMPDIR/out" --bench 2>/dev/null || echo '{}')
-            compile_ms=$(echo "$json" | jfield compile_ms 2>/dev/null || echo "ERR")
-            verify_ms=$(echo "$json" | jfield verify_ms 2>/dev/null || echo "FAIL")
-            echo "${name}_verified,$run,$compile_ms,$verify_ms" >> "$RESULTS_DIR/timing.csv"
-        done
-    done
+    while IFS= read -r f; do
+        local name compile_json verify_json cmd
+        name="$(basename "$f" .veri)"
+        log "  $name (compile)..."
 
-    echo "  -> $RESULTS_DIR/timing.csv" >&2
+        compile_json="$raw_dir/${name}_compile.json"
+        cmd="$VERITAS $f -o $TMPDIR/timing_out --bench"
+        if ! $VERITAS "$f" -o "$TMPDIR/timing_probe" --bench >/dev/null 2>&1; then
+            log "    compile probe failed; recording failure"
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                "$suite_name" "$name" "compile" "fail" "" "" "" "" "" "" >> "$csv"
+            continue
+        fi
+        hyperfine --warmup "$WARMUP" --runs "$RUNS" \
+            --export-json "$compile_json" \
+            "$cmd" > "$LOGS_DIR/hyperfine_${name}_compile.log"
+        append_hyperfine_summary "$compile_json" "$suite_name" "$name" "compile" "pass" "$csv"
+
+        log "  $name (compile+verify)..."
+        verify_json="$raw_dir/${name}_verify.json"
+        cmd="$VERITAS $f --verify -o $TMPDIR/timing_out_v --bench"
+        if ! $VERITAS "$f" --verify -o "$TMPDIR/timing_probe_v" --bench >/dev/null 2>&1; then
+            log "    verify probe failed; recording failure"
+            printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                "$suite_name" "$name" "verify" "fail" "" "" "" "" "" "" >> "$csv"
+            continue
+        fi
+        hyperfine --warmup "$WARMUP" --runs "$RUNS" \
+            --export-json "$verify_json" \
+            "$cmd" > "$LOGS_DIR/hyperfine_${name}_verify.log"
+        append_hyperfine_summary "$verify_json" "$suite_name" "$name" "verify" "pass" "$csv"
+    done < "$suite_file"
+
+    log "  -> $csv"
 }
 
-# ============================================================
-# 3. Error rejection tests (negative cases)
-# ============================================================
-
 run_error_bench() {
-    echo "=== Error Rejection Tests ===" >&2
-    echo "file,expected_error,rejected,error_message" > "$RESULTS_DIR/error_rejection.csv"
+    log "=== Error Rejection Tests ==="
 
-    for f in src/examples/errors/*.veri; do
-        name=$(basename "$f" .veri)
-        error_output=$("$VERITAS" "$f" -o "$TMPDIR/err_out" 2>&1 || true)
-        # Check if binary was actually produced
+    local suite_manifest="eval/suites/negative_suite.txt"
+    local suite_name
+    suite_name="$(suite_stem "$suite_manifest")"
+    local suite_file="$TMPDIR/${suite_name}.txt"
+    resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
+
+    local csv="$RESULTS_DIR/error_rejection.csv"
+    echo "suite,file,expected_error,rejected,error_message" > "$csv"
+
+    while IFS= read -r f; do
+        local name error_output rejected first_line
+        name="$(basename "$f" .veri)"
+        error_output="$("$VERITAS" "$f" -o "$TMPDIR/err_out" 2>&1 || true)"
+
         if [ -f "$TMPDIR/err_out" ] && [ -x "$TMPDIR/err_out" ]; then
             rejected="no"
         else
@@ -154,21 +258,21 @@ run_error_bench() {
         fi
         rm -f "$TMPDIR/err_out"
 
-        # Extract first line of error
-        first_line=$(echo "$error_output" | grep -i -m1 "error\|FAILED" | head -c 100 | tr ',' ';' | tr '"' "'")
-        echo "$name,type_error,$rejected,$first_line" >> "$RESULTS_DIR/error_rejection.csv"
-    done
+        first_line="$(echo "$error_output" | grep -i -m1 'error\|FAILED' | head -c 160 | tr ',' ';' | tr '"' "'")"
+        printf '%s,%s,%s,%s,%s\n' \
+            "$suite_name" "$name" "type_error" "$rejected" "$first_line" >> "$csv"
+    done < "$suite_file"
 
-    echo "  -> $RESULTS_DIR/error_rejection.csv" >&2
+    log "  -> $csv"
 }
-
-# ============================================================
-# 4. Binary size comparison with GCC
-# ============================================================
 
 run_binary_size_bench() {
-    echo "=== Binary Size Comparison ===" >&2
-    echo "program,veritas_bytes,gcc_O0_bytes,gcc_O2_bytes" > "$RESULTS_DIR/binary_size.csv"
+    log "=== Binary Size Comparison ==="
+
+    local csv="$RESULTS_DIR/binary_size.csv"
+    local text_csv="$RESULTS_DIR/text_size.csv"
+    echo "program,veritas_bytes,gcc_O0_bytes,gcc_O2_bytes" > "$csv"
+    echo "program,veritas_text_bytes,gcc_O0_text_bytes,gcc_O2_text_bytes" > "$text_csv"
 
     declare -A c_map
     c_map[01_simple]="simple_arithmetic"
@@ -177,6 +281,7 @@ run_binary_size_bench() {
     c_map[bubble_sort]="bubble_sort"
 
     for veri_name in "${!c_map[@]}"; do
+        local c_name veri_file c_file veri_size gcc_O0_size gcc_O2_size veri_text gcc_O0_text gcc_O2_text
         c_name="${c_map[$veri_name]}"
         veri_file="src/examples/${veri_name}.veri"
         c_file="eval/c_equivalents/${c_name}.c"
@@ -184,58 +289,36 @@ run_binary_size_bench() {
         [ -f "$veri_file" ] || continue
         [ -f "$c_file" ] || continue
 
-        echo "  $veri_name..." >&2
-
-        # Veritas binary
-        "$VERITAS" "$veri_file" -o "$TMPDIR/veri_bin" --bench >/dev/null 2>&1 || continue
-        veri_size=$(stat -c%s "$TMPDIR/veri_bin" 2>/dev/null || echo "ERR")
-
-        # GCC -O0
-        gcc -O0 -o "$TMPDIR/gcc_O0" "$c_file" 2>/dev/null || continue
-        gcc_O0_size=$(stat -c%s "$TMPDIR/gcc_O0")
-
-        # GCC -O2
-        gcc -O2 -o "$TMPDIR/gcc_O2" "$c_file" 2>/dev/null
-        gcc_O2_size=$(stat -c%s "$TMPDIR/gcc_O2")
-
-        echo "$veri_name,$veri_size,$gcc_O0_size,$gcc_O2_size" >> "$RESULTS_DIR/binary_size.csv"
-    done
-
-    # Also compare stripped sizes (just the .text section)
-    echo "" >&2
-    echo "program,veritas_text_bytes,gcc_O0_text_bytes,gcc_O2_text_bytes" > "$RESULTS_DIR/text_size.csv"
-
-    for veri_name in "${!c_map[@]}"; do
-        c_name="${c_map[$veri_name]}"
-        veri_file="src/examples/${veri_name}.veri"
-        c_file="eval/c_equivalents/${c_name}.c"
-
-        [ -f "$veri_file" ] || continue
-        [ -f "$c_file" ] || continue
+        log "  $veri_name..."
 
         "$VERITAS" "$veri_file" -o "$TMPDIR/veri_bin" --bench >/dev/null 2>&1 || continue
-        veri_text=$(stat -c%s "$TMPDIR/veri_bin")  # Veritas ELF is essentially all .text
+        veri_size="$(stat -c%s "$TMPDIR/veri_bin" 2>/dev/null || echo "ERR")"
 
         gcc -O0 -o "$TMPDIR/gcc_O0" "$c_file" 2>/dev/null || continue
-        gcc_O0_text=$(objdump -h "$TMPDIR/gcc_O0" | awk '/.text/{print strtonum("0x"$3)}')
+        gcc_O0_size="$(stat -c%s "$TMPDIR/gcc_O0")"
 
-        gcc -O2 -o "$TMPDIR/gcc_O2" "$c_file" 2>/dev/null
-        gcc_O2_text=$(objdump -h "$TMPDIR/gcc_O2" | awk '/.text/{print strtonum("0x"$3)}')
+        gcc -O2 -o "$TMPDIR/gcc_O2" "$c_file" 2>/dev/null || continue
+        gcc_O2_size="$(stat -c%s "$TMPDIR/gcc_O2")"
 
-        echo "$veri_name,$veri_text,$gcc_O0_text,$gcc_O2_text" >> "$RESULTS_DIR/text_size.csv"
+        printf '%s,%s,%s,%s\n' \
+            "$veri_name" "$veri_size" "$gcc_O0_size" "$gcc_O2_size" >> "$csv"
+
+        veri_text="$veri_size"
+        gcc_O0_text="$(objdump -h "$TMPDIR/gcc_O0" | awk '/.text/{print strtonum("0x"$3)}')"
+        gcc_O2_text="$(objdump -h "$TMPDIR/gcc_O2" | awk '/.text/{print strtonum("0x"$3)}')"
+        printf '%s,%s,%s,%s\n' \
+            "$veri_name" "$veri_text" "$gcc_O0_text" "$gcc_O2_text" >> "$text_csv"
     done
 
-    echo "  -> $RESULTS_DIR/binary_size.csv" >&2
-    echo "  -> $RESULTS_DIR/text_size.csv" >&2
+    log "  -> $csv"
+    log "  -> $text_csv"
 }
 
-# ============================================================
-# 5. Runtime performance comparison
-# ============================================================
-
 run_runtime_bench() {
-    echo "=== Runtime Performance Comparison ===" >&2
-    echo "program,veritas_exit,gcc_O0_exit,gcc_O2_exit,note" > "$RESULTS_DIR/runtime_correctness.csv"
+    log "=== Runtime Correctness Comparison ==="
+
+    local csv="$RESULTS_DIR/runtime_correctness.csv"
+    echo "program,veritas_exit,gcc_O0_exit,gcc_O2_exit,note" > "$csv"
 
     declare -A c_map
     c_map[01_simple]="simple_arithmetic"
@@ -244,6 +327,7 @@ run_runtime_bench() {
     c_map[bubble_sort]="bubble_sort"
 
     for veri_name in "${!c_map[@]}"; do
+        local c_name veri_file c_file veri_exit gcc_O0_exit gcc_O2_exit match
         c_name="${c_map[$veri_name]}"
         veri_file="src/examples/${veri_name}.veri"
         c_file="eval/c_equivalents/${c_name}.c"
@@ -251,143 +335,149 @@ run_runtime_bench() {
         [ -f "$veri_file" ] || continue
         [ -f "$c_file" ] || continue
 
-        echo "  $veri_name..." >&2
+        log "  $veri_name..."
 
-        # Compile and run Veritas
         "$VERITAS" "$veri_file" -o "$TMPDIR/veri_run" --bench >/dev/null 2>&1 || continue
-        veri_exit=$("$TMPDIR/veri_run" >/dev/null 2>&1 && echo $? || echo $?)
+        if "$TMPDIR/veri_run" >/dev/null 2>&1; then
+            veri_exit="0"
+        else
+            veri_exit="$?"
+        fi
 
-        # Compile and run GCC -O0
-        gcc -O0 -o "$TMPDIR/gcc_O0_run" "$c_file" 2>/dev/null
-        gcc_O0_exit=$("$TMPDIR/gcc_O0_run" >/dev/null 2>&1 && echo $? || echo $?)
+        gcc -O0 -o "$TMPDIR/gcc_O0_run" "$c_file" 2>/dev/null || continue
+        if "$TMPDIR/gcc_O0_run" >/dev/null 2>&1; then
+            gcc_O0_exit="0"
+        else
+            gcc_O0_exit="$?"
+        fi
 
-        # Compile and run GCC -O2
-        gcc -O2 -o "$TMPDIR/gcc_O2_run" "$c_file" 2>/dev/null
-        gcc_O2_exit=$("$TMPDIR/gcc_O2_run" >/dev/null 2>&1 && echo $? || echo $?)
+        gcc -O2 -o "$TMPDIR/gcc_O2_run" "$c_file" 2>/dev/null || continue
+        if "$TMPDIR/gcc_O2_run" >/dev/null 2>&1; then
+            gcc_O2_exit="0"
+        else
+            gcc_O2_exit="$?"
+        fi
 
         match="MATCH"
         if [ "$veri_exit" != "$gcc_O0_exit" ]; then
             match="MISMATCH"
         fi
 
-        echo "$veri_name,$veri_exit,$gcc_O0_exit,$gcc_O2_exit,$match" >> "$RESULTS_DIR/runtime_correctness.csv"
+        printf '%s,%s,%s,%s,%s\n' \
+            "$veri_name" "$veri_exit" "$gcc_O0_exit" "$gcc_O2_exit" "$match" >> "$csv"
     done
 
-    echo "  -> $RESULTS_DIR/runtime_correctness.csv" >&2
+    log "  -> $csv"
 }
 
-# ============================================================
-# 6. Verifier acceptance matrix
-# ============================================================
-
 run_verifier_matrix() {
-    echo "=== Verifier Acceptance Matrix ===" >&2
-    echo "file,frontend_ok,verifier_ok,exit_code,frontend_smt_queries,verifier_smt_queries" > "$RESULTS_DIR/verifier_matrix.csv"
+    log "=== Verifier Acceptance Matrix ==="
 
-    for f in src/examples/*.veri; do
-        name=$(basename "$f" .veri)
-        echo "  $name..." >&2
+    local suite_manifest="eval/suites/feature_suite.txt"
+    local suite_name
+    suite_name="$(suite_stem "$suite_manifest")"
+    local suite_file="$TMPDIR/${suite_name}.txt"
+    resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
-        # Frontend (compile without verify)
-        if json=$("$VERITAS" "$f" -o "$TMPDIR/vm_out" --bench 2>/dev/null); then
+    local csv="$RESULTS_DIR/verifier_matrix.csv"
+    echo "suite,file,frontend_ok,verifier_ok,exit_code,frontend_smt_queries,verifier_smt_queries" > "$csv"
+
+    while IFS= read -r f; do
+        local name fe_ok fe_queries exit_code ver_ok ver_queries json json_v
+        name="$(basename "$f" .veri)"
+        log "  $name..."
+
+        if json="$("$VERITAS" "$f" -o "$TMPDIR/vm_out" --bench 2>/dev/null)"; then
             fe_ok="yes"
-            fe_queries=$(echo "$json" | jfield frontend_smt_queries)
-
-            # Run the binary
-            "$TMPDIR/vm_out" >/dev/null 2>&1 || true
-            exit_code=$?
+            fe_queries="$(echo "$json" | jfield frontend_smt_queries)"
+            if "$TMPDIR/vm_out" >/dev/null 2>&1; then
+                exit_code="0"
+            else
+                exit_code="$?"
+            fi
         else
             fe_ok="no"
             fe_queries="N/A"
             exit_code="N/A"
         fi
 
-        # Verifier (compile with verify)
-        if json_v=$("$VERITAS" "$f" --verify -o "$TMPDIR/vm_out_v" --bench 2>/dev/null); then
+        if json_v="$("$VERITAS" "$f" --verify -o "$TMPDIR/vm_out_v" --bench 2>/dev/null)"; then
             ver_ok="yes"
-            ver_queries=$(echo "$json_v" | jfield verifier_smt_queries)
+            ver_queries="$(echo "$json_v" | jfield verifier_smt_queries)"
         else
             ver_ok="no"
             ver_queries="N/A"
         fi
 
-        echo "$name,$fe_ok,$ver_ok,$exit_code,$fe_queries,$ver_queries" >> "$RESULTS_DIR/verifier_matrix.csv"
-    done
+        printf '%s,%s,%s,%s,%s,%s,%s\n' \
+            "$suite_name" "$name" "$fe_ok" "$ver_ok" "$exit_code" "$fe_queries" "$ver_queries" >> "$csv"
+    done < "$suite_file"
 
-    echo "  -> $RESULTS_DIR/verifier_matrix.csv" >&2
+    log "  -> $csv"
 }
 
-# ============================================================
-# 7. LOC / TCB analysis
-# ============================================================
-
 run_loc_analysis() {
-    echo "=== Lines of Code / TCB Analysis ===" >&2
+    log "=== Lines of Code / TCB Analysis ==="
+
     {
         echo "component,files,lines"
 
-        # Frontend
-        fe_lines=$(find src/frontend -name "*.rs" -exec cat {} + | wc -l)
-        fe_files=$(find src/frontend -name "*.rs" | wc -l)
+        fe_lines="$(find src/frontend -name '*.rs' -exec cat {} + | wc -l)"
+        fe_files="$(find src/frontend -name '*.rs' | wc -l)"
         echo "frontend,$fe_files,$fe_lines"
 
-        # Backend
-        be_lines=$(find src/backend -name "*.rs" -exec cat {} + | wc -l)
-        be_files=$(find src/backend -name "*.rs" | wc -l)
+        be_lines="$(find src/backend -name '*.rs' -exec cat {} + | wc -l)"
+        be_files="$(find src/backend -name '*.rs' | wc -l)"
         echo "backend,$be_files,$be_lines"
 
-        # Verifier (TCB)
-        ver_lines=$(find src/verifier -name "*.rs" -exec cat {} + | wc -l)
-        ver_files=$(find src/verifier -name "*.rs" | wc -l)
+        ver_lines="$(find src/verifier -name '*.rs' -exec cat {} + | wc -l)"
+        ver_files="$(find src/verifier -name '*.rs' | wc -l)"
         echo "verifier_tcb,$ver_files,$ver_lines"
 
-        # Common
-        com_lines=$(find src/common -name "*.rs" -exec cat {} + | wc -l)
-        com_files=$(find src/common -name "*.rs" | wc -l)
+        com_lines="$(find src/common -name '*.rs' -exec cat {} + | wc -l)"
+        com_files="$(find src/common -name '*.rs' | wc -l)"
         echo "common,$com_files,$com_lines"
 
-        # Pipeline + main
-        pipe_lines=$(cat src/pipeline.rs src/main.rs src/lib.rs 2>/dev/null | wc -l)
+        pipe_lines="$(cat src/pipeline.rs src/main.rs src/lib.rs 2>/dev/null | wc -l)"
         echo "pipeline,3,$pipe_lines"
 
-        # Total
-        total_lines=$(find src -name "*.rs" -exec cat {} + | wc -l)
-        total_files=$(find src -name "*.rs" | wc -l)
+        total_lines="$(find src -name '*.rs' -exec cat {} + | wc -l)"
+        total_files="$(find src -name '*.rs' | wc -l)"
         echo "total,$total_files,$total_lines"
-
     } > "$RESULTS_DIR/loc.csv"
 
-    echo "  -> $RESULTS_DIR/loc.csv" >&2
+    log "  -> $RESULTS_DIR/loc.csv"
 }
 
-# ============================================================
-# Main dispatch
-# ============================================================
+main() {
+    write_invocation_log "$@"
+    ensure_release_build
 
-mode="${1:---all}"
+    case "$MODE" in
+        --all)
+            run_loc_analysis
+            run_compile_bench
+            run_timing_bench
+            run_verifier_matrix
+            run_error_bench
+            run_binary_size_bench
+            run_runtime_bench
+            ;;
+        --compile)      run_compile_bench ;;
+        --timing)       run_timing_bench ;;
+        --verify)       run_verifier_matrix ;;
+        --errors)       run_error_bench ;;
+        --binary-size)  run_binary_size_bench ;;
+        --runtime)      run_runtime_bench ;;
+        --loc)          run_loc_analysis ;;
+        *)
+            log "Usage: $0 [--all|--compile|--timing|--verify|--errors|--binary-size|--runtime|--loc]"
+            exit 1
+            ;;
+    esac
 
-case "$mode" in
-    --all)
-        run_loc_analysis
-        run_compile_bench
-        run_timing_bench
-        run_verifier_matrix
-        run_error_bench
-        run_binary_size_bench
-        run_runtime_bench
-        ;;
-    --compile)    run_compile_bench ;;
-    --timing)     run_timing_bench ;;
-    --verify)     run_verifier_matrix ;;
-    --errors)     run_error_bench ;;
-    --binary-size) run_binary_size_bench ;;
-    --runtime)    run_runtime_bench ;;
-    --loc)        run_loc_analysis ;;
-    *)
-        echo "Usage: $0 [--all|--compile|--timing|--verify|--errors|--binary-size|--runtime|--loc]"
-        exit 1
-        ;;
-esac
+    log ""
+    log "Done. Results in $RUN_DIR/"
+}
 
-echo "" >&2
-echo "Done. Results in $RESULTS_DIR/" >&2
+main "$@"
