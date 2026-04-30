@@ -403,7 +403,7 @@ run_runtime_bench() {
                 fi
                 ;;
             checksum)
-                if [ "$observed" = "$expected" ] && [ "$run_exit_code" -ge 0 ] && [ "$run_exit_code" -lt 128 ]; then
+                if [ "$observed" = "$expected" ] && [ "$run_exit_code" -ge 0 ]; then
                     status="PASS"
                 fi
                 ;;

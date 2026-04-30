@@ -53,6 +53,71 @@ const RAX: Reg = Reg::Physical(PhysicalReg::LR);
 const RDX: Reg = Reg::Physical(PhysicalReg::R2);
 const R11: Reg = Reg::Physical(PhysicalReg::R7);
 
+fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
+    func.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instr| match instr {
+            DtalInstr::BinOp { dst, lhs, rhs, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(lhs, Reg::Physical(PhysicalReg::R12))
+                    || matches!(rhs, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::AddImm { dst, src, .. }
+            | DtalInstr::MovReg { dst, src, .. }
+            | DtalInstr::AliasBorrow { dst, src, .. }
+            | DtalInstr::BorrowMut { dst, src, .. }
+            | DtalInstr::MoveOwned { dst, src, .. }
+            | DtalInstr::Neg { dst, src, .. }
+            | DtalInstr::Not { dst, src, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::MovImm { dst, .. }
+            | DtalInstr::SetCC { dst, .. }
+            | DtalInstr::Pop { dst, .. }
+            | DtalInstr::Alloca { dst, .. }
+            | DtalInstr::PortIn { dst, .. }
+            | DtalInstr::TypeAnnotation { reg: dst, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Push { src, .. } => matches!(src, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::Load {
+                dst, base, offset, ..
+            } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::LoadOp {
+                dst,
+                base,
+                offset,
+                other,
+                ..
+            } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+                    || matches!(other, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Store { base, offset, src } => {
+                matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Cmp { lhs, rhs } => {
+                matches!(lhs, Reg::Physical(PhysicalReg::R12))
+                    || matches!(rhs, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::CmpImm { lhs, .. } => matches!(lhs, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::PortOut { port, value } => {
+                matches!(port, Reg::Physical(PhysicalReg::R12))
+                    || matches!(value, Reg::Physical(PhysicalReg::R12))
+            }
+            _ => false,
+        })
+    })
+}
+
 /// Resolve a virtual register to its physical location.
 /// Returns either a physical Reg or a stack offset for spilled regs.
 enum PhysLoc {
@@ -331,11 +396,21 @@ pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
             continue;
         }
 
+        let allocatable_regs = if function_uses_reserved_region_reg(func) {
+            X86Reg::ALLOCATABLE
+                .iter()
+                .copied()
+                .filter(|reg| *reg != X86Reg::R15)
+                .collect()
+        } else {
+            X86Reg::ALLOCATABLE.to_vec()
+        };
+
         let allocation = if std::env::var("VERITAS_LS").is_ok() {
-            let mut ls = LinearScanAllocator::new();
+            let mut ls = LinearScanAllocator::with_available_regs(allocatable_regs.clone());
             ls.allocate(func)
         } else {
-            let gc = GraphColoringAllocator::new();
+            let gc = GraphColoringAllocator::with_available_regs(allocatable_regs);
             gc.allocate(func)
         };
 

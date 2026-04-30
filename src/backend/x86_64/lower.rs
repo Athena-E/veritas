@@ -35,18 +35,27 @@ pub fn lower_program(program: &DtalProgram) -> X86Program {
 
 /// Lower a DTAL function to x86-64
 fn lower_function(func: &DtalFunction) -> X86Function {
+    let uses_reserved_region_reg = function_uses_reserved_region_reg(func);
+    let allocatable_regs = if uses_reserved_region_reg {
+        X86Reg::ALLOCATABLE
+            .iter()
+            .copied()
+            .filter(|reg| *reg != X86Reg::R15)
+            .collect()
+    } else {
+        X86Reg::ALLOCATABLE.to_vec()
+    };
+
     // Perform register allocation (graph coloring by default, VERITAS_LS=1 for linear scan).
     let mut allocation = if std::env::var("VERITAS_LS").is_ok() {
-        let mut ls_allocator = LinearScanAllocator::new();
+        let mut ls_allocator = LinearScanAllocator::with_available_regs(allocatable_regs.clone());
         ls_allocator.allocate(func)
     } else {
-        let gc_allocator = GraphColoringAllocator::new();
+        let gc_allocator = GraphColoringAllocator::with_available_regs(allocatable_regs);
         gc_allocator.allocate(func)
     };
 
-    if function_uses_reserved_region_reg(func)
-        && !allocation.callee_saved_used.contains(&X86Reg::R15)
-    {
+    if uses_reserved_region_reg && !allocation.callee_saved_used.contains(&X86Reg::R15) {
         allocation.callee_saved_used.push(X86Reg::R15);
         allocation.callee_saved_used.sort();
     }

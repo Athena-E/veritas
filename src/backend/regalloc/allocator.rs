@@ -60,10 +60,15 @@ pub struct LinearScanAllocator {
 impl LinearScanAllocator {
     /// Create a new allocator with default x86-64 registers
     pub fn new() -> Self {
+        Self::with_available_regs(X86Reg::ALLOCATABLE.to_vec())
+    }
+
+    /// Create a new allocator with an explicit allocatable register set.
+    pub fn with_available_regs(available_regs: Vec<X86Reg>) -> Self {
         Self {
-            available_regs: X86Reg::ALLOCATABLE.to_vec(),
+            free_regs: available_regs.clone(),
+            available_regs,
             active: Vec::new(),
-            free_regs: X86Reg::ALLOCATABLE.to_vec(),
             allocation: BTreeMap::new(),
             next_spill_slot: -8, // Start at [rbp-8]
             callee_saved_used: HashSet::new(),
@@ -312,9 +317,13 @@ pub struct GraphColoringAllocator {
 
 impl GraphColoringAllocator {
     pub fn new() -> Self {
+        Self::with_available_regs(X86Reg::ALLOCATABLE.to_vec())
+    }
+
+    pub fn with_available_regs(available_regs: Vec<X86Reg>) -> Self {
         Self {
-            num_regs: X86Reg::ALLOCATABLE.len(),
-            available_regs: X86Reg::ALLOCATABLE.to_vec(),
+            num_regs: available_regs.len(),
+            available_regs,
         }
     }
 
