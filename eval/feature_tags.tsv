@@ -1,0 +1,23 @@
+file	feature_tags	narrative_role
+src/examples/01_simple.veri	basics,arithmetic,return	baseline_frontend_smoke
+src/examples/03_arrays.veri	arrays,indexing	fixed_size_arrays
+src/examples/04_references.veri	references,borrowing	basic_reference_semantics
+src/examples/07_function_calls.veri	function_calls	parameters	call_structure
+src/examples/08_mutable.veri	mutability,assignment	state_updates
+src/examples/10_advanced_types.veri	types,annotations,structural_checks	type_system_coverage
+src/examples/14_for_loops.veri	for_loops,iteration	control_flow_baseline
+src/examples/15_array_init.veri	arrays,initialisation,proof	obligation_heavy_array_setup
+src/examples/16_array_assignment.veri	arrays,mutation,proof	array_update_reasoning
+src/examples/17_preconditions.veri	preconditions,contracts	contract_definition
+src/examples/18_precondition_use.veri	preconditions,calls,contracts	contract_use_site
+src/examples/19_loop_invariant.veri	loop_invariants,while_loops,proof	invariant_baseline
+src/examples/19_quantifier_showcase.veri	quantifiers,proof,logic	quantifier_reasoning
+src/examples/20_array_loop_invariant.veri	arrays,loop_invariants,proof	array_invariant_reasoning
+src/examples/20_binary_search.veri	binary_search,loop_invariants,quantifiers,sortedness,proof	canonical_search_proof
+src/examples/22_bubble_sort.veri	bubble_sort,loop_invariants,sortedness,mutation,proof	canonical_sorting_proof
+src/examples/24_while_loop.veri	while_loops,control_flow	imperative_loop_baseline
+src/examples/32_shared_borrow.veri	shared_borrow,references	shared_borrow_semantics
+src/examples/33_mutable_borrow.veri	mutable_borrow,references,mutation	exclusive_borrow_semantics
+src/examples/36_shared_scalar_borrow_call.veri	shared_borrow,function_calls,scalar_refs	borrow_passing_shared
+src/examples/37_mutable_scalar_borrow_call.veri	mutable_borrow,function_calls,scalar_refs,mutation	borrow_passing_mutable
+src/examples/sortedness.veri	sortedness,quantifiers,specification,proof	sortedness_library_reasoning

@@ -43,6 +43,14 @@ LOGS_DIR="$RUN_DIR/logs"
 
 mkdir -p "$RAW_DIR" "$RESULTS_DIR" "$LOGS_DIR"
 
+if [ -f "$RUN_DIR/metadata.env" ]; then
+    {
+        printf 'BENCH_MODE=%q\n' "$MODE"
+        printf 'BENCH_RUNS=%q\n' "$RUNS"
+        printf 'BENCH_WARMUP=%q\n' "$WARMUP"
+    } >> "$RUN_DIR/metadata.env"
+fi
+
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -98,6 +106,7 @@ write_invocation_log() {
     {
         echo ""
         echo "# bench.sh invocation"
+        printf 'BENCH_MODE=%q BENCH_RUNS=%q BENCH_WARMUP=%q ' "$MODE" "$RUNS" "$WARMUP"
         printf '%q ' "$0" "$@"
         echo ""
     } >> "$RUN_DIR/commands.sh"
@@ -230,7 +239,7 @@ run_timing_bench() {
         hyperfine --warmup "$WARMUP" --runs "$RUNS" \
             --export-json "$compile_json" \
             "$cmd" > "$LOGS_DIR/hyperfine_${name}_compile.log"
-        append_hyperfine_summary "$compile_json" "$suite_name" "$name" "compile" "pass" "$csv"
+        append_hyperfine_summary "$compile_json" "$suite_name" "$name" "compile_only" "pass" "$csv"
 
         log "  $name (compile+verify)..."
         verify_json="$raw_dir/${name}_verify.json"
@@ -238,13 +247,13 @@ run_timing_bench() {
         if ! $VERITAS "$f" --verify -o "$TMPDIR/timing_probe_v" --bench >/dev/null 2>&1; then
             log "    verify probe failed; recording failure"
             printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-                "$suite_name" "$name" "verify" "fail" "" "" "" "" "" "" >> "$csv"
+                "$suite_name" "$name" "compile_plus_verify" "fail" "" "" "" "" "" "" >> "$csv"
             continue
         fi
         hyperfine --warmup "$WARMUP" --runs "$RUNS" \
             --export-json "$verify_json" \
             "$cmd" > "$LOGS_DIR/hyperfine_${name}_verify.log"
-        append_hyperfine_summary "$verify_json" "$suite_name" "$name" "verify" "pass" "$csv"
+        append_hyperfine_summary "$verify_json" "$suite_name" "$name" "compile_plus_verify" "pass" "$csv"
     done < "$suite_file"
 
     log "  -> $csv"

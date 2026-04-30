@@ -6,5 +6,4 @@ path:src/examples/16_array_assignment.veri
 path:src/examples/19_quantifier_showcase.veri
 path:src/examples/20_binary_search.veri
 path:src/examples/22_bubble_sort.veri
-path:src/examples/binary_search.veri
 path:src/examples/sortedness.veri
