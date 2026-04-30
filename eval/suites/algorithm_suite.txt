@@ -1,0 +1,9 @@
+# Larger kernels for runtime and practicality comparisons.
+
+path:src/examples/20_binary_search.veri
+path:src/examples/22_bubble_sort.veri
+path:src/examples/binary_search.veri
+path:src/examples/bubble_sort.veri
+path:eval/benchmarks/floyd-warshall/floyd_warshall.veri
+path:eval/benchmarks/jacobi-1d-imper/jacobi_1d_imper.veri
+path:eval/benchmarks/jacobi-2d-imper/jacobi_2d_imper.veri
