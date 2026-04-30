@@ -2,7 +2,7 @@ file	feature_tags	narrative_role
 src/examples/01_simple.veri	basics,arithmetic,return	baseline_frontend_smoke
 src/examples/03_arrays.veri	arrays,indexing	fixed_size_arrays
 src/examples/04_references.veri	references,borrowing	basic_reference_semantics
-src/examples/07_function_calls.veri	function_calls	parameters	call_structure
+src/examples/07_function_calls.veri	function_calls,parameters	call_structure
 src/examples/08_mutable.veri	mutability,assignment	state_updates
 src/examples/10_advanced_types.veri	types,annotations,structural_checks	type_system_coverage
 src/examples/14_for_loops.veri	for_loops,iteration	control_flow_baseline

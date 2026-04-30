@@ -124,6 +124,171 @@ suite_stem() {
     basename "$manifest" .txt
 }
 
+sanitize_csv_field() {
+    printf '%s' "$1" | tr ',' ';' | tr '"' "'"
+}
+
+jfield_file() {
+    local file="$1"
+    local field="$2"
+    jfield "$field" < "$file"
+}
+
+extract_diagnostic_summary() {
+    local diagnostic_file="$1"
+    local source_path="${2:-}"
+
+    python3 - "$diagnostic_file" "$source_path" <<'PY'
+import re
+import sys
+
+diagnostic_path = sys.argv[1]
+source_path = sys.argv[2]
+
+ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+priority = []
+fallback = []
+
+with open(diagnostic_path, "r", encoding="utf-8", errors="replace") as fh:
+    for raw_line in fh:
+        line = ansi.sub("", raw_line).strip()
+        if not line:
+            continue
+        if source_path and line == source_path:
+            continue
+        if line in {"Source code:"}:
+            continue
+        if set(line) <= {"=", "-"}:
+            continue
+        if line.startswith("//"):
+            continue
+        if line.startswith("-->"):
+            continue
+        if "│" in line or "╭" in line or "╰" in line or "─" in line:
+            continue
+        if "<unknown>:" in line:
+            continue
+        if "Error:" in line or "FAILED" in line or "failed" in line:
+            priority.append(line)
+            continue
+        fallback.append(line)
+
+summary = priority[0] if priority else (fallback[0] if fallback else "")
+summary = summary.replace(",", ";").replace('"', "'")
+print(summary[:160])
+PY
+}
+
+lookup_feature_metadata() {
+    local source_path="$1"
+    awk -F '\t' -v key="$source_path" '
+        NR > 1 && $1 == key {
+            print $2 "\t" $3
+            found = 1
+            exit
+        }
+        END {
+            if (!found) {
+                print "unclassified\tunclassified"
+            }
+        }
+    ' eval/feature_tags.tsv
+}
+
+lookup_error_metadata() {
+    local source_path="$1"
+    awk -F '\t' -v key="$source_path" '
+        NR > 1 && $1 == key {
+            print $2 "\t" $3
+            found = 1
+            exit
+        }
+        END {
+            if (!found) {
+                print "unclassified\tunclassified"
+            }
+        }
+    ' eval/error_classes.tsv
+}
+
+write_feature_verifier_summary() {
+    local matrix_csv="$1"
+
+    {
+        echo "feature_tag,total,frontend_ok,verifier_ok"
+        awk -F ',' '
+        BEGIN {
+            OFS = ","
+        }
+        NR == 1 { next }
+        {
+            split($4, tags, ";")
+            seen_count = 0
+            delete seen
+            for (i in tags) {
+                tag = tags[i]
+                gsub(/^ +| +$/, "", tag)
+                if (tag == "") {
+                    continue
+                }
+                if (!(tag in seen)) {
+                    seen[tag] = 1
+                    ordered[++seen_count] = tag
+                }
+            }
+            if (seen_count == 0) {
+                ordered[++seen_count] = "unclassified"
+            }
+            for (i = 1; i <= seen_count; i++) {
+                tag = ordered[i]
+                total[tag]++
+                if ($7 == "yes") {
+                    frontend_ok[tag]++
+                }
+                if ($8 == "yes") {
+                    verifier_ok[tag]++
+                }
+                delete seen[tag]
+                delete ordered[i]
+            }
+        }
+        END {
+            for (tag in total) {
+                print tag, total[tag], frontend_ok[tag] + 0, verifier_ok[tag] + 0
+            }
+        }
+    ' "$matrix_csv" | sort
+    }
+}
+
+write_error_class_summary() {
+    local matrix_csv="$1"
+
+    {
+        echo "error_class,total,rejected,accepted"
+        awk -F ',' '
+        BEGIN {
+            OFS = ","
+        }
+        NR == 1 { next }
+        {
+            total[$4]++
+            if ($6 == "yes") {
+                rejected[$4]++
+            } else {
+                accepted[$4]++
+            }
+        }
+        END {
+            for (klass in total) {
+                print klass, total[klass], rejected[klass] + 0, accepted[klass] + 0
+            }
+        }
+    ' "$matrix_csv" | sort
+    }
+}
+
 append_hyperfine_summary() {
     local export_json="$1"
     local suite="$2"
@@ -269,12 +434,18 @@ run_error_bench() {
     resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
     local csv="$RESULTS_DIR/error_rejection.csv"
+    local matrix_csv="$RESULTS_DIR/error_rejection_matrix.csv"
+    local summary_csv="$RESULTS_DIR/error_rejection_summary_by_class.csv"
     echo "suite,file,expected_error,rejected,error_message" > "$csv"
+    echo "suite,file,source,error_class,error_tags,rejected,error_message" > "$matrix_csv"
 
     while IFS= read -r f; do
-        local name error_output rejected first_line
+        local name rejected first_line error_class error_tags error_log
         name="$(basename "$f" .veri)"
-        error_output="$("$VERITAS" "$f" -o "$TMPDIR/err_out" 2>&1 || true)"
+        error_log="$LOGS_DIR/${name}.frontend_error.log"
+        "$VERITAS" "$f" -o "$TMPDIR/err_out" > "$error_log" 2>&1 || true
+        IFS=$'\t' read -r error_class error_tags <<< "$(lookup_error_metadata "$f")"
+        error_tags="$(sanitize_csv_field "${error_tags//,/;}")"
 
         if [ -f "$TMPDIR/err_out" ] && [ -x "$TMPDIR/err_out" ]; then
             rejected="no"
@@ -283,12 +454,18 @@ run_error_bench() {
         fi
         rm -f "$TMPDIR/err_out"
 
-        first_line="$(echo "$error_output" | grep -i -m1 'error\|FAILED' | head -c 160 | tr ',' ';' | tr '"' "'")"
+        first_line="$(extract_diagnostic_summary "$error_log" "$f")"
         printf '%s,%s,%s,%s,%s\n' \
             "$suite_name" "$name" "type_error" "$rejected" "$first_line" >> "$csv"
+        printf '%s,%s,%s,%s,%s,%s,%s\n' \
+            "$suite_name" "$name" "$f" "$error_class" "$error_tags" "$rejected" "$first_line" >> "$matrix_csv"
     done < "$suite_file"
 
+    write_error_class_summary "$matrix_csv" "$summary_csv" > "$summary_csv"
+
     log "  -> $csv"
+    log "  -> $matrix_csv"
+    log "  -> $summary_csv"
 }
 
 run_binary_size_bench() {
@@ -435,34 +612,65 @@ run_verifier_matrix() {
     resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
     local csv="$RESULTS_DIR/verifier_matrix.csv"
+    local matrix_csv="$RESULTS_DIR/feature_verifier_matrix.csv"
+    local summary_csv="$RESULTS_DIR/feature_verifier_summary_by_tag.csv"
     echo "suite,file,frontend_ok,verifier_ok,frontend_smt_queries,verifier_smt_queries" > "$csv"
+    echo "suite,file,source,feature_tags,narrative_role,agreement_status,frontend_ok,verifier_ok,frontend_smt_queries,verifier_smt_queries,frontend_diagnostic,verifier_diagnostic" > "$matrix_csv"
 
     while IFS= read -r f; do
-        local name fe_ok fe_queries ver_ok ver_queries json json_v
+        local name fe_ok fe_queries ver_ok ver_queries feature_tags narrative_role
+        local fe_json fe_stderr ver_json ver_stderr fe_diag ver_diag agreement_status
         name="$(basename "$f" .veri)"
         log "  $name..."
+        IFS=$'\t' read -r feature_tags narrative_role <<< "$(lookup_feature_metadata "$f")"
+        feature_tags="$(sanitize_csv_field "${feature_tags//,/;}")"
+        narrative_role="$(sanitize_csv_field "$narrative_role")"
+        fe_json="$TMPDIR/${name}.frontend.json"
+        fe_stderr="$LOGS_DIR/${name}.frontend_verify.log"
+        ver_json="$TMPDIR/${name}.verifier.json"
+        ver_stderr="$LOGS_DIR/${name}.physical_verify.log"
 
-        if json="$("$VERITAS" "$f" -o "$TMPDIR/vm_out" --bench 2>/dev/null)"; then
+        if "$VERITAS" "$f" -o "$TMPDIR/vm_out" --bench > "$fe_json" 2> "$fe_stderr"; then
             fe_ok="yes"
-            fe_queries="$(echo "$json" | jfield frontend_smt_queries)"
+            fe_queries="$(jfield_file "$fe_json" frontend_smt_queries)"
+            fe_diag=""
         else
             fe_ok="no"
             fe_queries="N/A"
+            fe_diag="$(extract_diagnostic_summary "$fe_stderr" "$f")"
         fi
 
-        if json_v="$("$VERITAS" "$f" --verify -o "$TMPDIR/vm_out_v" --bench 2>/dev/null)"; then
+        if "$VERITAS" "$f" --verify -o "$TMPDIR/vm_out_v" --bench > "$ver_json" 2> "$ver_stderr"; then
             ver_ok="yes"
-            ver_queries="$(echo "$json_v" | jfield verifier_smt_queries)"
+            ver_queries="$(jfield_file "$ver_json" verifier_smt_queries)"
+            ver_diag=""
         else
             ver_ok="no"
             ver_queries="N/A"
+            ver_diag="$(extract_diagnostic_summary "$ver_stderr" "$f")"
+        fi
+
+        if [ "$fe_ok" = "yes" ] && [ "$ver_ok" = "yes" ]; then
+            agreement_status="both_pass"
+        elif [ "$fe_ok" = "no" ] && [ "$ver_ok" = "no" ]; then
+            agreement_status="both_reject"
+        elif [ "$fe_ok" = "no" ]; then
+            agreement_status="frontend_reject"
+        else
+            agreement_status="verifier_reject"
         fi
 
         printf '%s,%s,%s,%s,%s,%s\n' \
             "$suite_name" "$name" "$fe_ok" "$ver_ok" "$fe_queries" "$ver_queries" >> "$csv"
+        printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+            "$suite_name" "$name" "$f" "$feature_tags" "$narrative_role" "$agreement_status" "$fe_ok" "$ver_ok" "$fe_queries" "$ver_queries" "$fe_diag" "$ver_diag" >> "$matrix_csv"
     done < "$suite_file"
 
+    write_feature_verifier_summary "$matrix_csv" "$summary_csv" > "$summary_csv"
+
     log "  -> $csv"
+    log "  -> $matrix_csv"
+    log "  -> $summary_csv"
 }
 
 run_loc_analysis() {
