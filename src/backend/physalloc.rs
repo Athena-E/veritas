@@ -605,7 +605,13 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 } else {
                     *src
                 };
-                emit_store_from_param_kind(&mut instrs, actual_src, dst_loc, ty.clone(), *param_kind);
+                emit_store_from_param_kind(
+                    &mut instrs,
+                    actual_src,
+                    dst_loc,
+                    ty.clone(),
+                    *param_kind,
+                );
             }
         }
 
@@ -815,46 +821,44 @@ fn allocate_instruction(
                         ty: ty.clone(),
                     });
                 }
-                (PhysLoc::Spill(offset), PhysLoc::Reg(d)) => {
-                    match instr {
-                        DtalInstr::MoveOwned { .. }
-                        | DtalInstr::AliasBorrow { .. }
-                        | DtalInstr::BorrowMut { .. } => {
-                            let scratch = pick_scratch(&[*d]);
-                            instrs.push(DtalInstr::SpillLoad {
-                                dst: scratch,
-                                offset: *offset,
-                                ty: ty.clone(),
-                            });
-                            let lowered = match instr {
-                                DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
-                                    dst: *d,
-                                    src: scratch,
-                                    ty: ty.clone(),
-                                },
-                                DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
-                                    dst: *d,
-                                    src: scratch,
-                                    ty: ty.clone(),
-                                },
-                                DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
-                                    dst: *d,
-                                    src: scratch,
-                                    ty: ty.clone(),
-                                },
-                                _ => unreachable!(),
-                            };
-                            instrs.push(lowered);
-                        }
-                        _ => {
-                            instrs.push(DtalInstr::SpillLoad {
+                (PhysLoc::Spill(offset), PhysLoc::Reg(d)) => match instr {
+                    DtalInstr::MoveOwned { .. }
+                    | DtalInstr::AliasBorrow { .. }
+                    | DtalInstr::BorrowMut { .. } => {
+                        let scratch = pick_scratch(&[*d]);
+                        instrs.push(DtalInstr::SpillLoad {
+                            dst: scratch,
+                            offset: *offset,
+                            ty: ty.clone(),
+                        });
+                        let lowered = match instr {
+                            DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
                                 dst: *d,
-                                offset: *offset,
+                                src: scratch,
                                 ty: ty.clone(),
-                            });
-                        }
+                            },
+                            DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                                dst: *d,
+                                src: scratch,
+                                ty: ty.clone(),
+                            },
+                            DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                                dst: *d,
+                                src: scratch,
+                                ty: ty.clone(),
+                            },
+                            _ => unreachable!(),
+                        };
+                        instrs.push(lowered);
                     }
-                }
+                    _ => {
+                        instrs.push(DtalInstr::SpillLoad {
+                            dst: *d,
+                            offset: *offset,
+                            ty: ty.clone(),
+                        });
+                    }
+                },
                 (PhysLoc::Spill(src_off), PhysLoc::Spill(dst_off)) => {
                     // mem-to-mem: use scratch
                     match instr {
