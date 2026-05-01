@@ -1,0 +1,10 @@
+fn read_offset(i: int) -> int
+    requires i >= 0 && i < 4
+{
+    let arr: [int; 5] = [7; 5];
+    arr[i + 1]
+}
+
+fn main() -> int {
+    read_offset(2)
+}

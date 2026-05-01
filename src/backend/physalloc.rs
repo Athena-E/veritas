@@ -1724,4 +1724,18 @@ fn main() -> int {
         let physical = physically_allocate(&output.dtal_program);
         verify_dtal(&physical).expect("physical mutable-borrow program should verify");
     }
+
+    #[test]
+    fn test_physalloc_verify_shared_scalar_deref() {
+        let source = r#"
+fn main() -> int {
+    let x: int = 7;
+    let rx: &int = &x;
+    *rx
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        verify_dtal(&physical).expect("physical shared scalar deref should verify");
+    }
 }

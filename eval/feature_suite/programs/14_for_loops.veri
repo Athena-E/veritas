@@ -1,0 +1,11 @@
+fn sum_squares(n: int) -> int {
+    let mut total: int = 0;
+    for i in 0..n {
+        total = total + i * i;
+    }
+    total
+}
+
+fn main() -> int {
+    sum_squares(5)
+}

@@ -1,0 +1,7 @@
+fn main() -> int {
+    let mut counter: int = 0;
+    counter = counter + 1;
+    counter = counter + 1;
+    counter = counter + 1;
+    counter
+}

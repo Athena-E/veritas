@@ -1,0 +1,9 @@
+fn endpoint_sum(arr: [int; 4]) -> int {
+    arr[0] + arr[3]
+}
+
+fn main() -> int {
+    let mut arr: [int; 4] = [5; 4];
+    arr[3] = 7;
+    endpoint_sum(arr)
+}

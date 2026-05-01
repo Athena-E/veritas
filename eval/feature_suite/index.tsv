@@ -1,0 +1,29 @@
+curated_id	file	original_source	rationale
+F01	01_simple.veri	src/examples/01_simple.veri	baseline arithmetic and return path
+F02	02_conditionals.veri	src/examples/02_conditionals.veri	explicit conditional control-flow baseline
+F03	03_arrays.veri	src/examples/03_arrays.veri	fixed-size array creation and indexing
+F04	04_references.veri	src/examples/04_references.veri	basic reference semantics
+F05	05_comparisons.veri	src/examples/05_comparisons.veri	explicit predicate and boolean comparison baseline
+F06	07_function_calls.veri	src/examples/07_function_calls.veri	function call structure
+F07	08_mutable.veri	src/examples/08_mutable.veri	mutable state and assignment
+F08	10_advanced_types.veri	src/examples/10_advanced_types.veri	type annotation coverage
+F09	14_for_loops.veri	src/examples/14_for_loops.veri	iteration baseline
+F10	15_array_init.veri	src/examples/15_array_init.veri	array proof obligations
+F11	16_array_assignment.veri	src/examples/16_array_assignment.veri	array mutation reasoning
+F12	17_preconditions.veri	src/examples/17_preconditions.veri	contract definition
+F13	18_precondition_use.veri	src/examples/18_precondition_use.veri	contract use site
+F14	19_loop_invariant.veri	src/examples/19_loop_invariant.veri	invariant baseline
+F15	19_quantifier_showcase.veri	src/examples/19_quantifier_showcase.veri	quantifier reasoning
+F16	20_array_loop_invariant.veri	src/examples/20_array_loop_invariant.veri	array loop invariant reasoning
+F17	20_binary_search.veri	src/examples/20_binary_search.veri	canonical search proof
+F18	21_safe_division.veri	src/examples/21_safe_division.veri	positive arithmetic-safety baseline
+F19	22_bubble_sort.veri	src/examples/22_bubble_sort.veri	canonical sorting proof
+F20	24_while_loop.veri	src/examples/24_while_loop.veri	while-loop baseline
+F21	30_i64_safe_midpoint.veri	src/examples/30_i64_safe_midpoint.veri	overflow-aware i64 arithmetic
+F22	32_shared_borrow.veri	src/examples/32_shared_borrow.veri	shared borrow semantics
+F23	33_mutable_borrow.veri	src/examples/33_mutable_borrow.veri	exclusive borrow semantics
+F24	34_shared_scalar_deref.veri	src/examples/34_shared_scalar_deref.veri	shared scalar dereference
+F25	35_mutable_scalar_deref.veri	src/examples/35_mutable_scalar_deref.veri	mutable scalar dereference
+F26	36_shared_scalar_borrow_call.veri	src/examples/36_shared_scalar_borrow_call.veri	shared borrow passing across calls
+F27	37_mutable_scalar_borrow_call.veri	src/examples/37_mutable_scalar_borrow_call.veri	mutable borrow passing across calls
+F28	sortedness.veri	src/examples/sortedness.veri	reusable sortedness specification reasoning

@@ -1,0 +1,17 @@
+fn count_digits(n: int) -> int
+    requires n > 0
+{
+    let mut count: int = 0;
+    let mut value: int = n;
+    while value > 0
+        invariant count >= 0
+    {
+        value = value / 10;
+        count = count + 1;
+    }
+    count
+}
+
+fn main() -> int {
+    count_digits(123)
+}

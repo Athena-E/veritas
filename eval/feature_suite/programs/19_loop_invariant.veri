@@ -1,0 +1,17 @@
+fn count_to(n: int) -> int
+    requires n >= 0
+{
+    let mut value: int = 0;
+    let mut count: int = 0;
+    while value < n
+        invariant value >= 0 && count == value
+    {
+        value = value + 1;
+        count = count + 1;
+    }
+    count
+}
+
+fn main() -> int {
+    count_to(6)
+}

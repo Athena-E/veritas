@@ -1,0 +1,17 @@
+fn main() -> int {
+    let a: int = 10;
+    let b: int = 20;
+    let mut score: int = 0;
+
+    if a < b {
+        score = score + 1;
+    }
+    if a != b {
+        score = score + 2;
+    }
+    if b >= a {
+        score = score + 4;
+    }
+
+    score
+}

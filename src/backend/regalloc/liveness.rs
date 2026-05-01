@@ -369,6 +369,18 @@ impl InterferenceGraph {
                         }
                     }
                 }
+
+                match &block.instructions[instr_idx] {
+                    DtalInstr::AliasBorrow { dst, src, .. }
+                    | DtalInstr::BorrowMut { dst, src, .. } => {
+                        if let (Reg::Virtual(dst_vreg), Reg::Virtual(src_vreg)) = (dst, src)
+                            && dst_vreg != src_vreg
+                        {
+                            graph.add_edge(*dst_vreg, *src_vreg);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 

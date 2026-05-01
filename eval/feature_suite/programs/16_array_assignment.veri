@@ -1,0 +1,12 @@
+fn fill_squares() -> [int; 5] {
+    let mut arr: [int; 5] = [0; 5];
+    for i in 0..5 {
+        arr[i] = i * i;
+    }
+    arr
+}
+
+fn main() -> int {
+    let squares: [int; 5] = fill_squares();
+    squares[3] + squares[4]
+}
