@@ -1,0 +1,10 @@
+// i64 overflow: x + y on unconstrained i64 can overflow.
+// Expected: IntegerOverflow error E023.
+
+fn add_unsafe(x: i64, y: i64) -> i64 {
+    x + y
+}
+
+fn main() -> int {
+    0
+}

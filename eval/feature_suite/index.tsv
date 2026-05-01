@@ -26,4 +26,4 @@ F24	34_shared_scalar_deref.veri	src/examples/34_shared_scalar_deref.veri	shared 
 F25	35_mutable_scalar_deref.veri	src/examples/35_mutable_scalar_deref.veri	mutable scalar dereference
 F26	36_shared_scalar_borrow_call.veri	src/examples/36_shared_scalar_borrow_call.veri	shared borrow passing across calls
 F27	37_mutable_scalar_borrow_call.veri	src/examples/37_mutable_scalar_borrow_call.veri	mutable borrow passing across calls
-F28	sortedness.veri	src/examples/sortedness.veri	reusable sortedness specification reasoning
+F28	38_sortedness.veri	src/examples/sortedness.veri	reusable sortedness specification reasoning

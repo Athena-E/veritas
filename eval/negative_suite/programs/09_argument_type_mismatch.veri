@@ -1,0 +1,10 @@
+// Error: Argument type doesn't match parameter
+// Expected error: E001 - Type mismatch
+
+fn double(x: int) -> int {
+    x + x
+}
+
+fn main() {
+    let result: int = double(true);
+}

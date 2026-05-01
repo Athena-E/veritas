@@ -28,4 +28,4 @@ path:eval/feature_suite/programs/34_shared_scalar_deref.veri
 path:eval/feature_suite/programs/35_mutable_scalar_deref.veri
 path:eval/feature_suite/programs/36_shared_scalar_borrow_call.veri
 path:eval/feature_suite/programs/37_mutable_scalar_borrow_call.veri
-path:eval/feature_suite/programs/sortedness.veri
+path:eval/feature_suite/programs/38_sortedness.veri

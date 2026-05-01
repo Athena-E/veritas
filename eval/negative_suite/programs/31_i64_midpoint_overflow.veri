@@ -1,0 +1,17 @@
+// Classic midpoint overflow bug caught by i64 verification.
+//
+// The expression (lo + hi) / 2 overflows when lo + hi > INT_MAX.
+// This is a real bug class that has caused issues in Java's Arrays.binarySearch,
+// Android's TimSort, and countless other implementations.
+//
+// Expected: IntegerOverflow error E023 on the `+` in `lo + hi`.
+
+fn unsafe_midpoint(lo: {v: i64 | v >= 0}, hi: {v: i64 | v >= 0}) -> i64
+    requires lo <= hi
+{
+    (lo + hi) / 2
+}
+
+fn main() -> int {
+    0
+}

@@ -1,0 +1,6 @@
+// Error: Invalid operation on types
+// Expected error: E001 - Type mismatch (int expected, bool found)
+
+fn main() {
+    let x: int = true + 5;
+}

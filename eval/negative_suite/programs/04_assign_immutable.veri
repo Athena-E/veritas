@@ -1,0 +1,7 @@
+// Error: Assigning to immutable variable
+// Expected error: E004 - Cannot assign to immutable variable
+
+fn main() {
+    let x: int = 5;
+    x = 10;
+}

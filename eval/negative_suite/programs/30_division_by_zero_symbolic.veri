@@ -1,0 +1,8 @@
+// Should fail: divisor could be zero
+fn divide(a: int, b: int) -> int {
+    a / b
+}
+
+fn main() -> int {
+    divide(10, 2)
+}

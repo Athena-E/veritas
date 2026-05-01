@@ -1,0 +1,36 @@
+curated_id	file	original_source	error_class	rationale
+N01	01_type_mismatch.veri	src/examples/errors/01_type_mismatch.veri	type_error	basic assignment/type compatibility failure
+N02	02_undefined_variable.veri	src/examples/errors/02_undefined_variable.veri	name_resolution	unbound variable rejection
+N03	03_undefined_function.veri	src/examples/errors/03_undefined_function.veri	name_resolution	unbound function rejection
+N04	04_assign_immutable.veri	src/examples/errors/04_assign_immutable.veri	mutability	immutability enforcement
+N05	05_return_type_mismatch.veri	src/examples/errors/05_return_type_mismatch.veri	type_error	return type mismatch
+N06	06_missing_return.veri	src/examples/errors/06_missing_return.veri	control_flow	missing return on non-unit path
+N07	07_not_an_array.veri	src/examples/errors/07_not_an_array.veri	type_error	array operation on non-array value
+N08	08_wrong_argument_count.veri	src/examples/errors/08_wrong_argument_count.veri	call_error	call arity mismatch
+N09	09_argument_type_mismatch.veri	src/examples/errors/09_argument_type_mismatch.veri	call_error	call argument type mismatch
+N10	10_invalid_operation.veri	src/examples/errors/10_invalid_operation.veri	type_error	invalid primitive operation
+N11	11_bool_arithmetic.veri	src/examples/errors/11_bool_arithmetic.veri	type_error	boolean arithmetic rejection
+N12	12_non_bool_condition.veri	src/examples/errors/12_non_bool_condition.veri	control_flow	non-boolean conditional rejection
+N13	13_array_index_type.veri	src/examples/errors/13_array_index_type.veri	array_error	non-integer array index rejection
+N14	14_array_element_mismatch.veri	src/examples/errors/14_array_element_mismatch.veri	array_error	array element type mismatch
+N15	15_logical_on_int.veri	src/examples/errors/15_logical_on_int.veri	type_error	logical operator on non-boolean value
+N16	16_not_on_int.veri	src/examples/errors/16_not_on_int.veri	type_error	unary not on non-boolean value
+N17	17_for_loop_non_int.veri	src/examples/errors/17_for_loop_non_int.veri	control_flow	invalid loop bound type
+N18	18_multiple_errors.veri	src/examples/errors/18_multiple_errors.veri	mixed_frontend	multi-error diagnostic behavior
+N19	19_array_out_of_bounds.veri	src/examples/errors/19_array_out_of_bounds.veri	safety_proof	static out-of-bounds rejection
+N20	20_array_negative_index.veri	src/examples/errors/20_array_negative_index.veri	safety_proof	negative index rejection
+N21	21_precondition_violation.veri	src/examples/errors/21_precondition_violation.veri	contract_violation	call-site contract rejection
+N22	22_quantifier_non_bool_body.veri	src/examples/errors/22_quantifier_non_bool_body.veri	quantifier_error	ill-typed quantifier body
+N23	23_quantifier_non_int_range.veri	src/examples/errors/23_quantifier_non_int_range.veri	quantifier_error	ill-typed quantifier range
+N24	24_implies_non_bool.veri	src/examples/errors/24_implies_non_bool.veri	logic_error	ill-typed implication
+N25	25_precondition_quantifier_violation.veri	src/examples/errors/25_precondition_quantifier_violation.veri	contract_violation	quantified precondition violation
+N26	26_quantifier_in_runtime.veri	src/examples/errors/26_quantifier_in_runtime.veri	quantifier_error	quantifier misuse in runtime context
+N27	27_invariant_not_preserved.veri	src/examples/errors/27_invariant_not_preserved.veri	invariant_failure	loop invariant preservation failure
+N28	28_invariant_not_established.veri	src/examples/errors/28_invariant_not_established.veri	invariant_failure	loop invariant establishment failure
+N29	29_division_by_zero.veri	src/examples/errors/division_by_zero.veri	arithmetic_safety	concrete division-by-zero rejection
+N30	30_division_by_zero_symbolic.veri	src/examples/errors/division_by_zero_symbolic.veri	arithmetic_safety	symbolic division-by-zero rejection
+N31	31_i64_midpoint_overflow.veri	src/examples/errors/i64_midpoint_overflow.veri	overflow_safety	i64 midpoint overflow rejection
+N32	32_i64_negation_overflow.veri	src/examples/errors/i64_negation_overflow.veri	overflow_safety	i64 negation overflow rejection
+N33	33_i64_overflow.veri	src/examples/errors/i64_overflow.veri	overflow_safety	i64 arithmetic overflow rejection
+N34	34_i64_shift_out_of_range.veri	src/examples/errors/i64_shift_out_of_range.veri	overflow_safety	invalid i64 shift rejection
+N35	35_u64_underflow.veri	src/examples/errors/u64_underflow.veri	overflow_safety	u64 underflow rejection

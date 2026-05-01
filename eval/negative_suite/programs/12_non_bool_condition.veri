@@ -1,0 +1,9 @@
+// Error: Non-boolean condition in if
+// Expected error: E001 - Type mismatch (expected bool)
+
+fn main() {
+    let x: int = 5;
+    if x {
+        let y: int = 10;
+    }
+}
