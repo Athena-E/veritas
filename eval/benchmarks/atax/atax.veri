@@ -1,0 +1,33 @@
+fn main() -> int {
+    let mut a: [[int; 96]; 96] = [[0; 96]; 96];
+    let mut x: [int; 96] = [0; 96];
+    let mut y: [int; 96] = [0; 96];
+    let mut tmp: [int; 96] = [0; 96];
+
+    for i in 0..96 {
+        x[i] = (i + 1) % 13;
+        for j in 0..96 {
+            a[i][j] = (i * (j + 2) + 3) % 17;
+        }
+    }
+
+    for i in 0..96 {
+        for j in 0..96 {
+            tmp[i] = tmp[i] + a[i][j] * x[j];
+        }
+    }
+    for j in 0..96 {
+        for i in 0..96 {
+            y[j] = y[j] + a[i][j] * tmp[i];
+        }
+    }
+
+    let mut sum: int = 0;
+    for i in 0..96 {
+        sum = sum + y[i];
+    }
+
+    print_int(sum);
+    print_char(10);
+    sum
+}

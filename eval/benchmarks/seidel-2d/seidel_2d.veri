@@ -1,0 +1,31 @@
+fn main() -> int {
+    let mut a: [[int; 48]; 48] = [[0; 48]; 48];
+
+    for i in 0..48 {
+        for j in 0..48 {
+            a[i][j] = (i * (j + 2) + 2) % 17;
+        }
+    }
+
+    for t in 0..10 {
+        for i in 1..47 {
+            for j in 1..47 {
+                a[i][j] =
+                    (a[i - 1][j - 1] + a[i - 1][j] + a[i - 1][j + 1] +
+                     a[i][j - 1] + a[i][j] + a[i][j + 1] +
+                     a[i + 1][j - 1] + a[i + 1][j] + a[i + 1][j + 1]) / 9;
+            }
+        }
+    }
+
+    let mut sum: int = 0;
+    for i in 0..48 {
+        for j in 0..48 {
+            sum = sum + a[i][j];
+        }
+    }
+
+    print_int(sum);
+    print_char(10);
+    sum
+}

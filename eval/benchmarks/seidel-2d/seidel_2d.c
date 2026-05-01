@@ -1,0 +1,49 @@
+#include <stdio.h>
+
+#ifndef N
+#define N 48
+#endif
+
+#ifndef TSTEPS
+#define TSTEPS 10
+#endif
+
+static long long a[N][N];
+
+static void init_array(void) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            a[i][j] = (i * (j + 2) + 2) % 17;
+        }
+    }
+}
+
+static void kernel(void) {
+    for (int t = 0; t < TSTEPS; t++) {
+        for (int i = 1; i < N - 1; i++) {
+            for (int j = 1; j < N - 1; j++) {
+                a[i][j] =
+                    (a[i - 1][j - 1] + a[i - 1][j] + a[i - 1][j + 1] +
+                     a[i][j - 1] + a[i][j] + a[i][j + 1] +
+                     a[i + 1][j - 1] + a[i + 1][j] + a[i + 1][j + 1]) / 9;
+            }
+        }
+    }
+}
+
+static long long checksum(void) {
+    long long s = 0;
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            s += a[i][j];
+        }
+    }
+    return s;
+}
+
+int main(void) {
+    init_array();
+    kernel();
+    fprintf(stderr, "checksum=%lld\n", checksum());
+    return (int)(checksum() & 255);
+}

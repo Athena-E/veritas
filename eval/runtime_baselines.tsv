@@ -3,3 +3,7 @@ src/examples/22_bubble_sort.veri	bubble_sort_feature	eval/c_equivalents/bubble_s
 eval/benchmarks/floyd-warshall/floyd_warshall.veri	floyd_warshall_64	eval/benchmarks/floyd-warshall/floyd_warshall.c	-DN=64
 eval/benchmarks/jacobi-1d-imper/jacobi_1d_imper.veri	jacobi_1d_128_80	eval/benchmarks/jacobi-1d-imper/jacobi_1d_imper.c	-DN=128 -DTSTEPS=80
 eval/benchmarks/jacobi-2d-imper/jacobi_2d_imper.veri	jacobi_2d_64_20	eval/benchmarks/jacobi-2d-imper/jacobi_2d_imper.c	-DN=64 -DTSTEPS=20
+eval/benchmarks/seidel-2d/seidel_2d.veri	seidel_2d_48_10	eval/benchmarks/seidel-2d/seidel_2d.c	-DN=48 -DTSTEPS=10
+eval/benchmarks/mvt/mvt.veri	mvt_96	eval/benchmarks/mvt/mvt.c	-DN=96
+eval/benchmarks/atax/atax.veri	atax_96	eval/benchmarks/atax/atax.c	-DN=96
+eval/benchmarks/gesummv/gesummv.veri	gesummv_96	eval/benchmarks/gesummv/gesummv.c	-DN=96
