@@ -1242,6 +1242,8 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             if let Some(object_id) = state.owned_object_ids.get(src).copied() {
                 state.owned_spills.insert(*offset);
                 state.owned_spill_object_ids.insert(*offset, object_id);
+                clear_owned_alias_group(*src, Some(object_id), state);
+                consume_owned_alias_group(*src, Some(object_id), state);
             } else {
                 state.owned_spills.remove(offset);
                 state.owned_spill_object_ids.remove(offset);
@@ -1262,7 +1264,12 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             }
         }
         DtalInstr::SpillLoad { dst, ty, offset } => {
-            state.register_types.insert(*dst, ty.clone());
+            let derived_ty = if let Some(stored_ty) = state.spill_types.get(offset).cloned() {
+                stored_ty
+            } else {
+                ty.clone()
+            };
+            state.register_types.insert(*dst, derived_ty);
             if let Some(object_id) = state.owned_spill_object_ids.get(offset).copied() {
                 state.owned_registers.insert(*dst);
                 state.owned_object_ids.insert(*dst, object_id);

@@ -53,6 +53,71 @@ const RAX: Reg = Reg::Physical(PhysicalReg::LR);
 const RDX: Reg = Reg::Physical(PhysicalReg::R2);
 const R11: Reg = Reg::Physical(PhysicalReg::R7);
 
+fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
+    func.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instr| match instr {
+            DtalInstr::BinOp { dst, lhs, rhs, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(lhs, Reg::Physical(PhysicalReg::R12))
+                    || matches!(rhs, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::AddImm { dst, src, .. }
+            | DtalInstr::MovReg { dst, src, .. }
+            | DtalInstr::AliasBorrow { dst, src, .. }
+            | DtalInstr::BorrowMut { dst, src, .. }
+            | DtalInstr::MoveOwned { dst, src, .. }
+            | DtalInstr::Neg { dst, src, .. }
+            | DtalInstr::Not { dst, src, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::MovImm { dst, .. }
+            | DtalInstr::SetCC { dst, .. }
+            | DtalInstr::Pop { dst, .. }
+            | DtalInstr::Alloca { dst, .. }
+            | DtalInstr::PortIn { dst, .. }
+            | DtalInstr::TypeAnnotation { reg: dst, .. } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Push { src, .. } => matches!(src, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::Load {
+                dst, base, offset, ..
+            } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::LoadOp {
+                dst,
+                base,
+                offset,
+                other,
+                ..
+            } => {
+                matches!(dst, Reg::Physical(PhysicalReg::R12))
+                    || matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+                    || matches!(other, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Store { base, offset, src } => {
+                matches!(base, Reg::Physical(PhysicalReg::R12))
+                    || matches!(offset, Reg::Physical(PhysicalReg::R12))
+                    || matches!(src, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::Cmp { lhs, rhs } => {
+                matches!(lhs, Reg::Physical(PhysicalReg::R12))
+                    || matches!(rhs, Reg::Physical(PhysicalReg::R12))
+            }
+            DtalInstr::CmpImm { lhs, .. } => matches!(lhs, Reg::Physical(PhysicalReg::R12)),
+            DtalInstr::PortOut { port, value } => {
+                matches!(port, Reg::Physical(PhysicalReg::R12))
+                    || matches!(value, Reg::Physical(PhysicalReg::R12))
+            }
+            _ => false,
+        })
+    })
+}
+
 /// Resolve a virtual register to its physical location.
 /// Returns either a physical Reg or a stack offset for spilled regs.
 enum PhysLoc {
@@ -305,6 +370,36 @@ fn emit_store_from_owned(instrs: &mut Vec<DtalInstr>, src: Reg, loc: &PhysLoc, t
     }
 }
 
+fn emit_store_from_param_kind(
+    instrs: &mut Vec<DtalInstr>,
+    src: Reg,
+    loc: &PhysLoc,
+    ty: DtalType,
+    param_kind: crate::common::ownership::ParameterKind,
+) {
+    use crate::common::ownership::ParameterKind;
+
+    match param_kind {
+        ParameterKind::OwnedValue => emit_store_from_owned(instrs, src, loc, ty),
+        ParameterKind::SharedBorrow => match loc {
+            PhysLoc::Reg(r) if *r == src => {}
+            PhysLoc::Reg(r) => {
+                instrs.push(DtalInstr::AliasBorrow { dst: *r, src, ty });
+            }
+            PhysLoc::Spill(offset) => {
+                instrs.push(DtalInstr::SpillStore {
+                    src,
+                    offset: *offset,
+                    ty,
+                });
+            }
+        },
+        ParameterKind::MutableBorrow | ParameterKind::PlainValue => {
+            emit_store_from(instrs, src, loc, ty)
+        }
+    }
+}
+
 fn pick_scratch(avoid: &[Reg]) -> Reg {
     for reg in [RAX, R11, RDX] {
         if !avoid.contains(&reg) {
@@ -331,11 +426,21 @@ pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
             continue;
         }
 
+        let allocatable_regs = if function_uses_reserved_region_reg(func) {
+            X86Reg::ALLOCATABLE
+                .iter()
+                .copied()
+                .filter(|reg| *reg != X86Reg::R15)
+                .collect()
+        } else {
+            X86Reg::ALLOCATABLE.to_vec()
+        };
+
         let allocation = if std::env::var("VERITAS_LS").is_ok() {
-            let mut ls = LinearScanAllocator::new();
+            let mut ls = LinearScanAllocator::with_available_regs(allocatable_regs.clone());
             ls.allocate(func)
         } else {
-            let gc = GraphColoringAllocator::new();
+            let gc = GraphColoringAllocator::with_available_regs(allocatable_regs);
             gc.allocate(func)
         };
 
@@ -421,15 +526,25 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             // Strategy: first move any params whose destination conflicts with
             // another param's source to scratch (R11), then do the rest.
             let param_regs = PhysicalReg::param_regs();
-            let mut param_moves: Vec<(Reg, PhysLoc, DtalType)> = Vec::new();
-            for (i, (param_reg, param_ty)) in func.params.iter().enumerate() {
+            let mut param_moves: Vec<(
+                Reg,
+                PhysLoc,
+                DtalType,
+                crate::common::ownership::ParameterKind,
+            )> = Vec::new();
+            for (i, ((param_reg, param_ty), param_kind)) in func
+                .params
+                .iter()
+                .zip(func.parameter_kinds.iter())
+                .enumerate()
+            {
                 if i < param_regs.len()
                     && let Reg::Virtual(vreg) = param_reg
                 {
                     // Skip dead parameters (not allocated because never used)
                     if let Some(dst_loc) = try_resolve(*vreg, alloc) {
                         let abi_reg = Reg::Physical(param_regs[i]);
-                        param_moves.push((abi_reg, dst_loc, param_ty.clone()));
+                        param_moves.push((abi_reg, dst_loc, param_ty.clone(), *param_kind));
                     }
                 }
             }
@@ -440,7 +555,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             // save that source to R11 first.
             let dst_regs: Vec<Option<Reg>> = param_moves
                 .iter()
-                .map(|(_, loc, _)| match loc {
+                .map(|(_, loc, _, _)| match loc {
                     PhysLoc::Reg(r) => Some(*r),
                     PhysLoc::Spill(_) => None,
                 })
@@ -448,7 +563,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
 
             // Check for conflicts: src_i == dst_j for some j > i
             let mut saved_to_scratch: Option<(Reg, Reg)> = None; // (original_src, scratch)
-            for (i, (src, _, _)) in param_moves.iter().enumerate() {
+            for (i, (src, _, ty, param_kind)) in param_moves.iter().enumerate() {
                 for (j, dst_r) in dst_regs.iter().enumerate() {
                     if j != i
                         && let Some(dr) = dst_r
@@ -456,35 +571,41 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                         && saved_to_scratch.is_none()
                     {
                         // Save src to scratch before it gets clobbered
-                        if matches!(&param_moves[i].2, DtalType::Array { .. }) {
-                            instrs.push(DtalInstr::MoveOwned {
-                                dst: R11,
-                                src: *src,
-                                ty: param_moves[i].2.clone(),
-                            });
-                        } else {
-                            instrs.push(DtalInstr::MovReg {
-                                dst: R11,
-                                src: *src,
-                                ty: DtalType::Int,
-                            });
+                        match param_kind {
+                            crate::common::ownership::ParameterKind::OwnedValue => {
+                                instrs.push(DtalInstr::MoveOwned {
+                                    dst: R11,
+                                    src: *src,
+                                    ty: ty.clone(),
+                                });
+                            }
+                            crate::common::ownership::ParameterKind::SharedBorrow => {
+                                instrs.push(DtalInstr::AliasBorrow {
+                                    dst: R11,
+                                    src: *src,
+                                    ty: ty.clone(),
+                                });
+                            }
+                            _ => {
+                                instrs.push(DtalInstr::MovReg {
+                                    dst: R11,
+                                    src: *src,
+                                    ty: DtalType::Int,
+                                });
+                            }
                         }
                         saved_to_scratch = Some((*src, R11));
                     }
                 }
             }
 
-            for (src, dst_loc, ty) in &param_moves {
+            for (src, dst_loc, ty, param_kind) in &param_moves {
                 let actual_src = if let Some((orig, scratch)) = &saved_to_scratch {
                     if src == orig { *scratch } else { *src }
                 } else {
                     *src
                 };
-                if matches!(ty, DtalType::Array { .. }) {
-                    emit_store_from_owned(&mut instrs, actual_src, dst_loc, ty.clone());
-                } else {
-                    emit_store_from(&mut instrs, actual_src, dst_loc, ty.clone());
-                }
+                emit_store_from_param_kind(&mut instrs, actual_src, dst_loc, ty.clone(), *param_kind);
             }
         }
 
@@ -695,24 +816,95 @@ fn allocate_instruction(
                     });
                 }
                 (PhysLoc::Spill(offset), PhysLoc::Reg(d)) => {
-                    instrs.push(DtalInstr::SpillLoad {
-                        dst: *d,
-                        offset: *offset,
-                        ty: ty.clone(),
-                    });
+                    match instr {
+                        DtalInstr::MoveOwned { .. }
+                        | DtalInstr::AliasBorrow { .. }
+                        | DtalInstr::BorrowMut { .. } => {
+                            let scratch = pick_scratch(&[*d]);
+                            instrs.push(DtalInstr::SpillLoad {
+                                dst: scratch,
+                                offset: *offset,
+                                ty: ty.clone(),
+                            });
+                            let lowered = match instr {
+                                DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
+                                    dst: *d,
+                                    src: scratch,
+                                    ty: ty.clone(),
+                                },
+                                DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                                    dst: *d,
+                                    src: scratch,
+                                    ty: ty.clone(),
+                                },
+                                DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                                    dst: *d,
+                                    src: scratch,
+                                    ty: ty.clone(),
+                                },
+                                _ => unreachable!(),
+                            };
+                            instrs.push(lowered);
+                        }
+                        _ => {
+                            instrs.push(DtalInstr::SpillLoad {
+                                dst: *d,
+                                offset: *offset,
+                                ty: ty.clone(),
+                            });
+                        }
+                    }
                 }
                 (PhysLoc::Spill(src_off), PhysLoc::Spill(dst_off)) => {
                     // mem-to-mem: use scratch
-                    instrs.push(DtalInstr::SpillLoad {
-                        dst: RAX,
-                        offset: *src_off,
-                        ty: ty.clone(),
-                    });
-                    instrs.push(DtalInstr::SpillStore {
-                        src: RAX,
-                        offset: *dst_off,
-                        ty: ty.clone(),
-                    });
+                    match instr {
+                        DtalInstr::MoveOwned { .. }
+                        | DtalInstr::AliasBorrow { .. }
+                        | DtalInstr::BorrowMut { .. } => {
+                            instrs.push(DtalInstr::SpillLoad {
+                                dst: RAX,
+                                offset: *src_off,
+                                ty: ty.clone(),
+                            });
+                            let scratch = R11;
+                            let lowered = match instr {
+                                DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
+                                    dst: scratch,
+                                    src: RAX,
+                                    ty: ty.clone(),
+                                },
+                                DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                                    dst: scratch,
+                                    src: RAX,
+                                    ty: ty.clone(),
+                                },
+                                DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                                    dst: scratch,
+                                    src: RAX,
+                                    ty: ty.clone(),
+                                },
+                                _ => unreachable!(),
+                            };
+                            instrs.push(lowered);
+                            instrs.push(DtalInstr::SpillStore {
+                                src: scratch,
+                                offset: *dst_off,
+                                ty: ty.clone(),
+                            });
+                        }
+                        _ => {
+                            instrs.push(DtalInstr::SpillLoad {
+                                dst: RAX,
+                                offset: *src_off,
+                                ty: ty.clone(),
+                            });
+                            instrs.push(DtalInstr::SpillStore {
+                                src: RAX,
+                                offset: *dst_off,
+                                ty: ty.clone(),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1219,6 +1411,12 @@ fn allocate_instruction(
                 instrs.push(DtalInstr::TypeAnnotation {
                     reg: RAX,
                     ty: DtalType::Unit,
+                });
+            } else if matches!(func.return_type, DtalType::Array { .. }) {
+                instrs.push(DtalInstr::MoveOwned {
+                    dst: RAX,
+                    src: Reg::Physical(PhysicalReg::R0),
+                    ty: func.return_type.clone(),
                 });
             } else {
                 instrs.push(DtalInstr::MovReg {

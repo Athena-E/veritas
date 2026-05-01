@@ -1,0 +1,5 @@
+source	benchmark_label	c_source	c_flags
+src/examples/22_bubble_sort.veri	bubble_sort_feature	eval/c_equivalents/bubble_sort_feature.c	
+eval/benchmarks/floyd-warshall/floyd_warshall.veri	floyd_warshall_64	eval/benchmarks/floyd-warshall/floyd_warshall.c	-DN=64
+eval/benchmarks/jacobi-1d-imper/jacobi_1d_imper.veri	jacobi_1d_128_80	eval/benchmarks/jacobi-1d-imper/jacobi_1d_imper.c	-DN=128 -DTSTEPS=80
+eval/benchmarks/jacobi-2d-imper/jacobi_2d_imper.veri	jacobi_2d_64_20	eval/benchmarks/jacobi-2d-imper/jacobi_2d_imper.c	-DN=64 -DTSTEPS=20

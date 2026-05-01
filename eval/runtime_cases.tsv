@@ -1,0 +1,9 @@
+# id	source	mode	expected	note
+simple_01	src/examples/01_simple.veri	exit	exit=0	Trivial arithmetic example; exit code is the intended semantic output.
+function_calls_07	src/examples/07_function_calls.veri	exit	exit=0	Function-call example; exit code is the intended semantic output.
+for_loops_14	src/examples/14_for_loops.veri	exit	exit=0	Loop example; exit code is the intended semantic output.
+bubble_sort_small	src/examples/bubble_sort.veri	exit	exit=3	Runtime result is the minimum sorted element.
+bubble_sort_feature	src/examples/22_bubble_sort.veri	exit	exit=16	Runtime result is the computed average of the sorted array.
+floyd_warshall_64	eval/benchmarks/floyd-warshall/floyd_warshall.veri	checksum	checksum=128	Checksum-style runtime validation based on printed aggregate output.
+jacobi_1d_128_80	eval/benchmarks/jacobi-1d-imper/jacobi_1d_imper.veri	checksum	checksum=1	Checksum-style runtime validation based on printed aggregate output.
+jacobi_2d_64_20	eval/benchmarks/jacobi-2d-imper/jacobi_2d_imper.veri	checksum	checksum=47616	Checksum-style runtime validation based on printed aggregate output.

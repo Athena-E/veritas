@@ -1,0 +1,25 @@
+# Representative supported-language programs for correctness and
+# expressiveness evaluation.
+
+path:src/examples/01_simple.veri
+path:src/examples/03_arrays.veri
+path:src/examples/04_references.veri
+path:src/examples/07_function_calls.veri
+path:src/examples/08_mutable.veri
+path:src/examples/10_advanced_types.veri
+path:src/examples/14_for_loops.veri
+path:src/examples/15_array_init.veri
+path:src/examples/16_array_assignment.veri
+path:src/examples/17_preconditions.veri
+path:src/examples/18_precondition_use.veri
+path:src/examples/19_loop_invariant.veri
+path:src/examples/19_quantifier_showcase.veri
+path:src/examples/20_array_loop_invariant.veri
+path:src/examples/20_binary_search.veri
+path:src/examples/22_bubble_sort.veri
+path:src/examples/24_while_loop.veri
+path:src/examples/32_shared_borrow.veri
+path:src/examples/33_mutable_borrow.veri
+path:src/examples/36_shared_scalar_borrow_call.veri
+path:src/examples/37_mutable_scalar_borrow_call.veri
+path:src/examples/sortedness.veri

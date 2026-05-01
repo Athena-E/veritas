@@ -250,6 +250,7 @@ fn verify_function_dataflow(func: &DtalFunction, program: &DtalProgram) -> Resul
             .unwrap_or_else(|| block.entry_state.clone());
 
         let mut state = entry_state;
+        seed_register_constraints(&mut state);
         for instr in &block.instructions {
             verify_instruction(instr, &mut state, &block.label, program)?;
         }
@@ -3312,6 +3313,59 @@ mod tests {
         assert!(
             verify_dtal(&program).is_ok(),
             "Physical mutable-borrow spill store/load should verify"
+        );
+    }
+
+    #[test]
+    fn test_physical_spill_load_allows_more_specific_array_view() {
+        let stored_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(4),
+        };
+        let requested_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::SingletonInt(IndexExpr::Const(0))),
+            size: IndexExpr::Const(4),
+        };
+        let program = make_program(vec![make_func(
+            "spill_refine",
+            vec![(r0(), stored_ty.clone())],
+            DtalType::Unit,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::Prologue {
+                        frame_size: 8,
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::SpillStore {
+                        src: r0(),
+                        offset: -8,
+                        ty: stored_ty,
+                    },
+                    DtalInstr::SpillLoad {
+                        dst: Reg::Physical(PhysicalReg::R1),
+                        offset: -8,
+                        ty: requested_ty,
+                    },
+                    DtalInstr::MovImm {
+                        dst: lr(),
+                        imm: 0,
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::TypeAnnotation {
+                        reg: lr(),
+                        ty: DtalType::Unit,
+                    },
+                    DtalInstr::Epilogue {
+                        callee_saved: vec![],
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        )]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Spill load should allow a more specific array view than the stored supertype"
         );
     }
 
