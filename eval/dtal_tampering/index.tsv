@@ -1,0 +1,15 @@
+case_id	source_program	mutation_kind	expected_failure	rationale
+T01	eval/feature_suite/programs/01_simple.veri	return_signature_mismatch	ReturnTypeMismatch	tamper the DTAL function signature so the verifier catches a bad return contract
+T02	eval/feature_suite/programs/17_preconditions.veri	strengthened_precondition	PreconditionFailed	tamper the callee contract so the existing call site no longer proves it
+T03	eval/feature_suite/programs/34_shared_scalar_deref.veri	out_of_bounds_index_positive	BoundsCheckFailed	tamper a proven in-bounds dereference into an out-of-bounds access with index 1
+T04	eval/feature_suite/programs/34_shared_scalar_deref.veri	ownership_duplication_during_live_borrow	OwnershipViolation	tamper the low-level program to move an owned object while a shared borrow is still live
+T05	eval/feature_suite/programs/01_simple.veri	i64_add_overflow	ArithmeticOverflow	tamper constant arithmetic into an overflowing i64 addition
+T06	eval/feature_suite/programs/34_shared_scalar_deref.veri	out_of_bounds_index_negative	BoundsCheckFailed	tamper a proven in-bounds dereference into an out-of-bounds access with index -1
+T07	eval/feature_suite/programs/34_shared_scalar_deref.veri	use_after_drop_owned	ConsumedRegister	tamper the low-level program to reuse an owned array after drop
+T08	eval/feature_suite/programs/34_shared_scalar_deref.veri	plain_mov_duplicates_ownership	OwnershipViolation	tamper ownership-preserving movement into a duplicating plain move
+T09	eval/feature_suite/programs/33_mutable_borrow.veri	shared_alias_during_mutable_borrow	OwnershipViolation	tamper the low-level program to create a shared alias while a mutable borrow is live
+T10	eval/feature_suite/programs/37_mutable_scalar_borrow_call.veri	double_mutable_borrow	OwnershipViolation	tamper the low-level program to create two mutable borrows of the same object
+T11	eval/feature_suite/programs/33_mutable_borrow.veri	mutable_store_out_of_bounds	BoundsCheckFailed	tamper a mutable-borrow store from index 0 to out-of-bounds index 1
+T12	eval/feature_suite/programs/33_mutable_borrow.veri	mutable_parameter_weakened_to_shared	TypeMismatch	tamper a mutable-borrow callee signature into a shared-borrow signature
+T13	eval/feature_suite/programs/17_preconditions.veri	entry_state_type_mismatch	TypeMismatch	tamper the block entry state so it no longer matches the function parameter type
+T14	eval/feature_suite/programs/17_preconditions.veri	impossible_assertion	UnprovableConstraint	insert an assertion that contradicts the available proof context
