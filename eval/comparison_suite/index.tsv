@@ -1,0 +1,5 @@
+task_id	task_slug	veritas_file	dafny_file	main_property
+C01	safe_division	veritas/01_safe_division.veri	dafny/01_safe_division.dfy	preconditioned division safety
+C02	bounded_read_offset	veritas/02_bounded_read_offset.veri	dafny/02_bounded_read_offset.dfy	array bounds via preconditions
+C03	fill_with_ones	veritas/03_fill_with_ones.veri	dafny/03_fill_with_ones.dfy	loop invariant over arrays
+C04	binary_search	veritas/04_binary_search.veri	dafny/04_binary_search.dfy	sorted-array search with invariants
