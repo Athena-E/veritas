@@ -1,0 +1,17 @@
+task_id,task_slug,system,file,total_loc,annotation_loc,executable_loc,annotation_to_code_ratio
+C01,safe_division,veritas,veritas/01_safe_division.veri,6,1,5,0.200
+C01,safe_division,dafny,dafny/01_safe_division.dfy,10,2,8,0.250
+C01,safe_division,liquid_haskell,liquid_haskell/01_safe_division.hs,7,2,5,0.400
+C01,safe_division,verus,verus/01_safe_division.rs,12,2,10,0.200
+C02,bounded_read_offset,veritas,veritas/02_bounded_read_offset.veri,9,1,8,0.125
+C02,bounded_read_offset,dafny,dafny/02_bounded_read_offset.dfy,19,4,15,0.267
+C02,bounded_read_offset,liquid_haskell,liquid_haskell/02_bounded_read_offset.hs,9,2,7,0.286
+C02,bounded_read_offset,verus,verus/02_bounded_read_offset.rs,13,2,11,0.182
+C03,fill_with_ones,veritas,veritas/03_fill_with_ones.veri,13,1,12,0.083
+C03,fill_with_ones,dafny,dafny/03_fill_with_ones.dfy,19,4,15,0.267
+C03,fill_with_ones,liquid_haskell,liquid_haskell/03_fill_with_ones.hs,15,4,11,0.364
+C03,fill_with_ones,verus,verus/03_fill_with_ones.rs,25,5,20,0.250
+C04,binary_search,veritas,veritas/04_binary_search.veri,42,3,39,0.077
+C04,binary_search,dafny,dafny/04_binary_search.dfy,40,10,30,0.333
+C04,binary_search,liquid_haskell,liquid_haskell/04_binary_search.hs,24,4,20,0.200
+C04,binary_search,verus,verus/04_binary_search.rs,34,7,27,0.259
