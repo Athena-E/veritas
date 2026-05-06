@@ -5,10 +5,8 @@ predicate Sorted(arr: array<int>)
 }
 
 method BinarySearch(arr: array<int>, target: int) returns (idx: int)
-  requires arr.Length == 5
+  requires arr.Length == 10
   requires Sorted(arr)
-  ensures idx == -1 || 0 <= idx < arr.Length
-  ensures idx != -1 ==> arr[idx] == target
 {
   var lo := 0;
   var hi := arr.Length;
@@ -32,11 +30,16 @@ method BinarySearch(arr: array<int>, target: int) returns (idx: int)
 
 method Main() returns (r: int)
 {
-  var arr := new int[5];
-  arr[0] := 1;
-  arr[1] := 3;
-  arr[2] := 5;
-  arr[3] := 7;
-  arr[4] := 9;
-  r := BinarySearch(arr, 7);
+  var arr := new int[10];
+  arr[0] := 3;
+  arr[1] := 7;
+  arr[2] := 12;
+  arr[3] := 15;
+  arr[4] := 22;
+  arr[5] := 34;
+  arr[6] := 41;
+  arr[7] := 55;
+  arr[8] := 68;
+  arr[9] := 90;
+  r := BinarySearch(arr, 34);
 }

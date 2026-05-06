@@ -1,5 +1,7 @@
 task_id,task_slug,file,compile_ms,verify_ms,binary_bytes,frontend_smt_queries,frontend_smt_ms,verifier_smt_queries,verifier_smt_ms,verification_outcome
-C01,safe_division,veritas/01_safe_division.veri,10.700,0.077,653,2,9.331,0,0.000,pass
-C02,bounded_read_offset,veritas/02_bounded_read_offset.veri,10.192,7.124,783,3,9.277,12,6.874,pass
-C03,fill_with_ones,veritas/03_fill_with_ones.veri,71.657,13.962,796,20,54.183,8,13.237,pass
-C04,binary_search,veritas/04_binary_search.veri,276.499,71.009,1410,31,39.599,62,66.257,pass
+C01,safe_division,veritas/01_safe_division.veri,17.155,0.148,653,2,16.059,0,0.000,pass
+C02,bounded_read_offset,veritas/02_bounded_read_offset.veri,19.140,9.645,787,4,17.876,13,9.330,pass
+C03,fill_with_ones,veritas/03_fill_with_ones.veri,35.130,5.890,812,21,27.216,9,5.565,pass
+C04,binary_search,veritas/04_binary_search.veri,139.491,32.634,1414,31,26.114,62,30.566,pass
+C05,sorted_head,veritas/05_sorted_head.veri,16.491,4.086,805,10,15.341,5,3.841,pass
+C06,safe_midpoint,veritas/06_safe_midpoint.veri,13.549,1.202,681,3,12.536,1,1.088,pass

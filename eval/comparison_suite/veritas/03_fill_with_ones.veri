@@ -1,4 +1,6 @@
-fn fill_with_ones() -> [int; 5] {
+fn fill_with_ones() -> [int; 5]
+    ensures forall j in 0..4 { result[j] == 1 }
+{
     let mut arr: [int; 5] = [0; 5];
     for i in 0..5
         invariant forall j in 0..i { arr[j] == 1 }

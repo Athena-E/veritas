@@ -1,5 +1,6 @@
 fn read_offset(i: int) -> int
     requires i >= 0 && i < 4
+    ensures result == 7
 {
     let arr: [int; 5] = [7; 5];
     arr[i + 1]

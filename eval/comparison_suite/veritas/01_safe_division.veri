@@ -1,4 +1,5 @@
-fn safe_divide(a: int, b: {v: int | v != 0}) -> int {
+fn safe_divide(a: int, b: {v: int | v != 0}) -> int
+{
     a / b
 }
 

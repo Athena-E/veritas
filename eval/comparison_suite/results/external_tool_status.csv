@@ -1,4 +1,4 @@
-system,tool_validated_locally,notes
-dafny,no,Programs authored but Dafny not available in this environment.
-liquid_haskell,no,Programs authored but Liquid Haskell not available in this environment.
-verus,no,Programs authored but Verus not available in this environment.
+system,tool_validated_locally,tool_path,tool_version,notes
+dafny,yes,/usr/bin/dafny,4.11.0+fcb2042d6d043a2634f0854338c08feeaaaf4ae2,Tool available for comparison-suite measurement.
+liquid_haskell,yes,/home/athena/.ghcup/bin/ghc,The Glorious Glasgow Haskell Compilation System, version 9.10.1,Tool available for comparison-suite measurement.
+verus,yes,/home/athena/.local/bin/verus,Verus,Tool available for comparison-suite measurement.

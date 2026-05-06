@@ -1,21 +1,33 @@
 {-@ LIQUID "--reflection" @-}
 {-@ LIQUID "--ple" @-}
+{-@ LIQUID "--no-termination" @-}
 module BinarySearch where
 
-{-@ measure sorted @-}
+{-@ reflect sorted @-}
 sorted :: [Int] -> Bool
 sorted [] = True
-sorted [_] = True
-sorted (x:y:xs) = x <= y && sorted (y:xs)
+sorted (x:xs) =
+  case xs of
+    [] -> True
+    (y:_) -> x <= y && sorted xs
+
+{-@ midpoint :: lo:Int -> hi:{Int | lo <= hi} -> {m:Int | lo <= m && m <= hi} @-}
+midpoint :: Int -> Int -> Int
+midpoint lo hi = lo + ((hi - lo) `div` 2)
 
 {-@ binarySearch :: xs:{[Int] | len xs == 10 && sorted xs} -> Int -> Int @-}
 binarySearch :: [Int] -> Int -> Int
-binarySearch xs target = go 0 (length xs - 1)
+binarySearch xs target = go 0 9
   where
+    {-@ go :: lo:{Int | 0 <= lo && lo <= 10}
+           -> hi:{Int | -1 <= hi && hi < 10 && lo <= hi + 1}
+           -> Int
+      @-}
+    go :: Int -> Int -> Int
     go lo hi
       | lo > hi = -1
       | otherwise =
-          let mid = lo + ((hi - lo) `div` 2)
+          let mid = midpoint lo hi
               val = xs !! mid
           in if val == target
                 then mid

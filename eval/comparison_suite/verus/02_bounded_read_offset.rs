@@ -2,12 +2,12 @@ use vstd::prelude::*;
 
 verus! {
 
-fn read_offset(i: int) -> (x: int)
-    requires 0 <= i && i < 4,
+fn read_offset(i: usize) -> (x: i32)
+    requires i < 4,
     ensures x == 7,
 {
-    let arr = [7int, 7int, 7int, 7int, 7int];
-    arr[(i + 1) as usize]
+    let arr: [i32; 5] = [7, 7, 7, 7, 7];
+    arr[i + 1]
 }
 
 fn main() {
