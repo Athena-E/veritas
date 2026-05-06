@@ -45,5 +45,7 @@ Canonicalisation rules:
   verification-stress suites only when they add proof-structure coverage.
 - Keep the algorithm suite focused on runtime-practicality cases that also
   have explicit semantic checks in `eval/runtime_cases.tsv`.
+- Use the full curated feature suite for local runtime-correctness checks; use
+  the algorithm suite as the timing-oriented runtime/practicality subset.
 - Treat committed translated external kernels as the only publishable external
   benchmarks until additional translations and manifests are added deliberately.

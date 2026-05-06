@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+#include "../checked_bounds.h"
+
 #ifndef N
 #define N 90
 #endif
@@ -11,13 +13,18 @@ static long long y[N];
 static const long long alpha = 3;
 static const long long beta = 2;
 
+#define A(i, j) a[CHECKED_IDX1("a", (i), N)][CHECKED_IDX1("a", (j), N)]
+#define B(i, j) b[CHECKED_IDX1("b", (i), N)][CHECKED_IDX1("b", (j), N)]
+#define X(i) x[CHECKED_IDX1("x", (i), N)]
+#define Y(i) y[CHECKED_IDX1("y", (i), N)]
+
 static void init_array(void) {
     for (int i = 0; i < N; i++) {
-        x[i] = (i + 1) % 11;
-        y[i] = 0;
+        X(i) = (i + 1) % 11;
+        Y(i) = 0;
         for (int j = 0; j < N; j++) {
-            a[i][j] = (i * (j + 1) + 1) % 13;
-            b[i][j] = (i * (j + 2) + 2) % 17;
+            A(i, j) = (i * (j + 1) + 1) % 13;
+            B(i, j) = (i * (j + 2) + 2) % 17;
         }
     }
 }
@@ -27,17 +34,17 @@ static void kernel(void) {
         long long tmp1 = 0;
         long long tmp2 = 0;
         for (int j = 0; j < N; j++) {
-            tmp1 += a[i][j] * x[j];
-            tmp2 += b[i][j] * x[j];
+            tmp1 += A(i, j) * X(j);
+            tmp2 += B(i, j) * X(j);
         }
-        y[i] = alpha * tmp1 + beta * tmp2;
+        Y(i) = alpha * tmp1 + beta * tmp2;
     }
 }
 
 static long long checksum(void) {
     long long s = 0;
     for (int i = 0; i < N; i++) {
-        s += y[i];
+        s += Y(i);
     }
     return s;
 }

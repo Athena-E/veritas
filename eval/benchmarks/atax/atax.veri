@@ -1,29 +1,33 @@
+// PolyBench/C MEDIUM dataset: M = 390, N = 410.
 fn main() -> int {
-    let mut a: [[int; 96]; 96] = [[0; 96]; 96];
-    let mut x: [int; 96] = [0; 96];
-    let mut y: [int; 96] = [0; 96];
-    let mut tmp: [int; 96] = [0; 96];
+    let mut a: [[int; 410]; 390] = [[0; 410]; 390];
+    let mut x: [int; 410] = [0; 410];
+    let mut y: [int; 410] = [0; 410];
+    let mut tmp: [int; 390] = [0; 390];
 
-    for i in 0..96 {
+    for i in 0..390 {
         x[i] = (i + 1) % 13;
-        for j in 0..96 {
+        for j in 0..410 {
             a[i][j] = (i * (j + 2) + 3) % 17;
         }
     }
+    for i in 390..410 {
+        x[i] = (i + 1) % 13;
+    }
 
-    for i in 0..96 {
-        for j in 0..96 {
+    for i in 0..390 {
+        for j in 0..410 {
             tmp[i] = tmp[i] + a[i][j] * x[j];
         }
     }
-    for j in 0..96 {
-        for i in 0..96 {
+    for j in 0..410 {
+        for i in 0..390 {
             y[j] = y[j] + a[i][j] * tmp[i];
         }
     }
 
     let mut sum: int = 0;
-    for i in 0..96 {
+    for i in 0..410 {
         sum = sum + y[i];
     }
 

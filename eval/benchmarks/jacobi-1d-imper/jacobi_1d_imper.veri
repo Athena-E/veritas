@@ -1,24 +1,24 @@
-// Integer Jacobi-1D benchmark in Veritas.
+// PolyBench/C MEDIUM dataset: TSTEPS = 100, N = 400.
 fn main() -> int {
-    let mut a: [int; 128] = [0; 128];
-    let mut b: [int; 128] = [0; 128];
+    let mut a: [int; 400] = [0; 400];
+    let mut b: [int; 400] = [0; 400];
 
-    for i in 0..128 {
-        a[i] = (i + 2) / 128;
-        b[i] = (i + 3) / 128;
+    for i in 0..400 {
+        a[i] = (i + 2) / 400;
+        b[i] = (i + 3) / 400;
     }
 
-    for t in 0..80 {
-        for i in 1..127 {
+    for t in 0..100 {
+        for i in 1..399 {
             b[i] = (a[i - 1] + a[i] + a[i + 1]) / 3;
         }
-        for j in 1..127 {
+        for j in 1..399 {
             a[j] = b[j];
         }
     }
 
     let mut sum: int = 0;
-    for i in 0..128 {
+    for i in 0..400 {
         sum = sum + a[i];
     }
 
