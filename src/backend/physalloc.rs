@@ -436,13 +436,23 @@ pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
             X86Reg::ALLOCATABLE.to_vec()
         };
 
-        let allocation = if std::env::var("VERITAS_LS").is_ok() {
+        let mut allocation = if std::env::var("VERITAS_LS").is_ok() {
             let mut ls = LinearScanAllocator::with_available_regs(allocatable_regs.clone());
             ls.allocate(func)
         } else {
             let gc = GraphColoringAllocator::with_available_regs(allocatable_regs);
             gc.allocate(func)
         };
+
+        // The hosted region pointer lives in the reserved DTAL register R12
+        // (x86 R15). When a function uses that register explicitly, it must be
+        // preserved across calls just like any other callee-saved register.
+        // The virtual allocator excludes R15 from general allocation in this
+        // case, but still needs the save/restore record for prologue/epilogue.
+        if function_uses_reserved_region_reg(func) && !allocation.callee_saved_used.contains(&X86Reg::R15) {
+            allocation.callee_saved_used.push(X86Reg::R15);
+            allocation.callee_saved_used.sort();
+        }
 
         functions.push(allocate_function(func, &allocation));
     }
@@ -1687,6 +1697,47 @@ fn main() -> int {
             status.code(),
             Some(6),
             "Expected exit code 6 (4+2), got {:?}",
+            status.code()
+        );
+    }
+
+    #[test]
+    fn test_physalloc_e2e_nested_region_helper_call() {
+        use crate::backend::direct_encode::encode_physical_dtal;
+        use crate::backend::elf::generate_elf;
+
+        let source = r#"
+fn sum_positive(arr: [{v:int|v > 0}; 3]) -> int
+    requires forall i in 0..3 { arr[i] > 0 }
+{
+    arr[0] + arr[1] + arr[2]
+}
+
+fn call_sum_positive() -> int {
+    let arr: [{v:int|v > 0}; 3] = [1; 3];
+    sum_positive(arr)
+}
+
+fn main() -> int {
+    let a: int = call_sum_positive();
+    let b: int = call_sum_positive();
+    a + b
+}
+"#;
+        let output = pipeline::compile_verbose(source).expect("compile failed");
+        let physical = physically_allocate(&output.dtal_program);
+        let encoded = encode_physical_dtal(&physical);
+        let elf = generate_elf(&encoded, "main");
+
+        let path = "/tmp/veritas_physalloc_nested_region_test";
+        std::fs::write(path, &elf).expect("write elf");
+        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("chmod");
+        let status = std::process::Command::new(path).status().expect("execute");
+        assert_eq!(
+            status.code(),
+            Some(6),
+            "Expected exit code 6 from two nested region helper calls, got {:?}",
             status.code()
         );
     }
