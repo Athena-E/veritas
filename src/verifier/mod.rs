@@ -492,7 +492,7 @@ fn types_compatible_with_constraints(
 mod tests {
     use super::*;
     use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-    use crate::backend::dtal::instr::{CmpOp, DtalBlock, DtalInstr, TypeState};
+    use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalBlock, DtalInstr, TypeState};
     use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
     use crate::backend::dtal::types::DtalType;
     use std::sync::Arc;
@@ -2092,6 +2092,82 @@ mod tests {
         assert!(
             verify_dtal(&program).is_ok(),
             "Precondition provides bounds proof for load"
+        );
+    }
+
+    #[test]
+    fn test_reject_loadop_without_bounds_proof() {
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(10),
+        };
+        let program = make_program(vec![make_func(
+            "bad",
+            vec![(v(0), arr_ty), (v(1), DtalType::Int), (v(2), DtalType::Int)],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![DtalInstr::LoadOp {
+                    op: BinaryOp::Add,
+                    dst: v(3),
+                    base: v(0),
+                    offset: v(1),
+                    other: v(2),
+                    ty: DtalType::Int,
+                }],
+            )],
+        )]);
+        let result = verify_dtal(&program);
+        assert!(
+            matches!(result, Err(VerifyError::BoundsCheckFailed { .. })),
+            "LoadOp without bounds proof should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_accept_loadop_with_precondition_bounds() {
+        let arr_ty = DtalType::Array {
+            element_type: Arc::new(DtalType::Int),
+            size: IndexExpr::Const(10),
+        };
+        let mut func = make_func(
+            "ok",
+            vec![(v(0), arr_ty), (v(1), DtalType::Int), (v(2), DtalType::Int)],
+            DtalType::Int,
+            vec![make_block(
+                ".entry",
+                vec![
+                    DtalInstr::LoadOp {
+                        op: BinaryOp::Add,
+                        dst: v(3),
+                        base: v(0),
+                        offset: v(1),
+                        other: v(2),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::MovReg {
+                        dst: r0(),
+                        src: v(3),
+                        ty: DtalType::Int,
+                    },
+                    DtalInstr::Ret,
+                ],
+            )],
+        );
+        func.precondition = Some(Constraint::And(
+            Box::new(Constraint::Ge(
+                IndexExpr::Var("v1".to_string()),
+                IndexExpr::Const(0),
+            )),
+            Box::new(Constraint::Lt(
+                IndexExpr::Var("v1".to_string()),
+                IndexExpr::Const(10),
+            )),
+        ));
+        let program = make_program(vec![func]);
+        assert!(
+            verify_dtal(&program).is_ok(),
+            "Precondition provides bounds proof for loadop"
         );
     }
 

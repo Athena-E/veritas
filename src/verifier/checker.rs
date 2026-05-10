@@ -1412,6 +1412,44 @@ fn verify_load_op(
     check_register_defined(base, state, block_label)?;
     check_register_defined(offset, state, block_label)?;
     check_register_defined(other, state, block_label)?;
+
+    let base_ty = get_register_type(base, state, block_label)?;
+    let array_view = match &base_ty {
+        DtalType::Array { size, .. } => Some(size.clone()),
+        DtalType::Ref(inner) | DtalType::RefMut(inner) => match inner.as_ref() {
+            DtalType::Array { size, .. } => Some(size.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+
+    if let Some(size) = array_view {
+        let offset_expr = reg_to_index_expr(&offset);
+        let bounds_constraint = Constraint::And(
+            Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
+            Box::new(Constraint::Lt(offset_expr, size)),
+        );
+
+        if !is_constraint_provable(&bounds_constraint, &state.constraints) {
+            return Err(VerifyError::BoundsCheckFailed {
+                block: block_label.to_string(),
+                instr_desc: format!("loadop {:?}, [{:?} + {:?}], {:?}", dst, base, offset, other),
+                constraint: bounds_constraint,
+                context: state.constraints.clone(),
+            });
+        }
+    } else {
+        return Err(VerifyError::TypeMismatch {
+            block: block_label.to_string(),
+            instr_desc: format!("loadop {:?}, [{:?} + {:?}], {:?}", dst, base, offset, other),
+            expected: DtalType::Array {
+                element_type: std::sync::Arc::new(DtalType::Int),
+                size: IndexExpr::Var("?".to_string()),
+            },
+            actual: base_ty,
+        });
+    }
+
     state.register_types.insert(dst, ty.clone());
     Ok(())
 }

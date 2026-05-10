@@ -1,15 +1,15 @@
 //! Load-Op Fusion Pass
 //!
-//! Fuses `Load dst, base, offset; BinOp Add/Sub result, dst, other` into a
-//! single `LoadOp` instruction, which lowers to x86 `AddRM` / `SubRM`
-//! (add/sub with memory operand).
+//! Fuses `Load dst, base, offset; BinOp Add result, dst, other` into a
+//! single `LoadOp` instruction, which lowers to x86 `AddRM`
+//! (add with memory operand).
 //!
 //! # Pattern
 //!
 //! ```text
 //! Load dst1, base, offset
 //! (optional TypeAnnotation dst1, _)
-//! BinOp op, dst2, lhs, rhs    where op ∈ {Add, Sub}, lhs == dst1
+//! BinOp Add, dst2, lhs, rhs   where lhs == dst1
 //! ```
 //!
 //! Becomes:
@@ -115,7 +115,7 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                     ty: binop_ty,
                 } = next
                 {
-                    if matches!(op, BinaryOp::Add | BinaryOp::Sub) && *lhs == load_dst {
+                    if *op == BinaryOp::Add && *lhs == load_dst {
                         // Fusion conditions
                         if *rhs == load_dst {
                             // self-use: skip
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sub_fusion() {
+    fn test_no_fusion_when_sub_load_is_lhs() {
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -397,14 +397,11 @@ mod tests {
         ]);
 
         let changed = fuse_loads_function(&mut func);
-        assert!(changed);
+        assert!(!changed);
 
         assert!(matches!(
             &func.blocks[0].instructions[0],
-            DtalInstr::LoadOp {
-                op: BinaryOp::Sub,
-                ..
-            }
+            DtalInstr::Load { .. }
         ));
     }
 

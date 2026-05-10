@@ -143,17 +143,21 @@ fn find_loops(
                     let header = succ.clone();
                     let loop_blocks = collect_natural_loop(&header, label, predecessors);
 
-                    // Find entry block: predecessor of header not in loop
+                    // Find a unique preheader: the predecessor of the loop
+                    // header that is outside the loop. Hoisting into one of
+                    // several non-loop predecessors would skip other loop
+                    // entry paths and leave the hoisted value undefined.
                     if let Some(header_preds) = predecessors.get(&header) {
-                        for pred in header_preds {
-                            if !loop_blocks.contains(pred) {
-                                loops.push(NaturalLoop {
-                                    _header: header.clone(),
-                                    blocks: loop_blocks.clone(),
-                                    entry: pred.clone(),
-                                });
-                                break;
-                            }
+                        let non_loop_preds: Vec<_> = header_preds
+                            .iter()
+                            .filter(|pred| !loop_blocks.contains(*pred))
+                            .collect();
+                        if non_loop_preds.len() == 1 {
+                            loops.push(NaturalLoop {
+                                _header: header.clone(),
+                                blocks: loop_blocks.clone(),
+                                entry: non_loop_preds[0].clone(),
+                            });
                         }
                     }
                 }
@@ -739,6 +743,91 @@ mod tests {
                             base: vreg(10),
                             offset: vreg(0),
                             src: vreg(11),
+                        },
+                        DtalInstr::AddImm {
+                            dst: vreg(0),
+                            src: vreg(0),
+                            imm: 1,
+                            ty: DtalType::Int,
+                        },
+                        DtalInstr::Jmp {
+                            target: ".test_bb1".to_string(),
+                        },
+                    ],
+                },
+                DtalBlock {
+                    label: ".test_bb3".to_string(),
+                    entry_state: TypeState::new(),
+                    instructions: vec![DtalInstr::Ret],
+                },
+            ],
+        };
+
+        let changed = licm_function(&mut func);
+        assert!(!changed);
+    }
+
+    #[test]
+    fn test_licm_requires_unique_preheader() {
+        // Header has two non-loop predecessors. Hoisting into either one would
+        // leave the other entry path without the hoisted definition.
+        let mut func = DtalFunction {
+            name: "test".to_string(),
+            params: vec![],
+            parameter_kinds: vec![],
+            return_type: DtalType::Int,
+            precondition: None,
+            postcondition: None,
+            blocks: vec![
+                DtalBlock {
+                    label: ".test_bb0".to_string(),
+                    entry_state: TypeState::new(),
+                    instructions: vec![
+                        DtalInstr::CmpImm {
+                            lhs: vreg(0),
+                            imm: 0,
+                        },
+                        DtalInstr::Branch {
+                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            target: ".test_bb1".to_string(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".test_bb4".to_string(),
+                        },
+                    ],
+                },
+                DtalBlock {
+                    label: ".test_bb4".to_string(),
+                    entry_state: TypeState::new(),
+                    instructions: vec![DtalInstr::Jmp {
+                        target: ".test_bb1".to_string(),
+                    }],
+                },
+                DtalBlock {
+                    label: ".test_bb1".to_string(),
+                    entry_state: TypeState::new(),
+                    instructions: vec![
+                        DtalInstr::CmpImm {
+                            lhs: vreg(0),
+                            imm: 10,
+                        },
+                        DtalInstr::Branch {
+                            cond: crate::backend::dtal::instr::CmpOp::Lt,
+                            target: ".test_bb2".to_string(),
+                        },
+                        DtalInstr::Jmp {
+                            target: ".test_bb3".to_string(),
+                        },
+                    ],
+                },
+                DtalBlock {
+                    label: ".test_bb2".to_string(),
+                    entry_state: TypeState::new(),
+                    instructions: vec![
+                        DtalInstr::MovImm {
+                            dst: vreg(3),
+                            imm: 7,
+                            ty: DtalType::Int,
                         },
                         DtalInstr::AddImm {
                             dst: vreg(0),

@@ -225,8 +225,8 @@ pub enum DtalInstr {
     },
     /// store [base + offset], src
     Store { base: Reg, offset: Reg, src: Reg },
-    /// Fused load + binop: dst = *[base + offset*8] op other
-    /// op ∈ {Add, Sub}. Maps to x86 AddRM / SubRM.
+    /// Fused load + add: dst = *[base + offset*8] + other.
+    /// Maps to x86 AddRM.
     LoadOp {
         op: BinaryOp,
         dst: Reg,
