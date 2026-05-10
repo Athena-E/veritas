@@ -266,7 +266,7 @@ fn main() {
     }
 
     if args.len() < 2 || show_help {
-        eprintln!("Veritas - A type-preserving compiler with refinement types");
+        eprintln!("Veritas Compiler");
         eprintln!();
         eprintln!("Usage: {} <source_file> [OPTIONS]", args[0]);
         eprintln!(
@@ -282,14 +282,8 @@ fn main() {
         eprintln!("  --verify           Verify DTAL before code generation");
         eprintln!("  --verify-only      Verify DTAL and exit (no codegen)");
         eprintln!("  --verify-dtal      Verify a standalone .dtal file");
-        eprintln!("  --generate-dtal-tampering");
-        eprintln!("                     Generate the tampered DTAL corpus");
-        eprintln!("  --tampering-out-dir <dir>");
-        eprintln!("                     Output directory for generated tampered DTAL");
         eprintln!();
         eprintln!("Code generation pipeline:");
-        eprintln!("  --legacy-pipeline  Use the old trusted-lowering pipeline instead of");
-        eprintln!("                       the default verify-after-regalloc pipeline");
         eprintln!("  --target-bare-metal  Generate Multiboot ELF for bare-metal/QEMU:");
         eprintln!("                       qemu-system-x86_64 -kernel <binary> -serial stdio");
         eprintln!("  --check-overflow     Prove every arithmetic op cannot overflow i64");
@@ -297,8 +291,12 @@ fn main() {
         eprintln!();
         eprintln!("Optimisation:");
         eprintln!("  -O, --optimize     Enable all optimisations");
+        eprintln!("  --const-fold       Constant folding and immediate folding");
+        eprintln!("  --peephole         Peephole simplifications");
         eprintln!("  --copy-prop        Copy propagation only");
         eprintln!("  --dce              Dead code elimination only");
+        eprintln!("  --licm             Loop-invariant code motion");
+        eprintln!("  --load-fusion      Fuse load+add patterns");
         eprintln!();
         eprintln!("Debug:");
         eprintln!("  -v, --verbose      Show compilation stages");
@@ -314,7 +312,15 @@ fn main() {
         eprintln!("  print_char(c: int)     Print single byte to stdout");
         eprintln!("  read_int() -> int      Read decimal integer from stdin");
         eprintln!();
-        eprintln!("Environment:");
+        eprintln!("Development:");
+        eprintln!("  --legacy-pipeline  Use the old trusted-lowering pipeline instead of");
+        eprintln!("                     the default verify-after-regalloc pipeline");
+        eprintln!("  --generate-dtal-tampering");
+        eprintln!("                     Generate the tampered DTAL corpus");
+        eprintln!("  --tampering-out-dir <dir>");
+        eprintln!("                     Output directory for generated tampered DTAL");
+        eprintln!();
+        eprintln!("Development Environment:");
         eprintln!("  VERITAS_LS=1           Use linear scan allocator (default: graph colouring)");
         eprintln!("  VERITAS_DEBUG_ALLOC=1  Dump register allocation details");
         std::process::exit(if show_help { 0 } else { 1 });
