@@ -449,7 +449,9 @@ pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
         // preserved across calls just like any other callee-saved register.
         // The virtual allocator excludes R15 from general allocation in this
         // case, but still needs the save/restore record for prologue/epilogue.
-        if function_uses_reserved_region_reg(func) && !allocation.callee_saved_used.contains(&X86Reg::R15) {
+        if function_uses_reserved_region_reg(func)
+            && !allocation.callee_saved_used.contains(&X86Reg::R15)
+        {
             allocation.callee_saved_used.push(X86Reg::R15);
             allocation.callee_saved_used.sort();
         }

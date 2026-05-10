@@ -4,9 +4,9 @@
 //! path. It uses a fixed seed corpus and a restricted generator so the results
 //! are reproducible and suitable for dissertation evaluation.
 
+use std::sync::Mutex;
 use veritas::pipeline::{compile, compile_verbose};
 use veritas::verifier::{verify_dtal, verify_dtal_text};
-use std::sync::Mutex;
 
 static ROBUSTNESS_LOCK: Mutex<()> = Mutex::new(());
 
@@ -268,10 +268,16 @@ fn seeded_valid_programs_are_deterministic_and_verify() {
             label(case)
         );
 
-        verify_dtal(&first.dtal_program)
-            .unwrap_or_else(|err| panic!("{}: in-memory DTAL verification failed: {}", label(case), err));
-        verify_dtal_text(&first.dtal)
-            .unwrap_or_else(|err| panic!("{}: DTAL text verification failed: {:?}", label(case), err));
+        verify_dtal(&first.dtal_program).unwrap_or_else(|err| {
+            panic!(
+                "{}: in-memory DTAL verification failed: {}",
+                label(case),
+                err
+            )
+        });
+        verify_dtal_text(&first.dtal).unwrap_or_else(|err| {
+            panic!("{}: DTAL text verification failed: {:?}", label(case), err)
+        });
     }
 }
 
@@ -296,7 +302,8 @@ fn seeded_invalid_programs_fail_deterministically() {
             .to_string();
 
         assert_eq!(
-            first, second,
+            first,
+            second,
             "{}: compile diagnostics changed across repeated compilation",
             label(case)
         );
@@ -316,7 +323,8 @@ fn seeded_corpus_classification_is_stable() {
         match (first, second) {
             (Ok(first_ok), Ok(second_ok)) => {
                 assert_eq!(
-                    first_ok.dtal, second_ok.dtal,
+                    first_ok.dtal,
+                    second_ok.dtal,
                     "{}: success classification was stable but DTAL output changed",
                     label(case)
                 );

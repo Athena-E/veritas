@@ -33,6 +33,15 @@ derives tampered DTAL from the compiler's current output so that the trust test
 tracks backend evolution instead of depending on hand-maintained stale `.dtal`
 snapshots.
 
+Concrete tampered `.dtal` artifacts can be regenerated with:
+
+```bash
+cargo run --bin generate_dtal_tampering
+```
+
+This writes the current corpus to `eval/dtal_tampering/generated/`, so each
+case can be checked manually with `--verify-dtal`.
+
 Current coverage:
 
 - 14 mutation cases
