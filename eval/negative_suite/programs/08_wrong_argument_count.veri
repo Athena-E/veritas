@@ -1,0 +1,11 @@
+// Error: Wrong number of arguments
+// Expected error: E009 - Wrong number of arguments
+
+fn add(a: int, b: int) -> int {
+    a + b
+}
+
+fn main() {
+    let x: int = add(1);
+    let y: int = add(1, 2, 3);
+}

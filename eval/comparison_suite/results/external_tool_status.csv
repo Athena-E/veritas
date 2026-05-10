@@ -1,0 +1,4 @@
+system,tool_validated_locally,tool_path,tool_version,notes
+dafny,yes,/usr/bin/dafny,4.11.0+fcb2042d6d043a2634f0854338c08feeaaaf4ae2,Tool available for comparison-suite measurement.
+liquid_haskell,yes,/home/athena/.ghcup/bin/ghc,The Glorious Glasgow Haskell Compilation System, version 9.10.1,Tool available for comparison-suite measurement.
+verus,yes,/home/athena/.local/bin/verus,Verus,Tool available for comparison-suite measurement.

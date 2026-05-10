@@ -1,0 +1,13 @@
+fn safe_midpoint(lo: {v: i64 | v >= 0}, hi: {v: i64 | v >= 0}) -> i64
+    requires lo <= hi
+{
+    lo + (hi - lo) / 2
+}
+
+fn main() -> int {
+    let lo: i64 = 0;
+    let hi: i64 = 100;
+    let mid: i64 = safe_midpoint(lo, hi);
+    let _used: i64 = mid;
+    0
+}

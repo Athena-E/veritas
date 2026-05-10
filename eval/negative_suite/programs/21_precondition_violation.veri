@@ -1,0 +1,9 @@
+// Example demonstrating precondition violation
+
+fn requires_positive(x: int) requires x > 0 {
+    // Body assumes x > 0
+}
+
+fn violate_precondition() {
+    requires_positive(0);  // 0 is not > 0, should fail
+}

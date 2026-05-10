@@ -1,0 +1,27 @@
+fn max_of(a: int, b: int) -> int {
+    let mut result: int = a;
+    if b > a {
+        result = b;
+    } else {
+        result = a;
+    }
+    result
+}
+
+fn bucket(x: int) -> int {
+    let mut result: int = 0;
+    if x < 0 {
+        result = 0;
+    } else {
+        if x < 10 {
+            result = 1;
+        } else {
+            result = 2;
+        }
+    }
+    result
+}
+
+fn main() -> int {
+    max_of(bucket(7), bucket(12))
+}

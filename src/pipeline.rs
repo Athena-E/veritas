@@ -31,9 +31,16 @@ use crate::backend::optimise::{OptConfig, optimize_program};
 use crate::backend::{codegen_program, emit_program, lower_program};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
+use crate::frontend::typechecker::helpers::reset_fresh_var_counter;
 use crate::frontend::typechecker::{TypeError, check_program, report_type_error};
 use chumsky::prelude::*;
 use std::fmt;
+
+fn reset_pipeline_state() {
+    // Reset synthesized refinement naming so repeated compilations of the same
+    // source produce stable generated identifiers and DTAL text.
+    reset_fresh_var_counter();
+}
 
 /// Compilation error types
 #[derive(Debug)]
@@ -100,6 +107,8 @@ pub struct VerboseOutput<'src> {
 /// assert!(output.dtal.contains(".function add"));
 /// ```
 pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
+    reset_pipeline_state();
+
     // Stage 1: Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
@@ -159,6 +168,8 @@ pub fn compile_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
 ) -> Result<CompileOutput, CompileError<'src>> {
+    reset_pipeline_state();
+
     // Stage 1: Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
@@ -211,6 +222,8 @@ pub fn compile_optimized<'src>(
 /// This function is useful for debugging and understanding the compilation process.
 /// It returns all intermediate representations including the typed AST and TIR.
 pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
+    reset_pipeline_state();
+
     // Stage 1: Lexical analysis
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
@@ -276,6 +289,8 @@ pub fn compile_verbose_with_overflow<'src>(
 ) -> Result<VerboseOutput<'src>, CompileError<'src>> {
     use crate::frontend::typechecker::check_program_with_overflow;
 
+    reset_pipeline_state();
+
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -320,6 +335,8 @@ pub fn compile_verbose_with_overflow<'src>(
 /// Compile source code for bare-metal target (no Linux intrinsics)
 pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     use crate::frontend::typechecker::check_program_bare_metal;
+
+    reset_pipeline_state();
 
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
@@ -368,6 +385,8 @@ pub fn compile_verbose_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
 ) -> Result<VerboseOutput<'src>, CompileError<'src>> {
+    reset_pipeline_state();
+
     // Stage 1: Lexical analysis
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(

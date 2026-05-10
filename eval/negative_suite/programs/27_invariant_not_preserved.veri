@@ -1,0 +1,10 @@
+// Error: loop invariant not preserved by loop body
+// Expected error: E021 - invariant not preserved
+
+fn main() -> int {
+    let mut arr: [int; 5] = [0;5];
+    for i in 0..5 invariant forall j in 0..i { arr[j] == 0 } {
+        arr[i] = i;
+    }
+    0
+}

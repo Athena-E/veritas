@@ -1,0 +1,10 @@
+fn use_positive(n: {v: int | v > 0}) -> int {
+    n
+}
+
+fn main() -> int {
+    let answer: int(42) = 42;
+    let positive: {n: int | n > 0} = 5;
+    let repeated: [int; 3] = [answer; 3];
+    use_positive(positive) + repeated[0]
+}

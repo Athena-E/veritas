@@ -1,0 +1,6 @@
+// Error: quantifiers cannot appear in runtime expressions
+// Expected error: unsupported feature - quantifier in runtime expression
+
+fn bad_runtime() -> bool {
+    forall i in 0..10 { i >= 0 }
+}

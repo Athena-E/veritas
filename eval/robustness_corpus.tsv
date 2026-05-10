@@ -1,0 +1,17 @@
+family	seed	note
+valid_arithmetic	1	simple arithmetic baseline
+valid_arithmetic	7	nested arithmetic expressions
+valid_arithmetic	19	larger literal variation
+valid_arithmetic	42	control-flow-free arithmetic stress
+valid_arrays	3	bounded array writes
+valid_arrays	11	array read/write composition
+valid_arrays	29	array arithmetic combination
+valid_arrays	57	array indexing baseline
+invalid_type	5	bool assigned to int
+invalid_type	13	non-bool if condition
+invalid_type	31	array index type mismatch
+invalid_type	73	function call type mismatch
+invalid_syntax	2	missing semicolon
+invalid_syntax	17	truncated expression
+invalid_syntax	37	unbalanced braces
+invalid_syntax	61	unbalanced parentheses

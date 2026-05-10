@@ -1,0 +1,13 @@
+fn read_first(r: &[int; 2]) -> int {
+    r[0]
+}
+
+fn write_first(r: &mut [int; 2]) {
+    r[0] = 9;
+}
+
+fn main() -> int {
+    let mut arr: [int; 2] = [1; 2];
+    write_first(&mut arr);
+    read_first(&arr)
+}

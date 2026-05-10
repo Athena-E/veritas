@@ -1,0 +1,9 @@
+fn filled_with(value: int) -> [int; 4] {
+    [value; 4]
+}
+
+fn main() -> int {
+    let zeros: [int; 4] = [0; 4];
+    let threes: [int; 4] = filled_with(3);
+    zeros[0] + threes[3]
+}

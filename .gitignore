@@ -4,3 +4,13 @@
 .codex
 /eval/polybench-c-3.2
 /eval/runs/
+/.ghc.environment.*
+/01_safe_division
+/02_bounded_read_offset
+/03_fill_with_ones
+/04_binary_search
+/05_sorted_head
+/06_safe_midpoint
+/eval/comparison_suite/liquid_haskell/.liquid/
+/eval/comparison_suite/liquid_haskell/*.hi
+/eval/comparison_suite/liquid_haskell/*.o

@@ -1,0 +1,6 @@
+// Error: Type mismatch - assigning bool to int
+// Expected error: E001 - Type mismatch
+
+fn main() {
+    let x: int = true;
+}

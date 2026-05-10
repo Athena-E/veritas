@@ -1,0 +1,14 @@
+// Shift count out of range caught by i64 verification.
+//
+// x86 masks the shift count to 6 bits, so x << 65 silently becomes x << 1.
+// Veritas proves the shift count is in [0, 64) to prevent this.
+//
+// Expected: IntegerOverflow error E023 on `<<`.
+
+fn bad_shift(x: i64, count: i64) -> i64 {
+    x << count
+}
+
+fn main() -> int {
+    0
+}

@@ -1,0 +1,12 @@
+fn add(a: int, b: int) -> int {
+    a + b
+}
+
+fn scale_and_shift(x: int, factor: int, offset: int) -> int {
+    x * factor + offset
+}
+
+fn main() -> int {
+    let base: int = add(5, 10);
+    scale_and_shift(base, 2, 3)
+}

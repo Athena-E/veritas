@@ -1,0 +1,7 @@
+// Error: Negation on integer
+// Expected error: E001 - Type mismatch (expected bool)
+
+fn main() {
+    let x: int = 5;
+    let y: bool = !x;
+}

@@ -1,0 +1,10 @@
+fn last_prefix(arr: [int; 5], n: int) -> int
+    requires n > 0 && n <= 5
+{
+    arr[n - 1]
+}
+
+fn main() -> int {
+    let arr: [int; 5] = [9; 5];
+    last_prefix(arr, 5)
+}

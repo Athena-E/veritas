@@ -2,7 +2,7 @@
 #include <time.h>
 
 #ifndef N
-#define N 1024
+#define N 180
 #endif
 
 static long long path[N][N];

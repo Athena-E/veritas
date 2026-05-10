@@ -1,0 +1,9 @@
+fn safe_midpoint(lo: int, hi: int) -> {m: int | m >= lo && m <= hi}
+    requires lo <= hi
+{
+    lo + (hi - lo) / 2
+}
+
+fn main() -> int {
+    safe_midpoint(10, 20)
+}

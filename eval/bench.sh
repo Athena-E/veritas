@@ -26,8 +26,8 @@ CREATE_RUN_DIR="$SCRIPT_DIR/create_run_dir.sh"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-RUNS="${BENCH_RUNS:-10}"
-WARMUP="${BENCH_WARMUP:-3}"
+RUNS="${BENCH_RUNS:-30}"
+WARMUP="${BENCH_WARMUP:-5}"
 MODE="${1:---all}"
 RUN_LABEL="${BENCH_LABEL:-${MODE#--}}"
 
@@ -309,13 +309,13 @@ lookup_runtime_baseline() {
     local source_path="$1"
     awk -F '\t' -v key="$source_path" '
         NR > 1 && $1 == key {
-            print $2 "\t" $3 "\t" $4
+            print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6
             found = 1
             exit
         }
         END {
             if (!found) {
-                print "\t\t"
+                print "\t\t\t\t"
             }
         }
     ' eval/runtime_baselines.tsv
@@ -590,8 +590,14 @@ with open(out_csv, "w", newline="", encoding="utf-8") as fh:
             "gcc_o2_mean_s",
             "gcc_o3_status",
             "gcc_o3_mean_s",
+            "checked_c_o2_status",
+            "checked_c_o2_mean_s",
+            "checked_c_o3_status",
+            "checked_c_o3_mean_s",
             "veritas_vs_gcc_o2",
             "veritas_vs_gcc_o3",
+            "veritas_vs_checked_c_o2",
+            "veritas_vs_checked_c_o3",
         ]
     )
     for benchmark in sorted(by_benchmark):
@@ -599,6 +605,8 @@ with open(out_csv, "w", newline="", encoding="utf-8") as fh:
         veritas = group.get("veritas", {})
         gcc_o2 = group.get("gcc_o2", {})
         gcc_o3 = group.get("gcc_o3", {})
+        checked_c_o2 = group.get("checked_c_o2", {})
+        checked_c_o3 = group.get("checked_c_o3", {})
 
         def ratio(lhs, rhs):
             try:
@@ -618,8 +626,14 @@ with open(out_csv, "w", newline="", encoding="utf-8") as fh:
                 gcc_o2.get("mean_s", ""),
                 gcc_o3.get("status", ""),
                 gcc_o3.get("mean_s", ""),
+                checked_c_o2.get("status", ""),
+                checked_c_o2.get("mean_s", ""),
+                checked_c_o3.get("status", ""),
+                checked_c_o3.get("mean_s", ""),
                 ratio(veritas.get("mean_s"), gcc_o2.get("mean_s")),
                 ratio(veritas.get("mean_s"), gcc_o3.get("mean_s")),
+                ratio(veritas.get("mean_s"), checked_c_o2.get("mean_s")),
+                ratio(veritas.get("mean_s"), checked_c_o3.get("mean_s")),
             ]
         )
 PY
@@ -917,47 +931,75 @@ run_error_bench() {
 run_binary_size_bench() {
     log "=== Binary Size Comparison ==="
 
+    local suite_manifest="eval/suites/feature_suite.txt"
+    local suite_name
+    suite_name="$(suite_stem "$suite_manifest")"
+    local suite_file="$TMPDIR/${suite_name}.txt"
+    resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
+
     local csv="$RESULTS_DIR/binary_size.csv"
     local text_csv="$RESULTS_DIR/text_size.csv"
     local summary_csv="$RESULTS_DIR/binary_size_summary.csv"
-    echo "program,veritas_bytes,gcc_O0_bytes,gcc_O2_bytes" > "$csv"
-    echo "program,veritas_text_bytes,gcc_O0_text_bytes,gcc_O2_text_bytes" > "$text_csv"
+    echo "program,source,veritas_bytes,gcc_equivalent,gcc_O0_bytes,gcc_O2_bytes" > "$csv"
+    echo "program,source,veritas_text_bytes,gcc_equivalent,gcc_O0_text_bytes,gcc_O2_text_bytes" > "$text_csv"
 
     declare -A c_map
     c_map[01_simple]="simple_arithmetic"
+    c_map[03_arrays]="arrays_feature"
+    c_map[10_advanced_types]="advanced_types_feature"
+    c_map[16_array_assignment]="array_assignment_feature"
+    c_map[20_binary_search]="binary_search_feature"
     c_map[07_function_calls]="function_calls"
     c_map[14_for_loops]="for_loops"
     c_map[22_bubble_sort]="bubble_sort_feature"
+    c_map[33_mutable_borrow]="mutable_borrow_feature"
+    c_map[38_sortedness]="sortedness_feature"
 
-    for veri_name in "${!c_map[@]}"; do
-        local c_name veri_file c_file veri_size gcc_O0_size gcc_O2_size veri_text gcc_O0_text gcc_O2_text
-        c_name="${c_map[$veri_name]}"
-        veri_file="src/examples/${veri_name}.veri"
-        c_file="eval/c_equivalents/${c_name}.c"
+    while IFS= read -r veri_file; do
+        local veri_name c_name c_file veri_size gcc_O0_size gcc_O2_size veri_text gcc_O0_text gcc_O2_text
+        veri_name="$(basename "$veri_file" .veri)"
+        c_name="${c_map[$veri_name]:-}"
+        c_file=""
+        gcc_O0_size=""
+        gcc_O2_size=""
+        gcc_O0_text=""
+        gcc_O2_text=""
 
         [ -f "$veri_file" ] || continue
-        [ -f "$c_file" ] || continue
 
         log "  $veri_name..."
 
         "$VERITAS" "$veri_file" -o "$TMPDIR/veri_bin" --bench >/dev/null 2>&1 || continue
         veri_size="$(stat -c%s "$TMPDIR/veri_bin" 2>/dev/null || echo "ERR")"
+        veri_text="$(objdump -h "$TMPDIR/veri_bin" | awk '$2==".text"{print "0x"$3}')"
+        if [ -n "$veri_text" ]; then
+            veri_text="$((veri_text))"
+        fi
+        [ -n "$veri_text" ] || veri_text="$veri_size"
 
-        gcc -O0 -o "$TMPDIR/gcc_O0" "$c_file" 2>/dev/null || continue
-        gcc_O0_size="$(stat -c%s "$TMPDIR/gcc_O0")"
+        if [ -n "$c_name" ]; then
+            c_file="eval/c_equivalents/${c_name}.c"
+            if [ -f "$c_file" ]; then
+                if gcc -O0 -o "$TMPDIR/gcc_O0" "$c_file" 2>/dev/null; then
+                    gcc_O0_size="$(stat -c%s "$TMPDIR/gcc_O0")"
+                    gcc_O0_text="$(objdump -h "$TMPDIR/gcc_O0" | awk '$2==".text"{print "0x"$3}')"
+                    [ -z "$gcc_O0_text" ] || gcc_O0_text="$((gcc_O0_text))"
+                fi
 
-        gcc -O2 -o "$TMPDIR/gcc_O2" "$c_file" 2>/dev/null || continue
-        gcc_O2_size="$(stat -c%s "$TMPDIR/gcc_O2")"
+                if gcc -O2 -o "$TMPDIR/gcc_O2" "$c_file" 2>/dev/null; then
+                    gcc_O2_size="$(stat -c%s "$TMPDIR/gcc_O2")"
+                    gcc_O2_text="$(objdump -h "$TMPDIR/gcc_O2" | awk '$2==".text"{print "0x"$3}')"
+                    [ -z "$gcc_O2_text" ] || gcc_O2_text="$((gcc_O2_text))"
+                fi
+            fi
+        fi
 
-        printf '%s,%s,%s,%s\n' \
-            "$veri_name" "$veri_size" "$gcc_O0_size" "$gcc_O2_size" >> "$csv"
+        printf '%s,%s,%s,%s,%s,%s\n' \
+            "$veri_name" "$veri_file" "$veri_size" "$c_name" "$gcc_O0_size" "$gcc_O2_size" >> "$csv"
 
-        veri_text="$veri_size"
-        gcc_O0_text="$(objdump -h "$TMPDIR/gcc_O0" | awk '/.text/{print strtonum("0x"$3)}')"
-        gcc_O2_text="$(objdump -h "$TMPDIR/gcc_O2" | awk '/.text/{print strtonum("0x"$3)}')"
-        printf '%s,%s,%s,%s\n' \
-            "$veri_name" "$veri_text" "$gcc_O0_text" "$gcc_O2_text" >> "$text_csv"
-    done
+        printf '%s,%s,%s,%s,%s,%s\n' \
+            "$veri_name" "$veri_file" "$veri_text" "$c_name" "$gcc_O0_text" "$gcc_O2_text" >> "$text_csv"
+    done < "$suite_file"
 
     write_binary_size_summary "$csv" "$text_csv" "$summary_csv"
 
@@ -1043,13 +1085,13 @@ run_runtime_bench() {
     resolve_suite "$suite_manifest" "resolved_${suite_name}.txt" > "$suite_file"
 
     while IFS= read -r f; do
-        local case_id mode expected note benchmark_label c_source c_flags
-        local veritas_bin baseline_o2 baseline_o3
+        local case_id mode expected note benchmark_label c_source c_flags checked_c_source checked_c_flags
+        local veritas_bin baseline_o2 baseline_o3 checked_baseline_o2 checked_baseline_o3
         local stdout_file stderr_file run_exit_code observed correctness_status
         local hf_json
 
         IFS=$'\t' read -r case_id mode expected note <<< "$(lookup_runtime_case "$f")"
-        IFS=$'\t' read -r benchmark_label c_source c_flags <<< "$(lookup_runtime_baseline "$f")"
+        IFS=$'\t' read -r benchmark_label c_source c_flags checked_c_source checked_c_flags <<< "$(lookup_runtime_baseline "$f")"
         [ -n "$case_id" ] || continue
         [ -n "$benchmark_label" ] || continue
 
@@ -1089,6 +1131,8 @@ run_runtime_bench() {
 
         baseline_o2="$TMPDIR/${benchmark_label}_gcc_o2"
         baseline_o3="$TMPDIR/${benchmark_label}_gcc_o3"
+        checked_baseline_o2="$TMPDIR/${benchmark_label}_checked_c_o2"
+        checked_baseline_o3="$TMPDIR/${benchmark_label}_checked_c_o3"
 
         if gcc -O2 $c_flags -o "$baseline_o2" "$c_source" >/dev/null 2>&1; then
             stdout_file="$raw_dir/${benchmark_label}_gcc_o2.stdout"
@@ -1133,6 +1177,54 @@ run_runtime_bench() {
             else
                 printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
                     "$benchmark_label" "$f" "gcc_o3" "gcc -O3" "$mode" "$expected" "$correctness_status" "fail" "" "" "" "" "" "" >> "$timing_csv"
+            fi
+        fi
+
+        if [ -n "$checked_c_source" ] && [ -f "$checked_c_source" ]; then
+            if gcc -O2 $checked_c_flags -o "$checked_baseline_o2" "$checked_c_source" >/dev/null 2>&1; then
+                stdout_file="$raw_dir/${benchmark_label}_checked_c_o2.stdout"
+                stderr_file="$raw_dir/${benchmark_label}_checked_c_o2.stderr"
+                IFS=$'\t' read -r run_exit_code observed <<< "$(observe_runtime_result "$checked_baseline_o2" "$mode" "$stdout_file" "$stderr_file")"
+                correctness_status="mismatch"
+                if [ "$observed" = "$expected" ] && { [ "$mode" = "exit" ] || [ "$run_exit_code" -ge 0 ]; }; then
+                    correctness_status="pass"
+                fi
+                if [ "$correctness_status" = "pass" ]; then
+                    hf_json="$raw_hyperfine_dir/${benchmark_label}_checked_c_o2.json"
+                    hyperfine --shell=none --ignore-failure --warmup "$WARMUP" --runs "$RUNS" \
+                        --export-json "$hf_json" \
+                        "$checked_baseline_o2" > "$LOGS_DIR/hyperfine_${benchmark_label}_checked_c_o2.log"
+                    append_hyperfine_summary "$hf_json" "$benchmark_label" "$f" "checked_c_o2" "pass" "$TMPDIR/runtime_hf.tmp"
+                    tail -n 1 "$TMPDIR/runtime_hf.tmp" | awk -F ',' -v mode="$mode" -v expected="$expected" -v correctness="$correctness_status" \
+                        'BEGIN { OFS="," } { print $1,$2,"checked_c_o2","checked C -O2",mode,expected,correctness,$4,$5,$6,$7,$8,$9,$10 }' >> "$timing_csv"
+                    : > "$TMPDIR/runtime_hf.tmp"
+                else
+                    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                        "$benchmark_label" "$f" "checked_c_o2" "checked C -O2" "$mode" "$expected" "$correctness_status" "fail" "" "" "" "" "" "" >> "$timing_csv"
+                fi
+            fi
+
+            if gcc -O3 $checked_c_flags -o "$checked_baseline_o3" "$checked_c_source" >/dev/null 2>&1; then
+                stdout_file="$raw_dir/${benchmark_label}_checked_c_o3.stdout"
+                stderr_file="$raw_dir/${benchmark_label}_checked_c_o3.stderr"
+                IFS=$'\t' read -r run_exit_code observed <<< "$(observe_runtime_result "$checked_baseline_o3" "$mode" "$stdout_file" "$stderr_file")"
+                correctness_status="mismatch"
+                if [ "$observed" = "$expected" ] && { [ "$mode" = "exit" ] || [ "$run_exit_code" -ge 0 ]; }; then
+                    correctness_status="pass"
+                fi
+                if [ "$correctness_status" = "pass" ]; then
+                    hf_json="$raw_hyperfine_dir/${benchmark_label}_checked_c_o3.json"
+                    hyperfine --shell=none --ignore-failure --warmup "$WARMUP" --runs "$RUNS" \
+                        --export-json "$hf_json" \
+                        "$checked_baseline_o3" > "$LOGS_DIR/hyperfine_${benchmark_label}_checked_c_o3.log"
+                    append_hyperfine_summary "$hf_json" "$benchmark_label" "$f" "checked_c_o3" "pass" "$TMPDIR/runtime_hf.tmp"
+                    tail -n 1 "$TMPDIR/runtime_hf.tmp" | awk -F ',' -v mode="$mode" -v expected="$expected" -v correctness="$correctness_status" \
+                        'BEGIN { OFS="," } { print $1,$2,"checked_c_o3","checked C -O3",mode,expected,correctness,$4,$5,$6,$7,$8,$9,$10 }' >> "$timing_csv"
+                    : > "$TMPDIR/runtime_hf.tmp"
+                else
+                    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+                        "$benchmark_label" "$f" "checked_c_o3" "checked C -O3" "$mode" "$expected" "$correctness_status" "fail" "" "" "" "" "" "" >> "$timing_csv"
+                fi
             fi
         fi
     done < "$suite_file"
