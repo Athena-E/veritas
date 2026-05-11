@@ -355,7 +355,7 @@ fn main() {
         .position(|a| a == "-o")
         .and_then(|i| args.get(i + 1));
 
-    // Optimization flags
+    // Optimisation flags
     let optimize_all = args.iter().any(|a| a == "-O" || a == "--optimize");
     let const_fold = args.iter().any(|a| a == "--const-fold");
     let peephole = args.iter().any(|a| a == "--peephole");
@@ -364,7 +364,7 @@ fn main() {
     let licm = args.iter().any(|a| a == "--licm");
     let load_fusion = args.iter().any(|a| a == "--load-fusion");
 
-    // Build optimization config
+    // Build optimisation config
     let opt_config = if optimize_all {
         OptConfig::all()
     } else {
@@ -458,14 +458,10 @@ fn main() {
                 }
             }
 
-            // Benchmark output should attribute verifier SMT work to the
-            // explicit verification stage only, not to earlier pipeline work.
+            // Reset verifier SMT counters after compilation, before benchmarking
             reset_verifier_smt_stats();
 
-            // Verify DTAL if requested.
-            // When using the physical pipeline (default), skip the virtual DTAL
-            // verifier — the physical verifier is strictly stronger and runs
-            // after register allocation.
+            // Verify DTAL if requested
             let mut verify_elapsed = std::time::Duration::ZERO;
             if verify && !physical {
                 if verbose {
@@ -556,8 +552,7 @@ fn main() {
             // Generate native code if requested
             if native || output_file.is_some() {
                 let encoded = if physical {
-                    // NEW PIPELINE: physalloc → verify physical → direct encode
-                    // Register allocation is UNTRUSTED — verifier checks the output
+                    // Verification after physical allocation
                     if verbose {
                         println!("\n[8] Physical allocation (regalloc → physical DTAL)...");
                     }
@@ -600,7 +595,7 @@ fn main() {
                     }
                     veritas::backend::direct_encode::encode_physical_dtal(&physical_dtal)
                 } else {
-                    // OLD PIPELINE: x86 lowering (trusted regalloc + isel + encode)
+                    // Legacy: x86 lowering (trusted regalloc + isel + encode)
                     if verbose {
                         println!("\n[8] Lowering to x86-64...");
                     }
@@ -623,11 +618,10 @@ fn main() {
                         println!("\n[10] Generating ELF executable...");
                     }
 
-                    // Determine entry point (use "main" or first function)
+                    // Determine entry point (use main or first function)
                     let entry = if encoded.symbols.contains_key("main") {
                         "main"
                     } else {
-                        // Use first user function from DTAL program
                         output
                             .dtal_program
                             .functions

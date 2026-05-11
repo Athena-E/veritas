@@ -68,12 +68,10 @@ pub fn lexer<'src>()
     ))
     .map(Token::Op);
 
-    // A parser for control characters
+    // Parser for control characters
     let ctrl = one_of("(){}[];,:").map(Token::Ctrl);
 
     // A parser for identifiers and keywords
-    // Note: text::ascii::ident() in chumsky 1.0-alpha doesn't include digits,
-    // so we build a custom identifier parser
     let ident = any()
         .filter(|c: &char| c.is_ascii_alphabetic() || *c == '_')
         .then(
@@ -119,7 +117,7 @@ pub fn lexer<'src>()
         .map_with(|tok, e| (tok, e.span()))
         .padded_by(comment.repeated())
         .padded()
-        // If we encounter an error, skip and attempt to lex the next character as a token instead
+        // If error encountered, skip and attempt to lex the next character as a token instead
         .recover_with(skip_then_retry_until(any().ignored(), end()))
         .repeated()
         .collect()

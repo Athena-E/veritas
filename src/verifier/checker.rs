@@ -1,6 +1,4 @@
-//! Instruction verification
-//!
-//! This module verifies individual DTAL instructions maintain type invariants.
+//! Instruction-level DTAL verification.
 
 #![allow(clippy::result_large_err)]
 
@@ -10,7 +8,7 @@ use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use crate::verifier::error::VerifyError;
 
-/// Verify a single instruction updates the type state correctly
+/// Verify one instruction and update the type state.
 pub fn verify_instruction(
     instr: &DtalInstr,
     state: &mut TypeState,
@@ -133,7 +131,6 @@ pub fn verify_instruction(
         }
 
         DtalInstr::SetCC { dst, cond: _ } => {
-            // SetCC defines dst as Bool (0 or 1)
             state.register_types.insert(*dst, DtalType::Bool);
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
@@ -174,7 +171,6 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Push { src, ty: _ } => {
-            // Xi & Harper's type-push: push the source register's type onto the stack
             let src_ty = get_register_type(*src, state, block_label)?;
             state.stack.push(src_ty);
             state.owned_stack.push(state.owned_registers.contains(src));
@@ -190,8 +186,6 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Pop { dst, ty: _ } => {
-            // Xi & Harper's type-pop: pop the top type from the stack
-            // If the stack is empty, this is an error
             let popped_ty = state.stack.pop().unwrap_or(DtalType::Int);
             state.register_types.insert(*dst, popped_ty);
             if state.owned_stack.pop().unwrap_or(false) {
@@ -221,8 +215,7 @@ pub fn verify_instruction(
             state.register_types.insert(*dst, ty.clone());
             set_owned_from_type(*dst, ty, state, true);
             clear_consumed(*dst, state);
-            // For array allocations, emit zero-initialization axioms:
-            // forall k in 0..size { arr_0[k] == 0 }
+            // Model zero-initialized arrays with a universal axiom.
             if let DtalType::Array { size, .. } = ty {
                 state.array_versions.insert(*dst, 0);
                 let arr_name = versioned_array_name(dst, 0);
@@ -238,7 +231,6 @@ pub fn verify_instruction(
             }
         }
 
-        // Call: derive return type from callee's declared signature
         DtalInstr::Call {
             target,
             arg_kinds,
@@ -250,10 +242,7 @@ pub fn verify_instruction(
             let derived_return_ty = if let Some(callee) =
                 program.functions.iter().find(|f| &f.name == target)
             {
-                // Check callee's precondition if available.
-                // Substitute callee's virtual param registers with physical
-                // param registers (r0, r1, ...) since the caller has placed
-                // arguments there before the call.
+                // Callee contracts use declared params; callers pass them in ABI regs.
                 if let Some(precond) = &callee.precondition {
                     let param_regs = PhysicalReg::param_regs();
                     let param_subs: std::collections::HashMap<String, String> = callee
@@ -264,9 +253,7 @@ pub fn verify_instruction(
                         .map(|(i, (reg, _))| (format!("{}", reg), format!("{}", param_regs[i])))
                         .collect();
                     let mut substituted = substitute_select_names(precond, &param_subs);
-                    // Also substitute Var references for param registers
                     substituted = substitute_var_names_in_constraint(&substituted, &param_subs);
-                    // Version-substitute array Select names
                     substituted =
                         version_substitute_constraint(&substituted, &state.array_versions);
 
@@ -280,9 +267,7 @@ pub fn verify_instruction(
                     }
                 }
 
-                // Propagate callee's postcondition to caller's constraint context.
-                // Substitute "result" and callee param names with physical regs,
-                // then version-substitute array names.
+                // Propagate the callee postcondition into the caller's context.
                 if let Some(postcond) = &callee.postcondition {
                     let r0_name = format!("{}", PhysicalReg::R0);
                     let mut postcond_subs: std::collections::HashMap<String, String> =
@@ -295,14 +280,8 @@ pub fn verify_instruction(
                     state.constraints.push(substituted);
                 }
 
-                // Derive return type from callee's declared signature
                 callee.return_type.clone()
             } else {
-                // Unknown callee: reject. All callable functions must be
-                // present in the DTAL program. When runtime/intrinsic
-                // functions are added, they should be registered in the
-                // program's function list with their signatures so the
-                // verifier can check preconditions and derive return types.
                 return Err(VerifyError::UnknownFunction {
                     name: target.clone(),
                 });
@@ -334,12 +313,7 @@ pub fn verify_instruction(
                 }
             }
 
-            // Set return type in both R0 and LR:
-            // - Virtual DTAL reads the return value from R0 (`mov vN, r0`)
-            // - Physical DTAL reads it from LR (`mov r0, lr`)
-            //
-            // This must happen after consuming call arguments because the first
-            // consuming argument also lives in R0.
+            // Set ABI return aliases after consuming arguments; arg0 also uses R0.
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::R0), derived_return_ty.clone());
@@ -366,7 +340,6 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Branch { cond, .. } => {
-            // On the fall-through path, add the negated branch constraint.
             if let Some(constraint) = constraint_from_cmp_op(*cond, &state.last_cmp) {
                 let negated = negate_cmp_op_constraint(*cond, &state.last_cmp);
                 if let Some(neg) = negated {
@@ -376,13 +349,10 @@ pub fn verify_instruction(
             }
         }
 
-        // Control flow instructions are handled separately
         DtalInstr::Jmp { .. } | DtalInstr::Ret => {}
 
-        // Port I/O instructions
         DtalInstr::PortIn { dst, port } => {
             check_register_defined(*port, state, block_label)?;
-            // Port read returns an int (byte value 0-255)
             state.register_types.insert(*dst, DtalType::Int);
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
@@ -394,19 +364,14 @@ pub fn verify_instruction(
             check_register_defined(*value, state, block_label)?;
         }
 
-        // Physical allocation instructions (post-regalloc).
-        // These are verified after register allocation in the physical DTAL pipeline.
-        // In the current virtual-register verification path, they should not appear.
         DtalInstr::Cqo => {
-            // cqo: sign-extend rax into rdx:rax
             use crate::backend::dtal::regs::PhysicalReg;
-            let rax = Reg::Physical(PhysicalReg::LR); // LR maps to rax
+            let rax = Reg::Physical(PhysicalReg::LR);
             check_register_defined(rax, state, block_label)?;
-            // rdx gets defined (sign extension of rax)
             let rax_ty = get_register_type(rax, state, block_label)?;
             state
                 .register_types
-                .insert(Reg::Physical(PhysicalReg::R2), rax_ty); // R2 maps to rdx
+                .insert(Reg::Physical(PhysicalReg::R2), rax_ty);
             if let Some(object_id) = state.owned_object_ids.get(&rax).copied() {
                 assign_owned_object(Reg::Physical(PhysicalReg::R2), object_id, state);
             } else {
@@ -424,16 +389,12 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Idiv { src } => {
-            // idiv src: signed divide rdx:rax by src
-            // Requires: rax (dividend low), rdx (dividend high), src (divisor)
-            // Produces: rax (quotient), rdx (remainder)
             use crate::backend::dtal::regs::PhysicalReg;
             let rax = Reg::Physical(PhysicalReg::LR);
             let rdx = Reg::Physical(PhysicalReg::R2);
             check_register_defined(rax, state, block_label)?;
             check_register_defined(rdx, state, block_label)?;
             check_register_defined(*src, state, block_label)?;
-            // Both rax and rdx get new values
             state.register_types.insert(rax, DtalType::Int);
             state.register_types.insert(rdx, DtalType::Int);
             clear_owned(rax, state);
@@ -448,7 +409,6 @@ pub fn verify_instruction(
 
         DtalInstr::SpillStore { src, offset, ty } => {
             check_register_defined(*src, state, block_label)?;
-            // Track the type stored at this stack offset
             state.spill_types.insert(*offset, ty.clone());
             if let Some(object_id) = state.owned_object_ids.get(src).copied() {
                 state.owned_spills.insert(*offset);
@@ -476,7 +436,6 @@ pub fn verify_instruction(
         }
 
         DtalInstr::SpillLoad { dst, offset, ty } => {
-            // Verify the spill slot has been stored to
             let derived_ty = if let Some(stored_ty) = state.spill_types.get(offset).cloned() {
                 stored_ty
             } else {
@@ -502,15 +461,7 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Prologue { .. } => {
-            // In physical DTAL, the prologue marks function entry. All physical
-            // registers are "available" at this point (they hold parameter values,
-            // caller-saved values, or undefined values). Define them all as Int
-            // to prevent false "used before definition" errors.
-            //
-            // TypeAnnotation instructions AFTER the Prologue will refine specific
-            // registers to their correct types (e.g., array params). Since
-            // TypeAnnotation verification accepts refinement from a supertype,
-            // defining as Int first and then narrowing via annotation is sound.
+            // Prologue seeds physical registers; later annotations refine them.
             use crate::backend::dtal::regs::PhysicalReg;
             for preg in &[
                 PhysicalReg::LR,
@@ -537,9 +488,7 @@ pub fn verify_instruction(
             }
         }
 
-        DtalInstr::Epilogue { .. } => {
-            // Structural marker
-        }
+        DtalInstr::Epilogue { .. } => {}
 
         DtalInstr::DropOwned { src, .. } => {
             verify_owned_available(*src, state, block_label, "drop_owned")?;
@@ -932,10 +881,7 @@ pub(crate) fn verify_unique_owned_objects(
     Ok(())
 }
 
-/// Verify mov immediate instruction
-///
-/// Xi & Harper's type-movimm rule: `mov rd, c ⟹ rd : int(c)`
-/// The type is derived from the immediate value, not trusted from the annotation.
+/// Verify `mov rd, c` by deriving `rd : int(c)`.
 fn verify_mov_imm(
     dst: Reg,
     imm: i128,
@@ -943,7 +889,6 @@ fn verify_mov_imm(
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
-    // For singleton types, verify the value matches
     if let DtalType::SingletonInt(IndexExpr::Const(expected)) = ty
         && imm != *expected
     {
@@ -954,8 +899,7 @@ fn verify_mov_imm(
         });
     }
 
-    // For refined types, verify the predicate holds for the immediate value.
-    // Substitute the value for the bound variable and check provability.
+    // Refined annotations must hold for the immediate value.
     if let DtalType::RefinedInt {
         var, constraint, ..
     } = ty
@@ -1031,7 +975,7 @@ fn substitute_const_in_constraint_inner(
             body,
         } => {
             if bound == var {
-                c.clone() // shadowed
+                c.clone()
             } else {
                 Constraint::Forall {
                     var: bound.clone(),
@@ -1092,10 +1036,7 @@ fn sub_idx(expr: &IndexExpr, var: &str, replacement: &IndexExpr) -> IndexExpr {
     }
 }
 
-/// Verify mov register instruction
-///
-/// Xi & Harper's type-mov rule: `mov rd, rs ⟹ rd : τ` where `rs : τ`
-/// The type is derived from the source register, not trusted from the annotation.
+/// Verify `mov rd, rs` by deriving `rd` from `rs`.
 fn verify_mov_reg(
     dst: Reg,
     src: Reg,
@@ -1107,11 +1048,9 @@ fn verify_mov_reg(
     let derived_ty = src_ty.clone();
 
     match &derived_ty {
-        // Singleton: link dst to the concrete index expression
         DtalType::SingletonInt(idx) => {
             add_register_index_constraint(dst, idx, state);
         }
-        // Scalar types: link dst to src register variable
         DtalType::Int
         | DtalType::I64
         | DtalType::U64
@@ -1120,7 +1059,6 @@ fn verify_mov_reg(
             let src_idx = extract_index(&derived_ty, &src);
             add_register_index_constraint(dst, &src_idx, state);
         }
-        // Existential: open the existential for the destination register
         DtalType::ExistentialInt {
             witness_var,
             constraint,
@@ -1131,7 +1069,6 @@ fn verify_mov_reg(
             let opened = substitute_select_names(&opened, &subs);
             state.constraints.push(opened);
         }
-        // Array: copy version and emit linking constraint
         DtalType::Array { size, .. } => {
             let src_version = state.array_versions.get(&src).copied().unwrap_or(0);
             state.array_versions.insert(dst, 0);
@@ -1154,11 +1091,7 @@ fn verify_mov_reg(
     Ok(())
 }
 
-/// Extract the index expression from a type for derivation-based typing.
-///
-/// - `SingletonInt(idx)` → `idx`
-/// - `RefinedInt { var, .. }` → `Var(var)`
-/// - `Int` → `Var(reg_name)` (treat register as opaque index variable)
+/// Extract the index expression used for derivation-based typing.
 pub fn extract_index(ty: &DtalType, reg: &Reg) -> IndexExpr {
     match ty {
         DtalType::SingletonInt(idx) => idx.clone(),
@@ -1196,14 +1129,7 @@ pub(crate) fn pointer_arithmetic_result_type(
     }
 }
 
-/// Verify binary operation
-///
-/// Xi & Harper's derivation rules:
-/// - type-add: `rs : int(x), v : int(y) ⟹ rd : int(x+y)`
-/// - type-sub, type-mul, type-div similarly
-/// - And/Or: boolean result
-///
-/// The verifier derives the result type from operand types, ignoring `ty`.
+/// Verify a binary operation by deriving the result type from operands.
 fn verify_binop(
     op: BinaryOp,
     dst: Reg,
@@ -1232,7 +1158,6 @@ fn verify_binop(
     }
 
     let derived_ty = match op {
-        // Logical operations require boolean operands, produce Bool
         BinaryOp::And | BinaryOp::Or => {
             if !is_bool_compatible(&lhs_ty) || !is_bool_compatible(&rhs_ty) {
                 return Err(VerifyError::BinOpTypeMismatch {
@@ -1244,7 +1169,6 @@ fn verify_binop(
             }
             DtalType::Bool
         }
-        // Arithmetic operations: derive result type symbolically
         BinaryOp::Add
         | BinaryOp::Sub
         | BinaryOp::Mul
@@ -1273,7 +1197,7 @@ fn verify_binop(
                 | BinaryOp::BitXor
                 | BinaryOp::Shl
                 | BinaryOp::Shr => {
-                    // Bitwise ops don't have IndexExpr representation — widen to Int
+                    // Bitwise ops have no `IndexExpr` representation.
                     DtalType::Int
                 }
                 _ => {
@@ -1291,19 +1215,7 @@ fn verify_binop(
         }
     };
 
-    // Phase 4: if the type annotation indicates i64 mode, verify the arithmetic
-    // result stays in [INT_MIN, INT_MAX]. This mirrors the frontend's check_no_overflow
-    // at the physical DTAL level so a buggy lowering can't slip an overflowing op past.
-    //
-    // We build the result expression using register names (not the symbolic indices
-    // from extract_index) so the expression matches the constraint context which
-    // uses projected register names.
-    // Phase 4: if the type annotation indicates i64 mode, verify the arithmetic
-    // result stays in [INT_MIN, INT_MAX] — but only when both operands have
-    // sufficient constraint information. The DTAL conversion is lossy: refined
-    // types whose predicates can't be converted to Constraint are widened to
-    // their base type. When this happens, the verifier cannot reproduce the
-    // frontend's Z3 proof, so we skip the check (the frontend already verified).
+    // DTAL can only recheck i64 overflow when both operands remain concrete.
     let is_i64_op = matches!(ty, DtalType::I64)
         || matches!(ty, DtalType::RefinedInt { base, .. } if matches!(base.as_ref(), DtalType::I64));
     let both_have_constraints = is_concrete_const(&lhs_ty) && is_concrete_const(&rhs_ty);
@@ -1332,7 +1244,6 @@ fn verify_binop(
         }
     }
 
-    // Add register-to-index linkage for derived singleton types
     if let DtalType::SingletonInt(ref idx) = derived_ty {
         add_register_index_constraint(dst, idx, state);
     }
@@ -1341,27 +1252,19 @@ fn verify_binop(
     Ok(())
 }
 
-/// Check if a DTAL type has a compile-time-known constant value.
-/// Only constant singletons can be overflow-checked at the DTAL level
-/// without the full frontend Z3 context (which includes i64 range axioms).
+/// Return true when DTAL retains enough information for overflow rechecking.
 fn is_concrete_const(ty: &DtalType) -> bool {
     matches!(ty, DtalType::SingletonInt(IndexExpr::Const(_)))
 }
 
-/// Check that a symbolic expression is provably within [INT_MIN, INT_MAX]
-/// using the DTAL constraint solver.
+/// Check that a symbolic expression is provably within the i64 range.
 pub fn check_i64_overflow_constraint(result_idx: &IndexExpr, constraints: &[Constraint]) -> bool {
-    // INT_MIN <= result
     let lower = Constraint::Ge(result_idx.clone(), IndexExpr::Const(i64::MIN as i128));
-    // result <= INT_MAX
     let upper = Constraint::Le(result_idx.clone(), IndexExpr::Const(i64::MAX as i128));
-    // Both must be provable
     is_constraint_provable(&lower, constraints) && is_constraint_provable(&upper, constraints)
 }
 
-/// Verify add immediate instruction
-///
-/// Derived type: `src : int(x) ⟹ dst : int(x + imm)`
+/// Verify `addi` by deriving `dst : int(src + imm)`.
 fn verify_add_imm(
     dst: Reg,
     src: Reg,
@@ -1395,11 +1298,7 @@ fn verify_add_imm(
     Ok(())
 }
 
-/// Verify load instruction
-///
-/// Derives the result type from the array's element type, not the annotation.
-/// If the base register doesn't have an array type, falls back to the annotation
-/// (e.g., raw pointer loads where no array type information is available).
+/// Verify `loadop` using the array bound available from the base type.
 fn verify_load_op(
     dst: Reg,
     base: Reg,
@@ -1465,8 +1364,7 @@ fn verify_load(
     let base_ty = get_register_type(base, state, block_label)?;
     let _offset_ty = get_register_type(offset, state, block_label)?;
 
-    // If base has an array type, or a reference to an array, derive element
-    // type and perform bounds checking.
+    // Typed arrays and array references provide element type and bounds.
     let array_view = match &base_ty {
         DtalType::Array { element_type, size } => {
             Some((element_type.as_ref().clone(), size.clone()))
@@ -1482,7 +1380,6 @@ fn verify_load(
     if let Some((derived_ty, size)) = array_view {
         let offset_expr = reg_to_index_expr(&offset);
 
-        // Construct bounds constraint: 0 <= offset < size
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
             Box::new(Constraint::Lt(offset_expr.clone(), size.clone())),
@@ -1497,10 +1394,8 @@ fn verify_load(
             });
         }
 
-        // Derive element type from array base — don't trust annotation
         state.register_types.insert(dst, derived_ty);
 
-        // Emit select constraint: dst == current_arr[offset]
         let current_version = state.array_versions.get(&base).copied().unwrap_or(0);
         let arr_name = versioned_array_name(&base, current_version);
         let dst_expr = reg_to_index_expr(&dst);
@@ -1509,8 +1404,6 @@ fn verify_load(
             IndexExpr::Select(arr_name, Box::new(offset_expr)),
         ));
     } else {
-        // Non-array base: reject — the verifier requires typed array bases
-        // to derive element types independently.
         return Err(VerifyError::TypeMismatch {
             block: block_label.to_string(),
             instr_desc: format!("load {:?}, [{:?} + {:?}]", dst, base, offset),
@@ -1525,11 +1418,7 @@ fn verify_load(
     Ok(())
 }
 
-/// Verify store instruction
-///
-/// After bounds and type checks, emits array store axioms:
-/// - **Write axiom**: `new_arr[offset] == src_value`
-/// - **Frame axiom**: `forall k. k != offset → new_arr[k] == old_arr[k]`
+/// Verify a store and emit versioned array axioms.
 fn verify_store(
     base: Reg,
     offset: Reg,
@@ -1541,8 +1430,7 @@ fn verify_store(
     let _offset_ty = get_register_type(offset, state, block_label)?;
     let src_ty = get_register_type(src, state, block_label)?;
 
-    // If base has an array type, or a mutable reference to an array, perform
-    // bounds checking and emit axioms.
+    // Stores require an owned array or mutable array reference.
     let array_view = match &base_ty {
         DtalType::Array { element_type, size } => {
             Some((element_type.as_ref().clone(), size.clone()))
@@ -1565,7 +1453,6 @@ fn verify_store(
     if let Some((element_type, size)) = array_view {
         let offset_expr = reg_to_index_expr(&offset);
 
-        // Construct bounds constraint: 0 <= offset < size
         let bounds_constraint = Constraint::And(
             Box::new(Constraint::Ge(offset_expr.clone(), IndexExpr::Const(0))),
             Box::new(Constraint::Lt(offset_expr.clone(), size.clone())),
@@ -1580,7 +1467,6 @@ fn verify_store(
             });
         }
 
-        // Check stored value type is compatible with array element type
         if !types_compatible_with_constraints(&src_ty, &element_type, &state.constraints) {
             return Err(VerifyError::TypeMismatch {
                 block: block_label.to_string(),
@@ -1590,7 +1476,6 @@ fn verify_store(
             });
         }
 
-        // Emit array store axioms (versioned array names)
         let old_version = state.array_versions.get(&base).copied().unwrap_or(0);
         let old_name = versioned_array_name(&base, old_version);
         let new_version = old_version + 1;
@@ -1599,13 +1484,11 @@ fn verify_store(
 
         let src_idx = extract_index(&src_ty, &src);
 
-        // Write axiom: new_arr[offset] == src_value
         state.constraints.push(Constraint::Eq(
             IndexExpr::Select(new_name.clone(), Box::new(offset_expr.clone())),
             src_idx,
         ));
 
-        // Frame axiom: forall k. k != offset → new_arr[k] == old_arr[k]
         state.constraints.push(Constraint::Forall {
             var: "_k".to_string(),
             lower: IndexExpr::Const(0),
@@ -1626,12 +1509,12 @@ fn verify_store(
     Ok(())
 }
 
-/// Get the versioned array name for a register
+/// Get the versioned array name for a register.
 fn versioned_array_name(reg: &Reg, version: u32) -> String {
     format!("{}_{}", reg, version)
 }
 
-/// Verify cmp instruction
+/// Verify `cmp`.
 fn verify_cmp(
     lhs: Reg,
     rhs: Reg,
@@ -1644,7 +1527,7 @@ fn verify_cmp(
     Ok(())
 }
 
-/// Verify cmp immediate instruction
+/// Verify `cmp` against an immediate.
 fn verify_cmp_imm(
     lhs: Reg,
     imm: i128,
@@ -1656,9 +1539,7 @@ fn verify_cmp_imm(
     Ok(())
 }
 
-/// Verify not instruction
-///
-/// Logical negation always produces Bool, regardless of annotation.
+/// Verify logical negation.
 fn verify_not(
     dst: Reg,
     src: Reg,
@@ -1695,7 +1576,7 @@ fn verify_shift_imm(
     Ok(())
 }
 
-/// Verify a type annotation
+/// Verify a type annotation.
 fn verify_type_annotation(
     reg: Reg,
     ty: &DtalType,
@@ -1703,9 +1584,7 @@ fn verify_type_annotation(
     block_label: &str,
 ) -> Result<(), VerifyError> {
     if let Some(existing_ty) = state.register_types.get(&reg) {
-        // ExistentialInt annotations serve as phi declarations — the type
-        // narrows from the widened join (Int) to a bounded existential.
-        // Correctness of each incoming edge is verified by verify_state_coercion.
+        // Existentials can narrow widened join types; edges are checked separately.
         let is_existential_narrowing = matches!(ty, DtalType::ExistentialInt { .. })
             && matches!(
                 existing_ty,
@@ -1716,9 +1595,7 @@ fn verify_type_annotation(
                     | DtalType::ExistentialInt { .. }
             );
 
-        // In physical DTAL, the Prologue sets all registers to Int as a placeholder.
-        // TypeAnnotation from physalloc refines them to their actual types.
-        // Allow narrowing from Int to any type (e.g., Int → [int; 5]).
+        // Prologue placeholders may be refined by physical DTAL annotations.
         let is_pointer_refinement =
             matches!(existing_ty, DtalType::Int | DtalType::I64 | DtalType::U64)
                 && matches!(
@@ -1747,13 +1624,9 @@ fn verify_type_annotation(
             });
         }
     }
-    // Set the type (either first definition via phi or verified annotation)
     state.register_types.insert(reg, ty.clone());
 
-    // Project refined type constraints into the constraint context.
-    // When a register gets a RefinedInt type (e.g. from a parameter annotation),
-    // substitute the register name for the bound variable and add the constraint
-    // so Z3 can use it for downstream proofs (overflow checks, bounds, etc.).
+    // Project refined types into the constraint context.
     if let DtalType::RefinedInt {
         var, constraint, ..
     } = ty
@@ -1767,18 +1640,13 @@ fn verify_type_annotation(
     Ok(())
 }
 
-/// Verify a constraint assertion.
-///
-/// If the constraint is provable from the current context, it is added
-/// to the context for use by downstream instructions (e.g., bounds checks).
+/// Verify and retain a constraint assertion.
 fn verify_constraint_assert(
     constraint: &Constraint,
     state: &mut TypeState,
     block_label: &str,
 ) -> Result<(), VerifyError> {
-    // Check if constraint is provable from current context (syntactic fast-path + Z3).
-    // Also check proven_assertions — these are frontend-verified invariants that
-    // survive across join points and don't need to be re-proven each iteration.
+    // Include frontend-proven invariants that survive joins.
     let mut full_context = state.constraints.clone();
     full_context.extend(state.proven_assertions.iter().cloned());
 
@@ -1789,12 +1657,9 @@ fn verify_constraint_assert(
             block: block_label.to_string(),
         });
     }
-    // Add proven constraint to context for downstream use
     state.constraints.push(constraint.clone());
     Ok(())
 }
-
-// Helper functions
 
 fn get_register_type(
     reg: Reg,
@@ -1845,10 +1710,7 @@ pub(crate) fn is_numeric_type(ty: &DtalType) -> bool {
     )
 }
 
-/// Check if a type can be used as a boolean operand.
-///
-/// At the DTAL level, booleans are represented as integers 0/1.
-/// `Bool`, `int(0)`, and `int(1)` are all valid boolean operands.
+/// Check whether a type can be used as a boolean operand.
 fn is_bool_compatible(ty: &DtalType) -> bool {
     matches!(
         ty,
@@ -1858,10 +1720,7 @@ fn is_bool_compatible(ty: &DtalType) -> bool {
     )
 }
 
-/// Check if actual type is a subtype of (or equal to) expected type.
-///
-/// Uses the constraint context for Xi & Harper's coerce-int rule:
-/// `φ ⊨ x = y ⟹ int(x) ≤ int(y)`
+/// Check whether `actual` is compatible with `expected` under constraints.
 pub fn types_compatible_with_constraints(
     actual: &DtalType,
     expected: &DtalType,
@@ -1881,7 +1740,6 @@ pub fn types_compatible_with_constraints(
         (DtalType::SingletonInt(_), DtalType::Int) => true,
         (DtalType::SingletonInt(_), DtalType::I64) => true,
         (DtalType::SingletonInt(_), DtalType::U64) => true,
-        // At the DTAL level, booleans are integers 0/1
         (DtalType::SingletonInt(IndexExpr::Const(0 | 1)), DtalType::Bool) => true,
         (DtalType::Bool, DtalType::SingletonInt(IndexExpr::Const(0 | 1))) => true,
         (DtalType::RefinedInt { .. }, DtalType::Int) => true,
@@ -1892,7 +1750,6 @@ pub fn types_compatible_with_constraints(
             types_compatible_with_constraints(base, &DtalType::U64, constraints)
         }
         (DtalType::SingletonInt(_), DtalType::RefinedInt { base, .. }) => {
-            // A singleton is compatible with a refined type if it's compatible with the base
             types_compatible_with_constraints(actual, base.as_ref(), constraints)
         }
         (
@@ -1907,11 +1764,10 @@ pub fn types_compatible_with_constraints(
                 constraint: c2,
             },
         ) => {
-            // Structural equality first, then base compatibility
             (v1 == v2 && c1 == c2 && types_compatible_with_constraints(b1, b2, constraints))
                 || types_compatible_with_constraints(b1, b2, constraints)
         }
-        // SingletonInt(k) <: ExistentialInt { n | φ(n) } — check φ(k) via witness equation
+        // Check the existential by binding its witness to the singleton index.
         (
             DtalType::SingletonInt(idx),
             DtalType::ExistentialInt {
@@ -1919,19 +1775,15 @@ pub fn types_compatible_with_constraints(
                 constraint,
             },
         ) => {
-            // Add witness_var == idx to the context, then check φ(witness_var).
-            // This is equivalent to φ[n/idx] but handles complex index expressions
-            // correctly (string substitution can't replace a Var with an arbitrary expr).
             let witness_eq = Constraint::Eq(IndexExpr::Var(witness_var.clone()), idx.clone());
             let mut augmented_ctx: Vec<Constraint> = constraints.to_vec();
             augmented_ctx.push(witness_eq);
             is_constraint_provable(constraint, &augmented_ctx)
         }
-        // ExistentialInt <: Int/I64 — always true (erasure)
         (DtalType::ExistentialInt { .. }, DtalType::Int) => true,
         (DtalType::ExistentialInt { .. }, DtalType::I64) => true,
         (DtalType::ExistentialInt { .. }, DtalType::U64) => true,
-        // ExistentialInt <: RefinedInt — check existential constraint implies refinement
+        // Existential-to-refined coercion is an implication check.
         (
             DtalType::ExistentialInt {
                 witness_var: w,
@@ -1943,7 +1795,6 @@ pub fn types_compatible_with_constraints(
                 constraint: rc,
             },
         ) => {
-            // Rename the refinement variable to match the witness, then check implication
             let subs: std::collections::HashMap<String, String> =
                 std::collections::HashMap::from([(rv.clone(), w.clone())]);
             let rc_renamed = substitute_var_names_in_constraint(rc, &subs);
@@ -1952,7 +1803,7 @@ pub fn types_compatible_with_constraints(
                 constraints,
             )
         }
-        // ExistentialInt <: ExistentialInt — check constraint implication
+        // Existential-to-existential coercion is also implication-based.
         (
             DtalType::ExistentialInt {
                 witness_var: w1,
@@ -1963,11 +1814,9 @@ pub fn types_compatible_with_constraints(
                 constraint: c2,
             },
         ) => {
-            // If structurally equal, trivially compatible
             if w1 == w2 && c1 == c2 {
                 return true;
             }
-            // Check ∀x. c1(x) ⟹ c2(x) by renaming w1 to a fresh var and checking implication
             let fresh = "_existential_check".to_string();
             let subs1: std::collections::HashMap<String, String> =
                 std::collections::HashMap::from([(w1.clone(), fresh.clone())]);
@@ -1980,7 +1829,7 @@ pub fn types_compatible_with_constraints(
                 constraints,
             )
         }
-        // ExistentialInt <: SingletonInt — only if constraint forces n = k
+        // Existential-to-singleton requires the constraint to force equality.
         (
             DtalType::ExistentialInt {
                 witness_var,
@@ -1993,7 +1842,6 @@ pub fn types_compatible_with_constraints(
                 Constraint::Implies(Box::new(constraint.clone()), Box::new(eq_constraint));
             is_constraint_provable(&implication, constraints)
         }
-        // Int <: ExistentialInt — false (cannot satisfy non-trivial constraint)
         (DtalType::Int, DtalType::ExistentialInt { .. }) => false,
         (DtalType::Int, DtalType::SingletonInt(_)) => false,
         (DtalType::Int, DtalType::RefinedInt { .. }) => false,
@@ -2027,14 +1875,13 @@ pub fn types_compatible_with_constraints(
     }
 }
 
-/// Check if actual type is a subtype of (or equal to) expected type.
-/// Convenience wrapper without constraint context (syntactic check only).
+/// Syntactic compatibility check without a constraint context.
 #[allow(dead_code)]
 pub fn types_compatible(actual: &DtalType, expected: &DtalType) -> bool {
     types_compatible_with_constraints(actual, expected, &[])
 }
 
-/// Check if a constraint is provable from context
+/// Check whether a constraint is provable from context.
 pub fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool {
     if matches!(goal, Constraint::True) {
         return true;
@@ -2054,11 +1901,10 @@ pub fn is_constraint_provable(goal: &Constraint, context: &[Constraint]) -> bool
         }
     }
 
-    // Use Z3 for all non-trivial cases
     crate::verifier::smt::ConstraintOracle::is_provable(goal, context)
 }
 
-/// Check if one constraint entails another (simple cases)
+/// Fast-path entailment for simple syntactic cases.
 fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
     if premise == conclusion {
         return true;
@@ -2076,20 +1922,14 @@ fn constraint_entails(premise: &Constraint, conclusion: &Constraint) -> bool {
     }
 }
 
-/// Convert a register to an IndexExpr variable
+/// Convert a register to an `IndexExpr` variable.
 pub fn reg_to_index_expr(reg: &Reg) -> IndexExpr {
     IndexExpr::Var(format!("{}", reg))
 }
 
-/// Add a constraint linking a register to its index expression.
-///
-/// When the verifier assigns `reg : SingletonInt(idx)`, this adds
-/// `reg == idx` to the constraint context (unless idx is already the
-/// register's own variable). This bridges types and constraints so Z3
-/// can reason across them.
+/// Add the register/index equality implied by a derived singleton type.
 fn add_register_index_constraint(reg: Reg, idx: &IndexExpr, state: &mut TypeState) {
     let reg_expr = reg_to_index_expr(&reg);
-    // Don't add tautological constraint reg == reg
     if *idx != reg_expr {
         state
             .constraints
@@ -2097,10 +1937,7 @@ fn add_register_index_constraint(reg: Reg, idx: &IndexExpr, state: &mut TypeStat
     }
 }
 
-/// Substitute unversioned array Select names with their current versioned names.
-///
-/// For each `Select(name, idx)` in the constraint, if `name` matches a register
-/// with a known array version, replace `name` with the versioned form (e.g., "v0" → "v0_3").
+/// Substitute array `Select` names with their current versioned names.
 pub fn version_substitute_constraint(
     constraint: &Constraint,
     array_versions: &std::collections::HashMap<Reg, u32>,
@@ -2112,7 +1949,7 @@ pub fn version_substitute_constraint(
     substitute_select_names(constraint, &subs)
 }
 
-/// Recursively substitute Select names in a constraint
+/// Substitute `Select` names in a constraint.
 pub fn substitute_select_names(
     constraint: &Constraint,
     subs: &std::collections::HashMap<String, String>,
@@ -2181,7 +2018,7 @@ pub fn substitute_select_names(
     }
 }
 
-/// Substitute Select names in an index expression
+/// Substitute `Select` names in an index expression.
 fn substitute_select_in_index(
     expr: &IndexExpr,
     subs: &std::collections::HashMap<String, String>,
@@ -2215,7 +2052,7 @@ fn substitute_select_in_index(
     }
 }
 
-/// Substitute Var names in a constraint (for register name remapping)
+/// Substitute variable names in a constraint.
 pub fn substitute_var_names_in_constraint(
     constraint: &Constraint,
     subs: &std::collections::HashMap<String, String>,
@@ -2267,7 +2104,6 @@ pub fn substitute_var_names_in_constraint(
             upper,
             body,
         } => {
-            // Don't substitute the bound variable
             let filtered: std::collections::HashMap<String, String> = subs
                 .iter()
                 .filter(|(k, _)| *k != var)
@@ -2301,7 +2137,7 @@ pub fn substitute_var_names_in_constraint(
     }
 }
 
-/// Substitute Var names in an index expression
+/// Substitute variable names in an index expression.
 fn substitute_var_in_index(
     expr: &IndexExpr,
     subs: &std::collections::HashMap<String, String>,
@@ -2342,7 +2178,7 @@ fn substitute_var_in_index(
     }
 }
 
-/// Negate a CmpOp (Lt <-> Ge, Le <-> Gt, Eq <-> Ne)
+/// Negate a comparison operator.
 pub fn negate_cmp_op(op: CmpOp) -> CmpOp {
     match op {
         CmpOp::Eq => CmpOp::Ne,
@@ -2354,7 +2190,7 @@ pub fn negate_cmp_op(op: CmpOp) -> CmpOp {
     }
 }
 
-/// Construct a constraint from a CmpOp and comparison operands
+/// Build a constraint from a comparison operator and operands.
 pub fn constraint_from_cmp_op(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Option<Constraint> {
     let (lhs_expr, rhs_expr) = match last_cmp {
         Some(CmpOperands::RegReg(lhs, rhs)) => (reg_to_index_expr(lhs), reg_to_index_expr(rhs)),
@@ -2372,7 +2208,7 @@ pub fn constraint_from_cmp_op(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Opti
     })
 }
 
-/// Construct the negated constraint from a CmpOp and comparison operands
+/// Build the negated constraint from a comparison operator and operands.
 pub fn negate_cmp_op_constraint(op: CmpOp, last_cmp: &Option<CmpOperands>) -> Option<Constraint> {
     constraint_from_cmp_op(negate_cmp_op(op), last_cmp)
 }

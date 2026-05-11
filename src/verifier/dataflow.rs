@@ -1,6 +1,4 @@
-//! Type state dataflow analysis
-//!
-//! This module computes type states at block entries using forward dataflow analysis.
+//! Forward dataflow analysis for DTAL type states.
 
 #![allow(clippy::result_large_err)]
 
@@ -12,35 +10,30 @@ use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, nega
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
-/// Result of dataflow analysis
+/// Type-state dataflow result.
 #[allow(dead_code)]
 pub struct DataflowResult {
-    /// Type state at entry of each block
+    /// Type state at entry of each block.
     pub entry_states: HashMap<String, TypeState>,
-    /// Type state at exit of each block
+    /// Type state at exit of each block.
     pub exit_states: HashMap<String, TypeState>,
-    /// Per-edge exit states (source_label, target_label) -> state
-    /// Used for branch-refined constraints on specific edges
+    /// Per-edge exit states keyed by `(source_label, target_label)`.
     pub edge_states: HashMap<(String, String), TypeState>,
-    /// Predecessor blocks for each block
+    /// Predecessor blocks for each block.
     pub predecessors: HashMap<String, Vec<String>>,
 }
 
-/// Compute type states for all blocks in a function
+/// Compute block entry and exit states for a function.
 pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyError> {
-    // Build CFG structure
     let predecessors = compute_predecessors(func);
 
-    // Initialize entry states
     let mut entry_states: HashMap<String, TypeState> = HashMap::new();
     let mut exit_states: HashMap<String, TypeState> = HashMap::new();
     let mut edge_states: HashMap<(String, String), TypeState> = HashMap::new();
 
-    // Set entry state for first block (function parameters)
     if let Some(entry_block) = func.blocks.first() {
         let mut entry_state = TypeState::new();
 
-        // Initialize with function parameters
         for ((reg, ty), param_kind) in func.params.iter().zip(func.parameter_kinds.iter()) {
             entry_state.register_types.insert(*reg, ty.clone());
             if param_kind.is_owned_value() && matches!(ty, DtalType::Array { .. }) {
@@ -66,7 +59,6 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
             }
         }
 
-        // Add precondition to constraints
         if let Some(precond) = &func.precondition {
             entry_state.constraints.push(precond.clone());
         }
@@ -74,12 +66,10 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
         entry_states.insert(entry_block.label.clone(), entry_state);
     }
 
-    // Fixed-point iteration
     let mut changed = true;
     let mut iterations = 0;
     const MAX_ITERATIONS: usize = 100;
 
-    // Get entry block label for special handling
     let entry_block_label = func.blocks.first().map(|b| b.label.clone());
 
     while changed && iterations < MAX_ITERATIONS {
@@ -87,33 +77,24 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
         iterations += 1;
 
         for (block_idx, block) in func.blocks.iter().enumerate() {
-            // Compute entry state - always recompute from predecessors
-            // (except for entry block which keeps function parameters)
             let entry_state = if Some(&block.label) == entry_block_label.as_ref() {
-                // Entry block: use cached state with function parameters
                 entry_states
                     .get(&block.label)
                     .cloned()
                     .unwrap_or_else(|| block.entry_state.clone())
             } else {
-                // Non-entry blocks: always recompute from predecessors
                 let preds = predecessors.get(&block.label).cloned().unwrap_or_default();
                 if preds.is_empty() {
-                    // No predecessors - use block's declared entry state
                     block.entry_state.clone()
                 } else {
-                    // Join from predecessors using per-edge states when available
                     join_states(&preds, &block.label, &exit_states, &edge_states)?
                 }
             };
 
-            // Compute exit state by processing instructions
             let exit_state = compute_exit_state(block, &entry_state)?;
 
-            // Compute per-edge exit states for branches
             compute_edge_states(func, block_idx, &exit_state, &mut edge_states);
 
-            // Check if exit state changed
             let old_exit = exit_states.get(&block.label);
             if old_exit
                 .map(|s| !states_equal(s, &exit_state))
@@ -123,7 +104,6 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
                 exit_states.insert(block.label.clone(), exit_state);
             }
 
-            // Update entry state if it changed
             if !entry_states.contains_key(&block.label)
                 || !states_equal(entry_states.get(&block.label).unwrap(), &entry_state)
             {
@@ -140,16 +120,14 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
     })
 }
 
-/// Compute predecessor blocks for each block
+/// Compute predecessor labels for each block.
 fn compute_predecessors(func: &DtalFunction) -> HashMap<String, Vec<String>> {
     let mut predecessors: HashMap<String, Vec<String>> = HashMap::new();
 
-    // Initialize all blocks with empty predecessor lists
     for block in &func.blocks {
         predecessors.insert(block.label.clone(), Vec::new());
     }
 
-    // Find successors and build predecessor lists
     for (i, block) in func.blocks.iter().enumerate() {
         let successors = get_block_successors(func, i);
         for succ in successors {
@@ -162,10 +140,9 @@ fn compute_predecessors(func: &DtalFunction) -> HashMap<String, Vec<String>> {
     predecessors
 }
 
-/// Get successor block labels from a block
+/// Get successor labels for a block.
 ///
-/// Detects implicit fall-through: if a block has a `Branch` but no `Jmp` or `Ret`,
-/// the next block in layout order is a fall-through successor.
+/// A conditional branch without `Jmp` or `Ret` falls through to the next block.
 fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> {
     let block = &func.blocks[block_index];
     let mut successors = Vec::new();
@@ -190,8 +167,6 @@ fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> 
         }
     }
 
-    // If block has a conditional branch but no unconditional jump or return,
-    // the next block in layout order is a fall-through successor
     if has_branch
         && !has_jmp
         && !has_ret
@@ -203,10 +178,7 @@ fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> 
     successors
 }
 
-/// Compute per-edge exit states for branches.
-///
-/// When a block ends with a conditional Branch, the taken edge gets the positive
-/// constraint and the fall-through edge gets the negated constraint.
+/// Compute branch-refined exit states for CFG edges.
 fn compute_edge_states(
     func: &DtalFunction,
     block_index: usize,
@@ -220,16 +192,13 @@ fn compute_edge_states(
     for instr in &block.instructions {
         match instr {
             DtalInstr::Branch { cond, target } => {
-                // Taken edge: add positive constraint
                 if let Some(pos_constraint) = constraint_from_cmp_op(*cond, &exit_state.last_cmp) {
                     let mut taken_state = exit_state.clone();
                     taken_state.constraints.push(pos_constraint);
                     edge_states.insert((block.label.clone(), target.clone()), taken_state);
                 }
 
-                // Fall-through edge: add negated constraint.
-                // Only if the next block in layout is NOT the branch target
-                // (otherwise we'd overwrite the taken-edge constraint).
+                // Avoid overwriting the taken edge when it targets the layout successor.
                 if !has_jmp
                     && !has_ret
                     && let Some(next_block) = func.blocks.get(block_index + 1)
@@ -249,17 +218,13 @@ fn compute_edge_states(
                 }
             }
             DtalInstr::Jmp { target } => {
-                // If this Jmp follows a Branch in the same block,
-                // it's the fall-through path. Add the negated branch
-                // constraint to the jump target's edge state.
+                // A `jmp` after a branch is the generated false edge.
                 if !has_jmp && !has_ret {
-                    // Check if a Branch was seen earlier in this block
                     let had_branch = block
                         .instructions
                         .iter()
                         .any(|i| matches!(i, DtalInstr::Branch { .. }));
                     if had_branch {
-                        // Find the branch's condition and negate it
                         for prev_instr in &block.instructions {
                             if let DtalInstr::Branch { cond, .. } = prev_instr {
                                 let neg_cond = negate_cmp_op(*cond);
@@ -286,10 +251,7 @@ fn compute_edge_states(
     }
 }
 
-/// Join type states from multiple predecessors
-///
-/// Uses per-edge states when available (for branch-refined constraints),
-/// otherwise falls back to the block's exit state.
+/// Join predecessor states, preferring branch-refined edge states.
 fn join_states(
     pred_labels: &[String],
     target_label: &str,
@@ -298,9 +260,7 @@ fn join_states(
 ) -> Result<TypeState, VerifyError> {
     let mut result = TypeState::new();
 
-    // Helper: get the state for a predecessor edge
     let get_pred_state = |pred_label: &String| -> Option<&TypeState> {
-        // Prefer per-edge state if available
         let edge_key = (pred_label.clone(), target_label.to_string());
         edge_states
             .get(&edge_key)
@@ -313,7 +273,6 @@ fn join_states(
 
     verify_borrow_join_compatibility(&pred_states, target_label)?;
 
-    // Collect all registers that appear in any predecessor
     let mut all_regs: HashSet<Reg> = HashSet::new();
     for state in &pred_states {
         for reg in state.register_types.keys() {
@@ -321,7 +280,6 @@ fn join_states(
         }
     }
 
-    // For each register, compute join of types
     for reg in all_regs {
         let mut types: Vec<DtalType> = Vec::new();
 
@@ -332,20 +290,14 @@ fn join_states(
         }
 
         if !types.is_empty() {
-            // Compute join (least upper bound) of types
             let joined_type = join_types(&types);
             result.register_types.insert(reg, joined_type);
         }
     }
 
-    // Join constraints: keep constraints provable from ALL predecessors.
-    // First, do fast syntactic intersection (constraints in all predecessors).
-    // Then, for constraints in some but not all predecessors, use Z3 to check
-    // if they're provable from the other predecessors' contexts (e.g., a loop
-    // invariant that's vacuously true on the entry edge).
+    // Keep only constraints entailed by every predecessor.
     let mut kept: HashSet<usize> = HashSet::new();
 
-    // Collect all unique constraints from all predecessors
     let mut all_constraints: Vec<crate::backend::dtal::constraints::Constraint> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for state in &pred_states {
@@ -373,7 +325,7 @@ fn join_states(
         }
     }
 
-    // Join array versions - take max to ensure fresh names for future stores
+    // Keep array names fresh after joins.
     for state in &pred_states {
         for (reg, version) in &state.array_versions {
             let current = result.array_versions.get(reg).copied().unwrap_or(0);
@@ -383,7 +335,7 @@ fn join_states(
         }
     }
 
-    // Join proven assertions - take union (these are frontend-verified)
+    // Frontend-verified assertions can be unioned across predecessors.
     let mut seen_assertions: std::collections::HashSet<String> = std::collections::HashSet::new();
     for state in &pred_states {
         for assertion in &state.proven_assertions {
@@ -655,26 +607,22 @@ fn verify_borrow_join_compatibility(
     Ok(())
 }
 
-/// Join multiple types into their least upper bound
+/// Join multiple types into their least upper bound.
 fn join_types(types: &[DtalType]) -> DtalType {
     if types.is_empty() {
-        return DtalType::Int; // Default
+        return DtalType::Int;
     }
 
     if types.len() == 1 {
         return types[0].clone();
     }
 
-    // Check if all types are the same
     let first = &types[0];
     if types.iter().all(|t| t == first) {
         return first.clone();
     }
 
-    // If any type is an existential, try to preserve it.
-    // ExistentialInt + SingletonInt → ExistentialInt (singleton is a subtype)
-    // ExistentialInt + ExistentialInt (same) → keep as-is
-    // ExistentialInt + Int → Int (conservative widening)
+    // Preserve existentials when every incoming type can inhabit them.
     if let Some(existential) = types
         .iter()
         .find(|t| matches!(t, DtalType::ExistentialInt { .. }))
@@ -694,7 +642,6 @@ fn join_types(types: &[DtalType]) -> DtalType {
         }
     }
 
-    // If different singleton ints, generalize to int
     let all_singleton_ints = types
         .iter()
         .all(|t| matches!(t, DtalType::SingletonInt(_) | DtalType::Int));
@@ -702,7 +649,6 @@ fn join_types(types: &[DtalType]) -> DtalType {
         return DtalType::Int;
     }
 
-    // If different refined ints, generalize to int
     let all_numeric = types.iter().all(|t| {
         matches!(
             t,
@@ -716,20 +662,15 @@ fn join_types(types: &[DtalType]) -> DtalType {
         return DtalType::Int;
     }
 
-    // Default: return first type (conservative)
     first.clone()
 }
 
-/// Check structural equality of types
+/// Check structural equality of types.
 fn types_structurally_equal(a: &DtalType, b: &DtalType) -> bool {
     a == b
 }
 
-/// Compute exit state by processing all instructions (non-verifying)
-///
-/// This function only updates the type state based on instruction definitions.
-/// It does NOT verify that operands are defined - that's done separately after
-/// the dataflow analysis reaches a fixed point.
+/// Compute a non-verifying exit state from instruction definitions.
 fn compute_exit_state(
     block: &DtalBlock,
     entry_state: &TypeState,
@@ -743,10 +684,7 @@ fn compute_exit_state(
     Ok(state)
 }
 
-/// Update type state based on instruction definitions (non-verifying).
-///
-/// Derives types using the same rules as the verifier (Xi & Harper derivation)
-/// so that dataflow-computed states match verifier expectations.
+/// Apply verifier-like type derivation without operand validation.
 fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
     use crate::backend::dtal::instr::BinaryOp;
 
@@ -755,7 +693,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state
                 .register_types
                 .insert(*dst, DtalType::SingletonInt(IndexExpr::Const(*imm)));
-            // Add equality constraint so branch conditions can reference this value
             let reg_expr = crate::verifier::checker::reg_to_index_expr(dst);
             state
                 .constraints
@@ -939,7 +876,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Load { dst, base, ty, .. } => {
-            // Derive element type from array and ref-to-array bases when available.
+            // Prefer element types derived from typed array bases.
             let derived_ty = if let Some(base_ty) = state.register_types.get(base) {
                 match base_ty {
                     DtalType::Array { element_type, .. } => element_type.as_ref().clone(),
@@ -1162,13 +1099,12 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         }
         DtalInstr::Store { .. } => {}
         DtalInstr::ConstraintAssert { constraint, .. } => {
-            // Propagate proven assertions through the dataflow.
+            // Proven assertions participate in downstream joins.
             state.constraints.push(constraint.clone());
             state.proven_assertions.push(constraint.clone());
         }
         DtalInstr::Jmp { .. } | DtalInstr::Branch { .. } | DtalInstr::Ret => {}
 
-        // Physical allocation instructions (post-regalloc)
         DtalInstr::Cqo => {
             use crate::backend::dtal::regs::PhysicalReg;
             let rax = Reg::Physical(PhysicalReg::LR);
@@ -1290,8 +1226,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Prologue { .. } => {
-            // Mirror the checker's Prologue handling: define all physical
-            // registers as Int so they're available in successor blocks.
+            // Match verifier prologue handling for successor blocks.
             use crate::backend::dtal::regs::PhysicalReg;
             for preg in &[
                 PhysicalReg::LR,
@@ -1447,7 +1382,7 @@ fn fresh_object_id(state: &mut TypeState) -> u32 {
     object_id
 }
 
-/// Check if two type states are equal
+/// Check whether two type states are equivalent for dataflow convergence.
 fn states_equal(a: &TypeState, b: &TypeState) -> bool {
     if a.register_types.len() != b.register_types.len() {
         return false;
@@ -1464,7 +1399,6 @@ fn states_equal(a: &TypeState, b: &TypeState) -> bool {
         }
     }
 
-    // Also check constraints, stack, and proven assertions
     a.constraints.len() == b.constraints.len()
         && a.constraints.iter().all(|c| b.constraints.contains(c))
         && a.stack.len() == b.stack.len()

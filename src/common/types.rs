@@ -53,8 +53,7 @@ pub enum IType<'src> {
     Master(Arc<Self>),
 }
 
-/// Internal representation of a function's signature
-/// To be stored in the global context (Σ_F)
+// Internal representation of a function's signature to be stored in the global context (\Sigma_F)
 #[derive(Clone, Debug)]
 pub struct FunctionSignature<'src> {
     pub name: String,

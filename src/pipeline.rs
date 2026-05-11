@@ -3,29 +3,28 @@
 //! This module provides the end-to-end compilation pipeline from source code
 //! to DTAL (Dependently Typed Assembly Language) output.
 //!
-//! # Pipeline Stages
+//! Pipeline Stages:
 //!
-//! ```text
 //! Source Code (&str)
 //!     │
-//!     ▼ lexer
+//!     v lexer
 //! Tokens (Vec<Spanned<Token>>)
 //!     │
-//!     ▼ parser
+//!     v parser
 //! AST (Program)
 //!     │
-//!     ▼ typechecker
+//!     v typechecker
 //! Typed AST (TProgram)
 //!     │
-//!     ▼ lower
+//!     v lower
 //! TIR (TirProgram) - SSA form
 //!     │
-//!     ▼ codegen
+//!     v codegen
 //! DTAL (DtalProgram)
 //!     │
-//!     ▼ emit
+//!     v emit
 //! Output (String)
-//! ```
+//!
 
 use crate::backend::optimise::{OptConfig, optimize_program};
 use crate::backend::{codegen_program, emit_program, lower_program};
@@ -37,19 +36,14 @@ use chumsky::prelude::*;
 use std::fmt;
 
 fn reset_pipeline_state() {
-    // Reset synthesized refinement naming so repeated compilations of the same
-    // source produce stable generated identifiers and DTAL text.
     reset_fresh_var_counter();
 }
 
 /// Compilation error types
 #[derive(Debug)]
 pub enum CompileError<'src> {
-    /// Lexer errors (tokenization failed)
     LexError(String),
-    /// Parser errors (syntax errors)
     ParseError(String),
-    /// Type errors (semantic errors)
     TypeError(TypeError<'src>),
 }
 
@@ -66,27 +60,21 @@ impl<'src> fmt::Display for CompileError<'src> {
 /// Result of a successful compilation
 #[derive(Debug, Clone)]
 pub struct CompileOutput {
-    /// The generated DTAL assembly as text
     pub dtal: String,
 }
 
 /// Verbose compilation output with all intermediate stages
 pub struct VerboseOutput<'src> {
-    /// Tokens produced by lexer (token, span as string)
     pub tokens: Vec<(String, String)>,
-    /// The typed AST
     pub tast: crate::common::tast::TProgram<'src>,
-    /// The TIR (SSA form)
     pub tir: crate::backend::TirProgram<'src>,
-    /// The DTAL program (for verification)
     pub dtal_program: crate::backend::dtal::instr::DtalProgram,
-    /// The generated DTAL assembly as text
     pub dtal: String,
 }
 
 /// Compile source code to DTAL assembly
 ///
-/// This is the main entry point for the compiler pipeline.
+/// Main entry point for the compiler pipeline.
 ///
 /// # Arguments
 ///
@@ -109,7 +97,7 @@ pub struct VerboseOutput<'src> {
 pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
     reset_pipeline_state();
 
-    // Stage 1: Lexical analysis
+    // Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -120,7 +108,7 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
         )
     })?;
 
-    // Stage 2: Parsing
+    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -136,29 +124,29 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
             )
         })?;
 
-    // Stage 3: Type checking
+    // Type checking
     let tast = check_program(&ast).map_err(CompileError::TypeError)?;
 
-    // Stage 4: Lower to TIR (SSA form)
+    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Stage 5: Generate DTAL
+    // Generate DTAL
     let dtal_program = codegen_program(&tir);
 
-    // Stage 6: Emit text
+    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(CompileOutput { dtal })
 }
 
-/// Compile source code to DTAL assembly with optimization
+/// Compile source code to DTAL assembly with optimisation
 ///
-/// This is like `compile` but allows specifying optimization options.
+/// This is like `compile` but allows specifying optimisation options.
 ///
 /// # Arguments
 ///
 /// * `source` - The source code to compile
-/// * `opt_config` - Configuration for optimization passes
+/// * `opt_config` - Configuration for optimisation passes
 ///
 /// # Returns
 ///
@@ -170,7 +158,7 @@ pub fn compile_optimized<'src>(
 ) -> Result<CompileOutput, CompileError<'src>> {
     reset_pipeline_state();
 
-    // Stage 1: Lexical analysis
+    // Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -181,7 +169,7 @@ pub fn compile_optimized<'src>(
         )
     })?;
 
-    // Stage 2: Parsing
+    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -197,34 +185,31 @@ pub fn compile_optimized<'src>(
             )
         })?;
 
-    // Stage 3: Type checking
+    // Type checking
     let tast = check_program(&ast).map_err(CompileError::TypeError)?;
 
-    // Stage 4: Lower to TIR (SSA form)
+    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Stage 5: Generate DTAL
+    // Generate DTAL
     let mut dtal_program = codegen_program(&tir);
 
-    // Stage 5.5: Optimize (if enabled)
+    // Optimise (if enabled)
     if opt_config.any_enabled() {
         optimize_program(&mut dtal_program, opt_config);
     }
 
-    // Stage 6: Emit text
+    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(CompileOutput { dtal })
 }
 
 /// Compile source code with verbose output, returning all intermediate stages
-///
-/// This function is useful for debugging and understanding the compilation process.
-/// It returns all intermediate representations including the typed AST and TIR.
 pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     reset_pipeline_state();
 
-    // Stage 1: Lexical analysis
+    // Lexical analysis
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -241,7 +226,7 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
         .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
         .collect();
 
-    // Stage 2: Parsing
+    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -257,16 +242,16 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
             )
         })?;
 
-    // Stage 3: Type checking
+    // Type checking
     let tast = check_program(&ast).map_err(CompileError::TypeError)?;
 
-    // Stage 4: Lower to TIR (SSA form)
+    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Stage 5: Generate DTAL
+    // Generate DTAL
     let dtal_program = codegen_program(&tir);
 
-    // Stage 6: Emit text
+    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(VerboseOutput {
@@ -324,9 +309,7 @@ pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, Com
     })
 }
 
-/// Compile source code with verbose output and optimization
-///
-/// Like `compile_verbose` but with optimization passes enabled.
+/// Compile source code with verbose output and optimisation
 pub fn compile_verbose_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
@@ -334,7 +317,7 @@ pub fn compile_verbose_optimized<'src>(
     compile_verbose_configured(source, Some(opt_config), false)
 }
 
-/// Compile source code with explicit target and optimization options.
+/// Compile source code with explicit target and optimisation options.
 pub fn compile_verbose_configured<'src>(
     source: &'src str,
     opt_config: Option<&OptConfig>,
@@ -342,7 +325,7 @@ pub fn compile_verbose_configured<'src>(
 ) -> Result<VerboseOutput<'src>, CompileError<'src>> {
     reset_pipeline_state();
 
-    // Stage 1: Lexical analysis
+    // Lexical analysis
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -359,7 +342,7 @@ pub fn compile_verbose_configured<'src>(
         .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
         .collect();
 
-    // Stage 2: Parsing
+    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -375,7 +358,7 @@ pub fn compile_verbose_configured<'src>(
             )
         })?;
 
-    // Stage 3: Type checking
+    // Type checking
     let tast = if bare_metal {
         crate::frontend::typechecker::check_program_bare_metal(&ast)
     } else {
@@ -383,24 +366,24 @@ pub fn compile_verbose_configured<'src>(
     }
     .map_err(CompileError::TypeError)?;
 
-    // Stage 4: Lower to TIR (SSA form)
+    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Stage 5: Generate DTAL
+    // Generate DTAL
     let mut dtal_program = if bare_metal {
         crate::backend::codegen::codegen_program_with_target(&tir, true)
     } else {
         codegen_program(&tir)
     };
 
-    // Stage 5.5: Optimize (if enabled)
+    // Optimise (if enabled)
     if let Some(opt_config) = opt_config
         && opt_config.any_enabled()
     {
         optimize_program(&mut dtal_program, opt_config);
     }
 
-    // Stage 6: Emit text
+    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(VerboseOutput {
@@ -414,8 +397,7 @@ pub fn compile_verbose_configured<'src>(
 
 /// Compile source code and report errors with source context
 ///
-/// This is a convenience function that prints pretty error messages
-/// when compilation fails.
+/// Prints pretty error messages when compilation fails.
 ///
 /// # Arguments
 ///

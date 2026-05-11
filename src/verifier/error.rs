@@ -1,17 +1,13 @@
-//! Verification error types
-//!
-//! This module defines error types for the DTAL verifier with
-//! detailed diagnostics for debugging verification failures.
+//! Verification error types for the DTAL verifier.
 
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use std::fmt;
 
-/// Verification error
+/// Error emitted while verifying DTAL.
 #[derive(Debug)]
 pub enum VerifyError {
-    /// Type annotation doesn't match actual value
     TypeMismatch {
         block: String,
         instr_desc: String,
@@ -19,20 +15,16 @@ pub enum VerifyError {
         actual: DtalType,
     },
 
-    /// Register used before definition
     UndefinedRegister { reg: Reg, block: String },
 
-    /// Register used after its owned value was consumed by move/drop
     ConsumedRegister { reg: Reg, block: String },
 
-    /// Constraint cannot be proven from context
     UnprovableConstraint {
         constraint: Constraint,
         context: Vec<Constraint>,
         block: String,
     },
 
-    /// Type states incompatible at join point
     JoinMismatch {
         block: String,
         reg: Reg,
@@ -41,14 +33,12 @@ pub enum VerifyError {
         from_block: String,
     },
 
-    /// Singleton type value mismatch
     SingletonMismatch {
         block: String,
         expected_value: i128,
         actual_value: i128,
     },
 
-    /// Binary operation type error
     BinOpTypeMismatch {
         block: String,
         op: String,
@@ -56,20 +46,16 @@ pub enum VerifyError {
         rhs_type: DtalType,
     },
 
-    /// Return type doesn't match function signature
     ReturnTypeMismatch {
         function: String,
         expected: DtalType,
         actual: DtalType,
     },
 
-    /// Function not found
     UnknownFunction { name: String },
 
-    /// Block not found
     UnknownBlock { label: String },
 
-    /// Bounds check failed for memory access
     BoundsCheckFailed {
         block: String,
         instr_desc: String,
@@ -77,14 +63,12 @@ pub enum VerifyError {
         context: Vec<Constraint>,
     },
 
-    /// Postcondition not provable at return
     PostconditionFailed {
         function: String,
         constraint: Constraint,
         context: Vec<Constraint>,
     },
 
-    /// Precondition not provable at call site
     PreconditionFailed {
         block: String,
         callee: String,
@@ -92,17 +76,15 @@ pub enum VerifyError {
         context: Vec<Constraint>,
     },
 
-    /// Arithmetic overflow on i64-typed operation
     ArithmeticOverflow {
         block: String,
         op: String,
         context: Vec<Constraint>,
     },
 
-    /// Internal error (should not happen)
+    // Should not happen
     InternalError { msg: String },
 
-    /// Ownership rule violated
     OwnershipViolation {
         block: String,
         instr_desc: String,
