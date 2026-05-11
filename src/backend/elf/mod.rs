@@ -452,7 +452,7 @@ pub fn generate_baremetal_elf(encoded: &EncodedProgram, entry: &str) -> Vec<u8> 
     // Patch the bootstrap's `call main` placeholder
     if let Some(&main_offset) = symbols.get(entry) {
         let call_addr = BOOTSTRAP_CALL_PATCH_OFFSET;
-        let rel = (main_offset as i64) - (call_addr as i64 + 4);
+        let rel = (main_offset as i64) - (call_addr as i64 + 5);
         code[call_addr + 1..call_addr + 5].copy_from_slice(&(rel as i32).to_le_bytes());
     }
 
@@ -529,6 +529,7 @@ pub fn generate_baremetal_elf(encoded: &EncodedProgram, entry: &str) -> Vec<u8> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::runtime;
 
     #[test]
     fn test_elf_header_size() {
@@ -597,5 +598,35 @@ mod tests {
         // The original code should be present (after startup wrapper)
         let code_section = &elf[header_size..];
         assert!(code_section.windows(2).any(|w| w == [0x0F, 0x05])); // syscall in startup
+    }
+
+    #[test]
+    fn test_baremetal_bootstrap_call_targets_main_start() {
+        let encoded = EncodedProgram {
+            code: vec![0x55, 0x48, 0x89, 0xE5, 0xC3],
+            symbols: {
+                let mut s = HashMap::new();
+                s.insert("main".to_string(), 0);
+                s
+            },
+            relocations: vec![],
+        };
+
+        let elf = generate_baremetal_elf(&encoded, "main");
+        let header_size = ELF32_EHDR_SIZE as usize + ELF32_PHDR_SIZE as usize;
+        let code = &elf[header_size..];
+        let runtime_size = runtime::runtime_code().len();
+        let expected_main_offset = bootstrap_blob().len() + runtime_size;
+
+        assert_eq!(code[BOOTSTRAP_CALL_PATCH_OFFSET], 0xE8);
+        let rel = i32::from_le_bytes(
+            code[BOOTSTRAP_CALL_PATCH_OFFSET + 1..BOOTSTRAP_CALL_PATCH_OFFSET + 5]
+                .try_into()
+                .unwrap(),
+        );
+        let actual_target = (BOOTSTRAP_CALL_PATCH_OFFSET as i64 + 5 + rel as i64) as usize;
+
+        assert_eq!(actual_target, expected_main_offset);
+        assert_eq!(code[actual_target], 0x55);
     }
 }
