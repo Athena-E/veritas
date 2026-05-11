@@ -1,38 +1,49 @@
-//! x86-64 Instruction Definitions
+//! x86-64 instruction definitions.
 //!
-//! This module defines the x86-64 instruction set used as the target for
-//! DTAL lowering.
+//! The backend lowers DTAL into this small instruction IR before machine-code
+//! encoding.
+//!
+//! # Example
+//!
+//! ```text
+//! Label("main")
+//! Push rbp
+//! MovRR rbp, rsp
+//! ...
+//! Ret
+//! ```
+//!
+//! # Design Notes
+//!
+//! This IR models only the instruction subset the backend emits. Pseudo
+//! instructions such as labels are resolved by
+//! [`crate::backend::x86_64::encode`] before bytes are written.
+//!
+//! # Related Modules
+//!
+//! [`crate::backend::x86_64::regs`] defines register metadata, and
+//! [`crate::backend::x86_64::lower`] emits this IR from DTAL.
 
 use super::regs::X86Reg;
 use std::fmt;
 
-/// Condition codes for conditional jumps
+/// Condition codes for conditional jumps and `setcc`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Condition {
-    /// Equal (ZF=1)
-    E,
-    /// Not Equal (ZF=0)
-    Ne,
-    /// Less Than (SF!=OF)
-    L,
-    /// Less or Equal (ZF=1 or SF!=OF)
-    Le,
-    /// Greater Than (ZF=0 and SF=OF)
-    G,
-    /// Greater or Equal (SF=OF)
-    Ge,
-    /// Below (unsigned less than, CF=1)
-    B,
-    /// Below or Equal (unsigned, CF=1 or ZF=1)
-    Be,
-    /// Above (unsigned greater than, CF=0 and ZF=0)
-    A,
-    /// Above or Equal (unsigned, CF=0)
-    Ae,
+    E,  // Equal (ZF=1)
+    Ne, // Not Equal (ZF=0)
+    L,  // Less Than (SF!=OF)
+    Le, // Less or Equal (ZF=1 or SF!=OF)
+    G,  // Greater Than (ZF=0 and SF=OF)
+    Ge, // Greater or Equal (SF=OF)
+    B,  // Below (unsigned less than, CF=1)
+    Be, // Below or Equal (unsigned, CF=1 or ZF=1)
+    A,  // Above (unsigned greater than, CF=0 and ZF=0)
+    Ae, // Above or Equal (unsigned, CF=0)
 }
 
 impl Condition {
-    /// Get the condition code byte for Jcc instructions
+    /// Return the opcode extension byte for a near `Jcc`.
     pub fn cc_byte(self) -> u8 {
         match self {
             Condition::E => 0x84,  // JE/JZ
@@ -48,7 +59,7 @@ impl Condition {
         }
     }
 
-    /// Get the condition code byte for SETcc instructions (0x0F 0x9x)
+    /// Return the opcode extension byte for `SETcc`.
     pub fn setcc_byte(self) -> u8 {
         match self {
             Condition::E => 0x94,  // sete
@@ -64,7 +75,7 @@ impl Condition {
         }
     }
 
-    /// Negate the condition
+    /// Return the logical negation of this condition.
     pub fn negate(self) -> Condition {
         match self {
             Condition::E => Condition::Ne,
@@ -99,19 +110,17 @@ impl fmt::Display for Condition {
     }
 }
 
-/// Memory operand
+/// x86-64 base/index/displacement memory operand.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemOperand {
-    /// Base register
     pub base: X86Reg,
-    /// Optional index register with scale
-    pub index: Option<(X86Reg, u8)>, // (reg, scale: 1, 2, 4, or 8)
-    /// Displacement
+    /// Optional `(index register, scale)` pair.
+    pub index: Option<(X86Reg, u8)>,
     pub disp: i32,
 }
 
 impl MemOperand {
-    /// Create a simple base + displacement operand
+    /// Create a `base + displacement` memory operand.
     pub fn base_disp(base: X86Reg, disp: i32) -> Self {
         Self {
             base,
@@ -120,7 +129,7 @@ impl MemOperand {
         }
     }
 
-    /// Create a base + index * scale + displacement operand
+    /// Create a `base + index * scale + displacement` memory operand.
     pub fn base_index_disp(base: X86Reg, index: X86Reg, scale: u8, disp: i32) -> Self {
         Self {
             base,
@@ -153,141 +162,221 @@ impl fmt::Display for MemOperand {
     }
 }
 
-/// x86-64 Instructions
+/// x86-64 instruction subset used by the backend.
 #[derive(Clone, Debug)]
 pub enum X86Instr {
-    // === Data Movement ===
-    /// mov reg, reg
-    MovRR { dst: X86Reg, src: X86Reg },
-    /// mov reg, imm64
-    MovRI { dst: X86Reg, imm: i64 },
-    /// mov reg, [mem]
-    MovRM { dst: X86Reg, src: MemOperand },
-    /// mov [mem], reg
-    MovMR { dst: MemOperand, src: X86Reg },
-    /// mov [mem], imm32 (sign-extended)
-    MovMI { dst: MemOperand, imm: i32 },
+    // Data Movement
+    MovRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    MovRI {
+        dst: X86Reg,
+        imm: i64,
+    },
+    MovRM {
+        dst: X86Reg,
+        src: MemOperand,
+    },
+    MovMR {
+        dst: MemOperand,
+        src: X86Reg,
+    },
+    MovMI {
+        dst: MemOperand,
+        imm: i32,
+    },
 
-    /// lea reg, [mem]
-    Lea { dst: X86Reg, src: MemOperand },
+    Lea {
+        dst: X86Reg,
+        src: MemOperand,
+    },
 
-    // === Arithmetic ===
-    /// add reg, reg
-    AddRR { dst: X86Reg, src: X86Reg },
-    /// add reg, imm32
-    AddRI { dst: X86Reg, imm: i32 },
-    /// add reg, [mem]
-    AddRM { dst: X86Reg, src: MemOperand },
+    // Arithmetic
+    AddRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    AddRI {
+        dst: X86Reg,
+        imm: i32,
+    },
+    AddRM {
+        dst: X86Reg,
+        src: MemOperand,
+    },
 
-    /// sub reg, reg
-    SubRR { dst: X86Reg, src: X86Reg },
-    /// sub reg, imm32
-    SubRI { dst: X86Reg, imm: i32 },
-    /// sub reg, [mem]
-    SubRM { dst: X86Reg, src: MemOperand },
+    SubRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    SubRI {
+        dst: X86Reg,
+        imm: i32,
+    },
+    SubRM {
+        dst: X86Reg,
+        src: MemOperand,
+    },
 
-    /// imul reg, reg (signed multiply)
-    ImulRR { dst: X86Reg, src: X86Reg },
-    /// imul reg, reg, imm32
-    ImulRRI { dst: X86Reg, src: X86Reg, imm: i32 },
+    /// Signed multiply.
+    ImulRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    ImulRRI {
+        dst: X86Reg,
+        src: X86Reg,
+        imm: i32,
+    },
 
-    /// cqo (sign-extend rax into rdx:rax for idiv)
+    /// Sign-extend RAX into RDX:RAX for `idiv`.
     Cqo,
 
-    /// idiv reg (signed divide rdx:rax by reg, quotient in rax)
-    IdivR { src: X86Reg },
+    /// Signed divide RDX:RAX by `src`; quotient is written to RAX.
+    IdivR {
+        src: X86Reg,
+    },
 
-    /// neg reg (two's complement negate)
-    Neg { dst: X86Reg },
+    /// Two's-complement negation.
+    Neg {
+        dst: X86Reg,
+    },
 
-    // === Comparison ===
-    /// cmp reg, reg
-    CmpRR { lhs: X86Reg, rhs: X86Reg },
-    /// cmp reg, imm32
-    CmpRI { lhs: X86Reg, imm: i32 },
-    /// cmp reg, [mem]
-    CmpRM { lhs: X86Reg, rhs: MemOperand },
+    // Comparison
+    CmpRR {
+        lhs: X86Reg,
+        rhs: X86Reg,
+    },
+    CmpRI {
+        lhs: X86Reg,
+        imm: i32,
+    },
+    CmpRM {
+        lhs: X86Reg,
+        rhs: MemOperand,
+    },
 
-    /// test reg, reg (AND without storing result)
-    TestRR { lhs: X86Reg, rhs: X86Reg },
-    /// test reg, imm32
-    TestRI { lhs: X86Reg, imm: i32 },
+    TestRR {
+        lhs: X86Reg,
+        rhs: X86Reg,
+    },
+    TestRI {
+        lhs: X86Reg,
+        imm: i32,
+    },
 
-    /// setcc r8 + zero-extend (set byte based on condition, zero-extend to 64-bit)
-    SetCC { dst: X86Reg, cond: Condition },
+    /// Set a byte from a condition and zero-extend to 64 bits.
+    SetCC {
+        dst: X86Reg,
+        cond: Condition,
+    },
 
-    // === Logical ===
-    /// and reg, reg
-    AndRR { dst: X86Reg, src: X86Reg },
-    /// and reg, imm32
-    AndRI { dst: X86Reg, imm: i32 },
+    // Logical
+    AndRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    AndRI {
+        dst: X86Reg,
+        imm: i32,
+    },
 
-    /// or reg, reg
-    OrRR { dst: X86Reg, src: X86Reg },
-    /// or reg, imm32
-    OrRI { dst: X86Reg, imm: i32 },
+    OrRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    OrRI {
+        dst: X86Reg,
+        imm: i32,
+    },
 
-    /// xor reg, reg
-    XorRR { dst: X86Reg, src: X86Reg },
-    /// xor reg, imm32
-    XorRI { dst: X86Reg, imm: i32 },
+    XorRR {
+        dst: X86Reg,
+        src: X86Reg,
+    },
+    XorRI {
+        dst: X86Reg,
+        imm: i32,
+    },
 
-    /// not reg
-    Not { dst: X86Reg },
+    /// Bitwise not.
+    Not {
+        dst: X86Reg,
+    },
 
-    /// shl reg, cl (shift left by count in CL)
-    ShlCl { dst: X86Reg },
-    /// shr reg, cl (shift right by count in CL)
-    ShrCl { dst: X86Reg },
-    /// shl reg, imm8 (shift left by immediate)
-    ShlRI { dst: X86Reg, imm: u8 },
-    /// shr reg, imm8 (shift right by immediate)
-    ShrRI { dst: X86Reg, imm: u8 },
+    /// Shift left by the count in CL.
+    ShlCl {
+        dst: X86Reg,
+    },
+    /// Shift right by the count in CL.
+    ShrCl {
+        dst: X86Reg,
+    },
+    ShlRI {
+        dst: X86Reg,
+        imm: u8,
+    },
+    ShrRI {
+        dst: X86Reg,
+        imm: u8,
+    },
 
-    // === Control Flow ===
-    /// jmp label (unconditional)
-    Jmp { target: String },
-    /// jmp rel32 (offset known)
-    JmpRel { offset: i32 },
+    // Control Flow
+    Jmp {
+        target: String,
+    },
+    JmpRel {
+        offset: i32,
+    },
 
-    /// jcc label (conditional)
-    Jcc { cond: Condition, target: String },
-    /// jcc rel32 (offset known)
-    JccRel { cond: Condition, offset: i32 },
+    Jcc {
+        cond: Condition,
+        target: String,
+    },
+    JccRel {
+        cond: Condition,
+        offset: i32,
+    },
 
-    /// call label
-    Call { target: String },
-    /// call rel32 (offset known)
-    CallRel { offset: i32 },
+    Call {
+        target: String,
+    },
+    CallRel {
+        offset: i32,
+    },
 
-    /// ret
     Ret,
 
-    // === Stack ===
-    /// push reg
-    Push { src: X86Reg },
-    /// push imm32
-    PushI { imm: i32 },
+    // Stack
+    Push {
+        src: X86Reg,
+    },
+    PushI {
+        imm: i32,
+    },
 
-    /// pop reg
-    Pop { dst: X86Reg },
+    Pop {
+        dst: X86Reg,
+    },
 
-    // === System ===
-    /// syscall
+    // System
     Syscall,
 
-    // === Port I/O ===
-    /// in al, dx (read byte from port in DX to AL)
+    // Port I/O
+    // Read a byte from the port in DX into AL.
     InAlDx,
-    /// out dx, al (write byte from AL to port in DX)
+    // Write the byte in AL to the port in DX.
     OutDxAl,
 
-    // === Pseudo-instructions (resolved before encoding) ===
-    /// Label definition
-    Label { name: String },
+    // Pseudo-instructions (resolved before encoding)
+    Label {
+        name: String,
+    },
 
-    /// Comment (for debugging output)
-    Comment { text: String },
+    Comment {
+        text: String,
+    },
 }
 
 impl fmt::Display for X86Instr {
@@ -366,14 +455,14 @@ impl fmt::Display for X86Instr {
     }
 }
 
-/// A sequence of x86-64 instructions forming a function
+/// Sequence of x86-64 instructions forming one function.
 #[derive(Clone, Debug)]
 pub struct X86Function {
     pub name: String,
     pub instructions: Vec<X86Instr>,
 }
 
-/// A complete x86-64 program
+/// Complete x86-64 program.
 #[derive(Clone, Debug)]
 pub struct X86Program {
     pub functions: Vec<X86Function>,

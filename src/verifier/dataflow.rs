@@ -1,4 +1,41 @@
 //! Forward dataflow analysis for DTAL type states.
+//!
+//! This fallback analysis computes block entry states for DTAL that does not
+//! yet declare explicit block states. It also carries branch-refined
+//! constraints along individual CFG edges.
+//!
+//! # Fixed Point
+//!
+//! ```text
+//! entry state
+//!    |
+//!    v
+//! block transfer -> edge states
+//!    |                 |
+//!    `---- join <------`
+//!          |
+//!          v
+//! repeat until stable
+//! ```
+//!
+//! # Design Notes
+//!
+//! Declared block states are preferred when available because they make joins
+//! explicit and easier to audit. This module exists for DTAL without those
+//! declarations and therefore computes the least common state accepted by all
+//! predecessors. Branch constraints are stored per edge so a taken branch can
+//! prove facts that are not valid on the fallthrough edge.
+//!
+//! # Errors
+//!
+//! Analysis returns [`VerifyError`] when instruction transfer fails, when
+//! predecessor states cannot be joined, or when the fixed point exposes an
+//! invalid return obligation.
+//!
+//! # Related Modules
+//!
+//! The `checker` module performs validating instruction derivation; this module
+//! mirrors the type effects needed for state propagation.
 
 #![allow(clippy::result_large_err)]
 
@@ -10,7 +47,7 @@ use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, nega
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
 
-/// Type-state dataflow result.
+/// Entry, exit, edge, and predecessor state computed for a function.
 #[allow(dead_code)]
 pub struct DataflowResult {
     /// Type state at entry of each block.
@@ -24,6 +61,11 @@ pub struct DataflowResult {
 }
 
 /// Compute block entry and exit states for a function.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] if transfer or join logic discovers an invalid DTAL
+/// state while computing the fixed point.
 pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyError> {
     let predecessors = compute_predecessors(func);
 

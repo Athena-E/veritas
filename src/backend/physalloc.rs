@@ -1,20 +1,42 @@
-//! Physical Allocation Pass
+//! Physical allocation for DTAL.
 //!
-//! Transforms a virtual-register DTAL program into a physically-allocated DTAL
-//! program by applying register allocation results. The output uses only physical
-//! registers and explicit stack spill/reload instructions.
+//! This pass applies register-allocation results to virtual-register DTAL,
+//! producing physical-register DTAL with explicit spill loads and stores. The
+//! pass is intentionally untrusted: the DTAL verifier checks the allocated
+//! output before code emission.
 //!
-//! This pass is **untrusted** — the DTAL verifier checks the output independently.
-//! If register allocation is incorrect (conflicting assignments, missing spills),
-//! the verifier catches it.
+//! # Pipeline Position
 //!
-//! ## Transformations
+//! ```text
+//! DTAL with virtual registers
+//!        |
+//!        v
+//! liveness + register allocation
+//!        |
+//!        v
+//! DTAL with physical registers and spill slots
+//!        |
+//!        v
+//! verifier -> encoder
+//! ```
 //!
-//! - Virtual registers → physical registers or spill slots
-//! - `BinOp::Div/Mod` → `mov rax, lhs; cqo; idiv rhs; mov dst, rax/rdx`
-//! - `Call` → push caller-saved; call; pop caller-saved
-//! - Function entry → `Prologue` + parameter moves
-//! - Function return → move result to rax + `Epilogue`
+//! # Design Notes
+//!
+//! Spill code is emitted as DTAL, not directly as x86-64, so the verifier can
+//! still check the resulting type and ownership state. Function contracts are
+//! remapped from virtual parameters to ABI physical registers after allocation.
+//!
+//! # Error Behavior
+//!
+//! Dead virtual registers may be skipped when they have no physical location.
+//! A live unallocated virtual register is treated as an allocator invariant
+//! violation and panics.
+//!
+//! # Related Modules
+//!
+//! - [`crate::backend::regalloc`] computes register and stack locations.
+//! - [`crate::backend::direct_encode`] encodes the verified physical DTAL.
+//! - [`crate::verifier`] rechecks the transformed program.
 
 use crate::backend::dtal::instr::{
     BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
@@ -26,7 +48,7 @@ use crate::backend::regalloc::liveness::LivenessAnalysis;
 use crate::backend::x86_64::regs::{Location, X86Reg};
 use std::collections::HashSet;
 
-/// Map from x86 register back to DTAL PhysicalReg
+/// Map an x86 register to the corresponding DTAL physical register.
 fn x86_to_dtal_reg(x86: X86Reg) -> Reg {
     let preg = match x86 {
         X86Reg::Rdi => PhysicalReg::R0,
@@ -118,8 +140,7 @@ fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
     })
 }
 
-/// Resolve a virtual register to its physical location.
-/// Returns either a physical Reg or a stack offset for spilled regs.
+/// Physical location assigned to a virtual register.
 enum PhysLoc {
     Reg(Reg),
     Spill(i32),
@@ -137,7 +158,7 @@ fn resolve(vreg: VirtualReg, alloc: &AllocationResult) -> PhysLoc {
     try_resolve(vreg, alloc).unwrap_or_else(|| panic!("Unallocated virtual register v{}", vreg.0))
 }
 
-/// Resolve a Reg (virtual or physical) to a PhysLoc.
+/// Resolve a virtual or physical register to a physical location.
 fn resolve_reg(reg: Reg, alloc: &AllocationResult) -> PhysLoc {
     match reg {
         Reg::Virtual(vreg) => resolve(vreg, alloc),
@@ -145,7 +166,7 @@ fn resolve_reg(reg: Reg, alloc: &AllocationResult) -> PhysLoc {
     }
 }
 
-/// Resolve a Reg to Option<PhysLoc> (returns None for dead virtual regs).
+/// Resolve a register, returning `None` for dead virtual registers.
 fn resolve_reg_opt(reg: Reg, alloc: &AllocationResult) -> Option<PhysLoc> {
     match reg {
         Reg::Virtual(vreg) => try_resolve(vreg, alloc),
@@ -167,7 +188,7 @@ fn build_vreg_name_map(alloc: &AllocationResult) -> std::collections::HashMap<St
     map
 }
 
-/// Remap virtual register names in an IndexExpr to physical names.
+/// Remap virtual register names in an index expression.
 fn remap_index_expr(
     expr: &crate::backend::dtal::constraints::IndexExpr,
     name_map: &std::collections::HashMap<String, String>,
@@ -206,7 +227,7 @@ fn remap_index_expr(
     }
 }
 
-/// Remap virtual register names in a Constraint.
+/// Remap virtual register names in a constraint.
 fn remap_constraint(
     c: &crate::backend::dtal::constraints::Constraint,
     name_map: &std::collections::HashMap<String, String>,
@@ -271,7 +292,7 @@ fn remap_constraint(
     }
 }
 
-/// Remap virtual register names in constraint assertions.
+/// Remap virtual register names in a constraint assertion.
 fn remap_constraint_vars(
     constraint: &crate::backend::dtal::constraints::Constraint,
     alloc: &AllocationResult,
@@ -280,7 +301,7 @@ fn remap_constraint_vars(
     remap_constraint(constraint, &name_map)
 }
 
-/// Remap virtual register names within a DtalType's constraints.
+/// Remap virtual register names within type constraints.
 fn remap_constraint_vars_in_type(ty: &DtalType, alloc: &AllocationResult) -> DtalType {
     let name_map = build_vreg_name_map(alloc);
     remap_type(ty, &name_map)
@@ -409,11 +430,7 @@ fn pick_scratch(avoid: &[Reg]) -> Reg {
     RAX
 }
 
-/// Physically allocate an entire DTAL program.
-///
-/// Runs register allocation on each function, then applies the allocation
-/// to produce physical DTAL. Runtime stub functions (empty blocks) are
-/// passed through unchanged.
+/// Apply physical allocation to every non-stub function in a DTAL program.
 pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
     use crate::backend::regalloc::allocator::{GraphColoringAllocator, LinearScanAllocator};
 
@@ -421,7 +438,6 @@ pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
 
     for func in &program.functions {
         if func.blocks.is_empty() {
-            // Runtime stub — pass through unchanged
             functions.push(func.clone());
             continue;
         }
@@ -444,11 +460,8 @@ pub fn physically_allocate(program: &DtalProgram) -> DtalProgram {
             gc.allocate(func)
         };
 
-        // The hosted region pointer lives in the reserved DTAL register R12
-        // (x86 R15). When a function uses that register explicitly, it must be
-        // preserved across calls just like any other callee-saved register.
-        // The virtual allocator excludes R15 from general allocation in this
-        // case, but still needs the save/restore record for prologue/epilogue.
+        // R12/R15 is reserved for the hosted region pointer and must be saved
+        // when used explicitly.
         if function_uses_reserved_region_reg(func)
             && !allocation.callee_saved_used.contains(&X86Reg::R15)
         {
@@ -470,7 +483,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
         .map(|x86| x86_to_dtal_reg(*x86))
         .collect();
 
-    // Collect caller-saved registers that need save/restore around calls.
     let caller_saved_to_save: Vec<Reg>;
     {
         let mut cs_set: std::collections::BTreeSet<X86Reg> = std::collections::BTreeSet::new();
@@ -485,22 +497,12 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
         caller_saved_to_save = cs_set.iter().map(|x86| x86_to_dtal_reg(*x86)).collect();
     }
 
-    // Check if function uses alloca (needs extra frame space for caller-saved saves)
-    // let has_alloca = func.blocks.iter().any(|b| {
-    //     b.instructions
-    //         .iter()
-    //         .any(|i| matches!(i, DtalInstr::Alloca { .. }))
-    // });
-
-    // Count unique caller-saved registers used (for alloca save slots)
     let caller_save_slots = caller_saved_to_save.len();
     let liveness = LivenessAnalysis::analyze(func);
 
-    // Compute frame size (spill slots + caller-save slots for alloca, 16-byte aligned)
     let spill_size = ((alloc.spill_slots + caller_save_slots) * 8) as u32;
     let callee_saved_size = (callee_saved_regs.len() * 8) as u32;
-    // After push rbp (8) + callee saves (N*8), we need frame_size such that
-    // total is 16-byte aligned
+    // Keep the stack 16-byte aligned after `push rbp` and callee saves.
     let unaligned = 8 + callee_saved_size + spill_size;
     let frame_size = if unaligned.is_multiple_of(16) {
         spill_size
@@ -513,15 +515,13 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     for (block_idx, block) in func.blocks.iter().enumerate() {
         let mut instrs = Vec::new();
 
-        // First block: emit prologue and parameter moves
         if block_idx == 0 {
             instrs.push(DtalInstr::Prologue {
                 frame_size,
                 callee_saved: callee_saved_regs.clone(),
             });
 
-            // Emit type annotations for ABI parameter registers so the verifier
-            // knows their types before the parameter moves.
+            // ABI parameter registers need types before parameter moves.
             let param_regs_list = PhysicalReg::param_regs();
             for (i, (_param_reg, param_ty)) in func.params.iter().enumerate() {
                 if i < param_regs_list.len() {
@@ -532,11 +532,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 }
             }
 
-            // Move parameters from ABI argument registers to allocated locations.
-            // Must handle cycles: if param 0 (in rdi) is allocated to rsi, and
-            // param 1 (in rsi) is allocated to rdi, sequential moves would clobber.
-            // Strategy: first move any params whose destination conflicts with
-            // another param's source to scratch (R11), then do the rest.
+            // Break parameter-move cycles with R11.
             let param_regs = PhysicalReg::param_regs();
             let mut param_moves: Vec<(
                 Reg,
@@ -553,7 +549,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 if i < param_regs.len()
                     && let Reg::Virtual(vreg) = param_reg
                 {
-                    // Skip dead parameters (not allocated because never used)
                     if let Some(dst_loc) = try_resolve(*vreg, alloc) {
                         let abi_reg = Reg::Physical(param_regs[i]);
                         param_moves.push((abi_reg, dst_loc, param_ty.clone(), *param_kind));
@@ -561,10 +556,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 }
             }
 
-            // Detect if any source reg is the same as another move's destination reg.
-            // If so, save it to R11 first. Simple approach: move all params to their
-            // allocated location, but if dst is a register that's also a param source,
-            // save that source to R11 first.
             let dst_regs: Vec<Option<Reg>> = param_moves
                 .iter()
                 .map(|(_, loc, _, _)| match loc {
@@ -573,8 +564,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                 })
                 .collect();
 
-            // Check for conflicts: src_i == dst_j for some j > i
-            let mut saved_to_scratch: Option<(Reg, Reg)> = None; // (original_src, scratch)
+            let mut saved_to_scratch: Option<(Reg, Reg)> = None;
             for (i, (src, _, ty, param_kind)) in param_moves.iter().enumerate() {
                 for (j, dst_r) in dst_regs.iter().enumerate() {
                     if j != i
@@ -582,7 +572,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                         && *src == *dr
                         && saved_to_scratch.is_none()
                     {
-                        // Save src to scratch before it gets clobbered
                         match param_kind {
                             crate::common::ownership::ParameterKind::OwnedValue => {
                                 instrs.push(DtalInstr::MoveOwned {
@@ -627,7 +616,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             }
         }
 
-        // Translate each instruction
         let live_out = liveness
             .blocks
             .get(&block.label)
@@ -657,7 +645,6 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
         });
     }
 
-    // Convert function params to physical registers
     let phys_params: Vec<(Reg, DtalType)> = func
         .params
         .iter()
@@ -667,17 +654,13 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
             let reg = if i < param_regs.len() {
                 Reg::Physical(param_regs[i])
             } else {
-                Reg::Physical(PhysicalReg::R0) // placeholder for stack params
+                Reg::Physical(PhysicalReg::R0)
             };
             (reg, ty.clone())
         })
         .collect();
 
-    // Remap precondition/postcondition variable names from virtual param names
-    // to ABI parameter register names (R0, R1, ...). The preconditions reference
-    // the callee's virtual param registers; we map them to the ABI registers
-    // because the verifier's call-site check substitutes callee param names
-    // with ABI param names.
+    // Function contracts refer to ABI parameter registers after allocation.
     let mut precond_map = std::collections::HashMap::new();
     let param_regs_for_precond = PhysicalReg::param_regs();
     for (i, (param_reg, _)) in func.params.iter().enumerate() {
@@ -707,7 +690,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
     }
 }
 
-/// Check if a destination register is dead (not allocated).
+/// Check whether a destination register is dead.
 fn is_dead_dst(reg: &Reg, alloc: &AllocationResult) -> bool {
     if let Reg::Virtual(vreg) = reg {
         try_resolve(*vreg, alloc).is_none()
@@ -725,7 +708,7 @@ struct AllocationContext<'a> {
     live_after: Option<&'a HashSet<VirtualReg>>,
 }
 
-/// Translate a single virtual-register instruction to physical-register instructions.
+/// Translate one virtual-register instruction to physical DTAL.
 fn allocate_instruction(
     instrs: &mut Vec<DtalInstr>,
     instr: &DtalInstr,
@@ -740,7 +723,6 @@ fn allocate_instruction(
         live_after,
     } = ctx;
 
-    // Skip instructions with dead destinations (register not allocated = never used)
     match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
@@ -777,7 +759,6 @@ fn allocate_instruction(
                     });
                 }
                 PhysLoc::Spill(offset) => {
-                    // Load imm into scratch, then spill
                     instrs.push(DtalInstr::MovImm {
                         dst: R11,
                         imm: *imm,
@@ -800,7 +781,7 @@ fn allocate_instruction(
             let dst_loc = resolve_reg(*dst, alloc);
 
             match (&src_loc, &dst_loc) {
-                (PhysLoc::Reg(s), PhysLoc::Reg(d)) if s == d => {} // nop
+                (PhysLoc::Reg(s), PhysLoc::Reg(d)) if s == d => {}
                 (PhysLoc::Reg(s), PhysLoc::Reg(d)) => {
                     let lowered = match instr {
                         DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
@@ -871,57 +852,54 @@ fn allocate_instruction(
                         });
                     }
                 },
-                (PhysLoc::Spill(src_off), PhysLoc::Spill(dst_off)) => {
-                    // mem-to-mem: use scratch
-                    match instr {
-                        DtalInstr::MoveOwned { .. }
-                        | DtalInstr::AliasBorrow { .. }
-                        | DtalInstr::BorrowMut { .. } => {
-                            instrs.push(DtalInstr::SpillLoad {
-                                dst: RAX,
-                                offset: *src_off,
-                                ty: ty.clone(),
-                            });
-                            let scratch = R11;
-                            let lowered = match instr {
-                                DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
-                                    dst: scratch,
-                                    src: RAX,
-                                    ty: ty.clone(),
-                                },
-                                DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
-                                    dst: scratch,
-                                    src: RAX,
-                                    ty: ty.clone(),
-                                },
-                                DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
-                                    dst: scratch,
-                                    src: RAX,
-                                    ty: ty.clone(),
-                                },
-                                _ => unreachable!(),
-                            };
-                            instrs.push(lowered);
-                            instrs.push(DtalInstr::SpillStore {
-                                src: scratch,
-                                offset: *dst_off,
-                                ty: ty.clone(),
-                            });
-                        }
-                        _ => {
-                            instrs.push(DtalInstr::SpillLoad {
-                                dst: RAX,
-                                offset: *src_off,
-                                ty: ty.clone(),
-                            });
-                            instrs.push(DtalInstr::SpillStore {
+                (PhysLoc::Spill(src_off), PhysLoc::Spill(dst_off)) => match instr {
+                    DtalInstr::MoveOwned { .. }
+                    | DtalInstr::AliasBorrow { .. }
+                    | DtalInstr::BorrowMut { .. } => {
+                        instrs.push(DtalInstr::SpillLoad {
+                            dst: RAX,
+                            offset: *src_off,
+                            ty: ty.clone(),
+                        });
+                        let scratch = R11;
+                        let lowered = match instr {
+                            DtalInstr::MoveOwned { .. } => DtalInstr::MoveOwned {
+                                dst: scratch,
                                 src: RAX,
-                                offset: *dst_off,
                                 ty: ty.clone(),
-                            });
-                        }
+                            },
+                            DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                                dst: scratch,
+                                src: RAX,
+                                ty: ty.clone(),
+                            },
+                            DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                                dst: scratch,
+                                src: RAX,
+                                ty: ty.clone(),
+                            },
+                            _ => unreachable!(),
+                        };
+                        instrs.push(lowered);
+                        instrs.push(DtalInstr::SpillStore {
+                            src: scratch,
+                            offset: *dst_off,
+                            ty: ty.clone(),
+                        });
                     }
-                }
+                    _ => {
+                        instrs.push(DtalInstr::SpillLoad {
+                            dst: RAX,
+                            offset: *src_off,
+                            ty: ty.clone(),
+                        });
+                        instrs.push(DtalInstr::SpillStore {
+                            src: RAX,
+                            offset: *dst_off,
+                            ty: ty.clone(),
+                        });
+                    }
+                },
             }
         }
 
@@ -980,8 +958,7 @@ fn allocate_instruction(
 
             match op {
                 BinaryOp::Div | BinaryOp::Mod => {
-                    // x86 idiv: dividend in rax, sign-extend to rdx:rax, divisor in any reg
-                    // quotient → rax, remainder → rdx
+                    // x86 `idiv` uses rdx:rax and returns quotient/remainder in rax/rdx.
                     emit_load_to(instrs, &rhs_loc, R11, DtalType::Int);
                     emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
                     instrs.push(DtalInstr::Cqo);
@@ -990,7 +967,7 @@ fn allocate_instruction(
                     emit_store_from(instrs, result, &dst_loc, ty.clone());
                 }
                 BinaryOp::Shl | BinaryOp::Shr => {
-                    // x86 shifts require count in CL (low byte of RCX/R3)
+                    // x86 shifts require the count in CL.
                     let r3 = Reg::Physical(PhysicalReg::R3);
                     emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
                     emit_load_to(instrs, &rhs_loc, r3, DtalType::Int);
@@ -1004,7 +981,6 @@ fn allocate_instruction(
                     emit_store_from(instrs, RAX, &dst_loc, ty.clone());
                 }
                 _ => {
-                    // General case: lhs → rax, operate with rhs, store result
                     emit_load_to(instrs, &lhs_loc, RAX, DtalType::Int);
                     emit_load_to(instrs, &rhs_loc, R11, DtalType::Int);
                     instrs.push(DtalInstr::BinOp {
@@ -1035,8 +1011,7 @@ fn allocate_instruction(
         DtalInstr::Cmp { lhs, rhs } => {
             let lhs_loc = resolve_reg(*lhs, alloc);
             let rhs_loc = resolve_reg(*rhs, alloc);
-            // Use the actual allocated registers when possible, so branch
-            // constraints reference the right registers (not scratch).
+            // Prefer allocated registers so branch constraints name stable regs.
             let lhs_reg = match &lhs_loc {
                 PhysLoc::Reg(r) => *r,
                 PhysLoc::Spill(_) => {
@@ -1073,7 +1048,7 @@ fn allocate_instruction(
         }
 
         DtalInstr::SetCC { dst, cond } => {
-            // setcc always goes to rax first (byte register encoding safety)
+            // Route through rax for byte-register encoding.
             instrs.push(DtalInstr::SetCC {
                 dst: RAX,
                 cond: *cond,
@@ -1321,19 +1296,12 @@ fn allocate_instruction(
             } else {
                 caller_saved.to_vec()
             };
-            // Save caller-saved registers BEFORE argument setup.
-            // The argument-setup moves (mov r0, ...; mov r1, ...) have
-            // already been emitted to `instrs`. We need to insert saves
-            // BEFORE those moves to capture the pre-argument values.
-            //
-            // Strategy: find the argument-setup instructions at the tail
-            // of `instrs` (MovReg to R0-R5) and insert pushes before them.
+            // Save caller-saved registers before the already-emitted argument moves.
             let arg_regs: Vec<Reg> = PhysicalReg::param_regs()
                 .iter()
                 .map(|p| Reg::Physical(*p))
                 .collect();
 
-            // Count trailing instructions that are argument moves (MovReg dst=R0..R5)
             let mut arg_move_count = 0;
             for instr in instrs.iter().rev() {
                 match instr {
@@ -1349,12 +1317,10 @@ fn allocate_instruction(
                 }
             }
 
-            // Split: extract the argument moves, insert saves before them
             let split_point = instrs.len() - arg_move_count;
             let arg_moves: Vec<DtalInstr> = instrs.drain(split_point..).collect();
 
-            // Save caller-saved to rbp-relative spill slots (safe with alloca).
-            // These slots are in the frame area allocated by the prologue.
+            // Caller-saved slots live in the prologue-allocated frame.
             for (i, &reg) in regs_to_save.iter().enumerate() {
                 let offset = -(((callee_saved_count + alloc.spill_slots + 1 + i) * 8) as i32);
                 instrs.push(DtalInstr::SpillStore {
@@ -1364,10 +1330,8 @@ fn allocate_instruction(
                 });
             }
 
-            // Re-insert the argument moves
             instrs.extend(arg_moves);
 
-            // Call
             instrs.push(DtalInstr::Call {
                 target: target.clone(),
                 arg_kinds: arg_kinds.clone(),
@@ -1375,35 +1339,16 @@ fn allocate_instruction(
                 ownership: *ownership,
             });
 
-            // Return value is in rax (LR). Move to the destination register
-            // for the virtual reg that receives the call result.
-            // THEN restore caller-saved (so r0 gets its pre-call value back,
-            // NOT the return value). The return value is now in its destination reg.
-            //
-            // The DTAL instruction after Call is: MovReg { dst: vN, src: r0 }
-            // In physical DTAL: mov <dest>, r0. But we need to use lr (rax).
-            // So emit: mov r0, lr (return val to r0 temporarily)
-            //          mov <dest>, r0 (will be done by next instruction)
-            //
-            // Instead: skip r0 in restore, let return value flow through.
-            // Restore all EXCEPT r0, then let the next MovReg pick up r0=return val.
+            // Preserve the return value in R0 for the following virtual result move.
             let r0_reg = Reg::Physical(PhysicalReg::R0);
-            // First: move return value from rax to r0 (rdi)
             instrs.push(DtalInstr::MovReg {
                 dst: r0_reg,
                 src: RAX,
                 ty: return_ty.clone(),
             });
-            // The DTAL's MovReg { dst: vN, src: r0 } will pick up the return value.
-            // After that, we need to restore r0 from spill. But we can't know here
-            // when the return value has been consumed.
-            //
-            // Correct approach: restore everything EXCEPT r0 now, and accept that
-            // r0's pre-call value is lost. The register allocator should have placed
-            // anything that needs to survive the call in a callee-saved register.
             for (i, &reg) in regs_to_save.iter().enumerate() {
                 if reg == r0_reg {
-                    continue; // r0 now holds return value — don't overwrite
+                    continue;
                 }
                 let offset = -(((callee_saved_count + alloc.spill_slots + 1 + i) * 8) as i32);
                 instrs.push(DtalInstr::SpillLoad {
@@ -1415,9 +1360,7 @@ fn allocate_instruction(
         }
 
         DtalInstr::Ret => {
-            // Move return value to rax (x86 ABI). Unit carries no payload, so
-            // materialize a dummy scalar and retag it instead of reading a
-            // potentially-consumed source register.
+            // Unit returns carry no payload; materialize and retag a dummy scalar.
             if matches!(func.return_type, DtalType::Unit) {
                 instrs.push(DtalInstr::MovImm {
                     dst: RAX,
@@ -1441,8 +1384,6 @@ fn allocate_instruction(
                     ty: func.return_type.clone(),
                 });
             }
-            // Epilogue must restore ALL saved registers (callee-saved + caller-saved
-            // that were saved in the prologue for functions with calls)
             instrs.push(DtalInstr::Epilogue {
                 callee_saved: callee_saved.to_vec(),
             });
@@ -1482,7 +1423,6 @@ fn allocate_instruction(
 
         DtalInstr::Alloca { dst, size, ty } => {
             let dst_loc = resolve_reg(*dst, alloc);
-            // Alloca stays as-is with physical dst
             match dst_loc {
                 PhysLoc::Reg(r) => {
                     instrs.push(DtalInstr::Alloca {
@@ -1502,8 +1442,6 @@ fn allocate_instruction(
             }
         }
 
-        // Pass through type annotations and constraint assertions with
-        // virtual register names remapped to their physical counterparts.
         DtalInstr::TypeAnnotation { reg, ty } => {
             if let Some(loc) = resolve_reg_opt(*reg, alloc)
                 && let PhysLoc::Reg(phys_reg) = loc
@@ -1521,7 +1459,6 @@ fn allocate_instruction(
             });
         }
 
-        // Port I/O: pass through with register resolution
         DtalInstr::PortIn { dst, port } => {
             let port_loc = resolve_reg(*port, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
@@ -1544,7 +1481,6 @@ fn allocate_instruction(
             });
         }
 
-        // Physical instructions should not appear in virtual DTAL input
         DtalInstr::Cqo
         | DtalInstr::Idiv { .. }
         | DtalInstr::SpillStore { .. }
@@ -1610,7 +1546,7 @@ fn main() -> int {
         println!("=== Physical DTAL (div/mod) ===\n{}", text);
     }
 
-    /// End-to-end test: compile → physalloc → direct_encode → ELF → execute
+    /// End-to-end test through ELF execution.
     #[test]
     fn test_physalloc_e2e_simple() {
         use crate::backend::direct_encode::encode_physical_dtal;
@@ -1628,7 +1564,6 @@ fn main() -> int {
         let encoded = encode_physical_dtal(&physical);
         let elf = generate_elf(&encoded, "main");
 
-        // Write to temp file and execute
         let path = "/tmp/veritas_physalloc_test";
         std::fs::write(path, &elf).expect("write elf");
         std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o755))

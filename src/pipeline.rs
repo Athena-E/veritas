@@ -1,30 +1,38 @@
-//! Veritas Compiler Pipeline
+//! End-to-end Veritas compilation pipeline.
 //!
-//! This module provides the end-to-end compilation pipeline from source code
-//! to DTAL (Dependently Typed Assembly Language) output.
+//! The pipeline turns source text into tokens, AST, typed AST, TIR, DTAL, and
+//! finally emitted DTAL text. Verbose entry points expose the intermediate
+//! stages for tests and debugging.
 //!
-//! Pipeline Stages:
+//! # Stages
 //!
-//! Source Code (&str)
-//!     │
-//!     v lexer
-//! Tokens (Vec<Spanned<Token>>)
-//!     │
-//!     v parser
-//! AST (Program)
-//!     │
-//!     v typechecker
-//! Typed AST (TProgram)
-//!     │
-//!     v lower
-//! TIR (TirProgram) - SSA form
-//!     │
-//!     v codegen
-//! DTAL (DtalProgram)
-//!     │
-//!     v emit
-//! Output (String)
+//! ```text
+//! source
+//!   -> lexer tokens
+//!   -> parsed AST
+//!   -> typed AST
+//!   -> TIR
+//!   -> DTAL program
+//!   -> emitted DTAL text
+//! ```
 //!
+//! # Design Notes
+//!
+//! Each public entry point resets frontend freshness state before compiling so
+//! repeated calls are deterministic. Optimisation is optional and runs after
+//! DTAL generation, which keeps the default `compile` path close to the source
+//! lowering behavior.
+//!
+//! # Errors
+//!
+//! [`CompileError`] reports the first failed stage: lexing, parsing, or type
+//! checking. Later verifier errors are surfaced by consumers that explicitly
+//! verify emitted DTAL through [`crate::verifier`].
+//!
+//! # Related Modules
+//!
+//! [`crate::frontend`] owns lexing, parsing, and type checking. The backend
+//! stages are implemented under [`crate::backend`].
 
 use crate::backend::optimise::{OptConfig, optimize_program};
 use crate::backend::{codegen_program, emit_program, lower_program};
@@ -39,7 +47,7 @@ fn reset_pipeline_state() {
     reset_fresh_var_counter();
 }
 
-/// Compilation error types
+/// Error from one stage of compilation.
 #[derive(Debug)]
 pub enum CompileError<'src> {
     LexError(String),
@@ -57,13 +65,13 @@ impl<'src> fmt::Display for CompileError<'src> {
     }
 }
 
-/// Result of a successful compilation
+/// DTAL text produced by a successful compilation.
 #[derive(Debug, Clone)]
 pub struct CompileOutput {
     pub dtal: String,
 }
 
-/// Verbose compilation output with all intermediate stages
+/// Compilation output that retains intermediate representations.
 pub struct VerboseOutput<'src> {
     pub tokens: Vec<(String, String)>,
     pub tast: crate::common::tast::TProgram<'src>,
@@ -72,18 +80,12 @@ pub struct VerboseOutput<'src> {
     pub dtal: String,
 }
 
-/// Compile source code to DTAL assembly
+/// Compile source code to emitted DTAL text.
 ///
-/// Main entry point for the compiler pipeline.
+/// # Errors
 ///
-/// # Arguments
-///
-/// * `source` - The source code to compile
-///
-/// # Returns
-///
-/// * `Ok(CompileOutput)` - Successful compilation with DTAL output
-/// * `Err(CompileError)` - Compilation failed at some stage
+/// Returns [`CompileError::LexError`], [`CompileError::ParseError`], or
+/// [`CompileError::TypeError`] depending on the first failed stage.
 ///
 /// # Example
 ///
@@ -139,19 +141,11 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
     Ok(CompileOutput { dtal })
 }
 
-/// Compile source code to DTAL assembly with optimisation
+/// Compile source code to emitted DTAL text with optimisation options.
 ///
-/// This is like `compile` but allows specifying optimisation options.
+/// # Errors
 ///
-/// # Arguments
-///
-/// * `source` - The source code to compile
-/// * `opt_config` - Configuration for optimisation passes
-///
-/// # Returns
-///
-/// * `Ok(CompileOutput)` - Successful compilation with DTAL output
-/// * `Err(CompileError)` - Compilation failed at some stage
+/// Returns [`CompileError`] when lexing, parsing, or type checking fails.
 pub fn compile_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
@@ -205,7 +199,12 @@ pub fn compile_optimized<'src>(
     Ok(CompileOutput { dtal })
 }
 
-/// Compile source code with verbose output, returning all intermediate stages
+/// Compile source code and return all intermediate stages.
+///
+/// # Errors
+///
+/// Returns [`CompileError`] when lexing, parsing, or type checking fails before
+/// all intermediate representations can be produced.
 pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     reset_pipeline_state();
 
@@ -263,7 +262,12 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
     })
 }
 
-/// Compile source code for bare-metal target (no Linux intrinsics)
+/// Compile source code for the bare-metal target without Linux intrinsics.
+///
+/// # Errors
+///
+/// Returns [`CompileError`] when lexing, parsing, or bare-metal type checking
+/// fails.
 pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     use crate::frontend::typechecker::check_program_bare_metal;
 
@@ -309,7 +313,11 @@ pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, Com
     })
 }
 
-/// Compile source code with verbose output and optimisation
+/// Compile source code with verbose output and optimisation.
+///
+/// # Errors
+///
+/// Returns [`CompileError`] when lexing, parsing, or type checking fails.
 pub fn compile_verbose_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
@@ -318,6 +326,11 @@ pub fn compile_verbose_optimized<'src>(
 }
 
 /// Compile source code with explicit target and optimisation options.
+///
+/// # Errors
+///
+/// Returns [`CompileError`] when lexing, parsing, or the selected type-checking
+/// mode fails.
 pub fn compile_verbose_configured<'src>(
     source: &'src str,
     opt_config: Option<&OptConfig>,
@@ -395,19 +408,12 @@ pub fn compile_verbose_configured<'src>(
     })
 }
 
-/// Compile source code and report errors with source context
+/// Compile source code and print source-context errors on failure.
 ///
-/// Prints pretty error messages when compilation fails.
+/// # Errors
 ///
-/// # Arguments
-///
-/// * `filename` - The filename (for error reporting)
-/// * `source` - The source code to compile
-///
-/// # Returns
-///
-/// * `Ok(String)` - The generated DTAL assembly
-/// * `Err(())` - Compilation failed (errors printed to stderr)
+/// Returns `Err(())` after printing a diagnostic for lex, parse, or type
+/// errors.
 #[allow(clippy::result_unit_err)]
 pub fn compile_and_report(filename: &str, source: &str) -> Result<String, ()> {
     match compile(source) {

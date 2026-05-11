@@ -1,13 +1,27 @@
-//! Core types for TIR
+//! Core TIR support types.
 //!
-//! This module defines basic types used throughout the TIR representation.
+//! This module contains block identifiers, block-local type state, and the
+//! operation enums shared by TIR instructions and lowering helpers.
+//!
+//! # Example
+//!
+//! ```text
+//! bb0:
+//!   state = { v0: int, constraints: [v0 >= 0] }
+//! ```
+//!
+//! # Design Notes
+//!
+//! [`RegisterState`] is a lightweight snapshot used while constructing and
+//! lowering TIR. It records facts that should become DTAL annotations; it is
+//! not a substitute for verifier state in [`crate::verifier`].
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::common::types::IType;
 use std::collections::HashMap;
 use std::fmt;
 
-/// Unique identifier for a basic block
+/// Unique basic block identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);
 
@@ -17,7 +31,7 @@ impl fmt::Display for BlockId {
     }
 }
 
-/// Allocator for block IDs
+/// Allocator for block IDs.
 #[derive(Debug, Default)]
 pub struct BlockIdAllocator {
     next_id: u32,
@@ -35,7 +49,7 @@ impl BlockIdAllocator {
     }
 }
 
-/// Register state: mapping from virtual registers to types
+/// Type and constraint state at a point in the TIR CFG.
 #[derive(Clone, Debug, Default)]
 pub struct RegisterState<'src> {
     pub registers: HashMap<VirtualReg, IType<'src>>,
@@ -63,7 +77,7 @@ impl<'src> RegisterState<'src> {
     }
 }
 
-/// Binary operations in TIR
+/// Binary operations in TIR.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
@@ -111,7 +125,7 @@ impl fmt::Display for BinaryOp {
     }
 }
 
-/// Unary operations in TIR
+/// Unary operations in TIR.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     Not,

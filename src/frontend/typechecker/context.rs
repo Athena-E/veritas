@@ -672,7 +672,7 @@ impl<'src> TypingContext<'src> {
         new_ctx
     }
 
-    /// Remove the pointwise proposition for arr_name[idx_val] == ... and any
+    /// Remove the pointwise proposition for `arr_name[idx_val] == ...` and any
     /// quantified propositions over arr_name (since modifying one element
     /// invalidates a universal claim).
     pub fn without_array_element_prop(&self, arr_name: &str, idx_val: i128) -> Self {

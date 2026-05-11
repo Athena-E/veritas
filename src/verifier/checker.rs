@@ -1,4 +1,39 @@
 //! Instruction-level DTAL verification.
+//!
+//! The checker derives post-instruction type and ownership state from each
+//! DTAL instruction. It rejects annotations that disagree with derivation and
+//! records constraints needed by later verifier checks.
+//!
+//! # State Transition
+//!
+//! ```text
+//! (instruction, pre-state)
+//!        |
+//!        v
+//! derive result type + ownership changes
+//!        |
+//!        v
+//! compare explicit annotations and update post-state
+//! ```
+//!
+//! # Design Notes
+//!
+//! The checker does not trust DTAL type annotations. It derives the type that
+//! should result from each instruction, then verifies that any annotation is
+//! compatible under the current constraint context. Ownership is modeled as
+//! explicit object identity so moves, borrows, drops, and joins can be checked
+//! without relying on register names alone.
+//!
+//! # Errors
+//!
+//! Instruction checks return [`VerifyError`] variants for undefined registers,
+//! consumed values, type mismatches, unprovable constraints, failed bounds
+//! checks, contract failures, and ownership violations.
+//!
+//! # Related Modules
+//!
+//! The `dataflow` module uses checker-like derivation for fallback analysis,
+//! and [`crate::verifier::smt`] discharges constraint implications.
 
 #![allow(clippy::result_large_err)]
 
@@ -8,7 +43,13 @@ use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use crate::verifier::error::VerifyError;
 
-/// Verify one instruction and update the type state.
+/// Verify one instruction and update the current type state.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] if the instruction uses invalid operands, violates
+/// ownership state, has an unjustified annotation, or requires an unprovable
+/// constraint.
 pub fn verify_instruction(
     instr: &DtalInstr,
     state: &mut TypeState,

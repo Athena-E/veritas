@@ -7,8 +7,8 @@
 //! # Algorithm
 //!
 //! We use backward dataflow analysis:
-//! - live_in[B] = USE[B] ∪ (live_out[B] - DEF[B])
-//! - live_out[B] = ∪ live_in[S] for all successors S of B
+//! - `live_in[B] = USE[B] ∪ (live_out[B] - DEF[B])`
+//! - `live_out[B] = ∪ live_in[S]` for all successors `S` of `B`
 
 use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
 use crate::backend::dtal::regs::{Reg, VirtualReg};

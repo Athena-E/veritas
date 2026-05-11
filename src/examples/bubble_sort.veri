@@ -8,8 +8,6 @@ fn bubble_sort(arr: [int; 10]) -> [int; 10] {
             if a > b {
                 result[j] = b;
                 result[j + 1] = a;
-            } else {
-                let dummy: int = 0;
             }
         }
     }

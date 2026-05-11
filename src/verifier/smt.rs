@@ -1,4 +1,33 @@
 //! Z3-backed constraint oracle for the DTAL verifier.
+//!
+//! The oracle translates DTAL index expressions and constraints into Z3 terms
+//! and proves goals by checking whether the context plus the negated goal is
+//! unsatisfiable.
+//!
+//! # Proof Rule
+//!
+//! ```text
+//! context |= goal
+//!     iff
+//! context AND not(goal) is UNSAT
+//! ```
+//!
+//! # Design Notes
+//!
+//! Array selects are modeled as uninterpreted functions named after the current
+//! versioned array. That lets store operations introduce fresh array versions
+//! while keeping ordinary arithmetic constraints in integer logic.
+//!
+//! # Errors
+//!
+//! The public oracle returns `false` for goals it cannot prove. It does not
+//! expose solver errors; verifier callers turn failed proofs into
+//! [`crate::verifier::VerifyError`] variants with contextual constraints.
+//!
+//! # Related Modules
+//!
+//! The verifier checker builds the constraints proved here, and
+//! [`crate::backend::dtal::constraints`] defines the source syntax.
 
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,7 +38,7 @@ use z3::{FuncDecl, SatResult, Solver, Sort};
 static VERIFIER_SMT_QUERIES: AtomicU64 = AtomicU64::new(0);
 static VERIFIER_SMT_TIME_NS: AtomicU64 = AtomicU64::new(0);
 
-/// Reset verifier SMT counters
+/// Reset verifier SMT query counters.
 pub fn reset_verifier_smt_stats() {
     VERIFIER_SMT_QUERIES.store(0, Ordering::Relaxed);
     VERIFIER_SMT_TIME_NS.store(0, Ordering::Relaxed);
@@ -33,7 +62,7 @@ fn z3_int_from_i128(n: i128) -> Int {
     }
 }
 
-/// Constraint oracle used by the verifier.
+/// SMT constraint oracle used by verifier checks.
 pub struct ConstraintOracle;
 
 impl ConstraintOracle {

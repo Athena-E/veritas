@@ -418,7 +418,7 @@ fn bootstrap_blob() -> Vec<u8> {
 
 /// Generate a bare-metal Multiboot ELF32 binary.
 ///
-/// Layout: [ELF32 header + phdr] [bootstrap] [runtime] [user code]
+/// Layout: `[ELF32 header + phdr] [bootstrap] [runtime] [user code]`
 /// Load address: 0x100000
 /// Entry point: 0x10000C (_start in bootstrap, after Multiboot header)
 pub fn generate_baremetal_elf(encoded: &EncodedProgram, entry: &str) -> Vec<u8> {

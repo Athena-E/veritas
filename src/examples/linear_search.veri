@@ -9,11 +9,7 @@ fn linear_search(arr: [int; 10], target: int) -> int {
         if val == target {
             if result == 0 - 1 {
                 result = i;
-            } else {
-                let dummy: int = 0;
             }
-        } else {
-            let dummy: int = 0;
         }
     }
 

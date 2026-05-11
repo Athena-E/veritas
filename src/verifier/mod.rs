@@ -1,7 +1,40 @@
 //! DTAL verifier.
 //!
-//! The verifier checks instruction typing, CFG type-state propagation,
-//! join compatibility, and constraint provability.
+//! The verifier independently checks generated DTAL before machine-code
+//! emission. It validates instruction typing, ownership state, CFG joins,
+//! contracts, and constraint provability.
+//!
+//! # Verification Flow
+//!
+//! ```text
+//! DTAL text
+//!   -> parser
+//!   -> DtalProgram
+//!   -> per-function verifier
+//!        |- declared block-state derivation, or
+//!        `- fallback dataflow analysis
+//!   -> Result<(), VerifyError>
+//! ```
+//!
+//! # Design Notes
+//!
+//! Generated physical DTAL is treated as untrusted input. The verifier derives
+//! types and ownership state from instructions and rejects annotations that are
+//! not justified by the current state. When block entry states are present, the
+//! verifier checks each edge against those declarations; otherwise it computes
+//! a conservative dataflow fixed point.
+//!
+//! # Errors
+//!
+//! [`VerifyTextError`] separates parse failures from semantic verification
+//! failures. Semantic failures use [`VerifyError`] so callers can distinguish
+//! type, ownership, bounds, contract, and constraint errors.
+//!
+//! # Related Modules
+//!
+//! - `checker` verifies individual DTAL instructions.
+//! - `dataflow` computes fallback block states.
+//! - [`smt`] proves arithmetic and array constraints.
 
 #![allow(clippy::result_large_err)]
 
@@ -18,6 +51,9 @@ use checker::verify_instruction;
 use std::collections::HashMap;
 
 /// Error returned when verifying DTAL text.
+///
+/// This type keeps syntax errors separate from verifier errors so tools can
+/// report parser diagnostics without losing the semantic error structure.
 #[derive(Debug)]
 pub enum VerifyTextError {
     /// Parsing failed before verification.
@@ -43,14 +79,24 @@ impl std::fmt::Display for VerifyTextError {
 
 impl std::error::Error for VerifyTextError {}
 
-/// Parse and verify a DTAL program from text.
+/// Parse DTAL text and verify the resulting program.
+///
+/// # Errors
+///
+/// Returns [`VerifyTextError::ParseErrors`] when DTAL parsing fails, or
+/// [`VerifyTextError::VerifyError`] when parsed DTAL violates verifier rules.
 pub fn verify_dtal_text(input: &str) -> Result<(), VerifyTextError> {
     let program =
         crate::backend::dtal::parser::parse_dtal(input).map_err(VerifyTextError::ParseErrors)?;
     verify_dtal(&program).map_err(|e| VerifyTextError::VerifyError(Box::new(e)))
 }
 
-/// Verify a complete DTAL program.
+/// Verify every function in a DTAL program.
+///
+/// # Errors
+///
+/// Returns the first [`VerifyError`] encountered while checking function
+/// bodies, contracts, CFG joins, or constraints.
 pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
     for func in &program.functions {
         verify_function(func, program)?;

@@ -1,22 +1,37 @@
-//! Verified Runtime
+//! Trusted runtime machine-code blob.
 //!
-//! Provides trusted machine code implementations of I/O primitives:
-//! - `print_int(n: int)`: Print a signed 64-bit integer followed by newline to stdout
-//! - `print_char(c: int)`: Print a single byte to stdout
-//! - `read_int() -> int`: Read a decimal integer from stdin
+//! Provides hand-assembled x86-64 Linux implementations of I/O primitives and
+//! hosted region helpers. This module is part of the trusted computing base;
+//! the DTAL verifier checks call signatures and preconditions at each call site.
 //!
-//! These are hand-assembled x86-64 Linux code sequences using the SysV ABI
-//! (first argument in rdi, return value in rax) and Linux syscalls
-//! (write=1, read=0 via the syscall instruction).
+//! # Layout
 //!
-//! This module is part of the Trusted Computing Base — its correctness is
-//! assumed, not verified by the DTAL verifier. The DTAL verifier checks that
-//! user code calls these functions with correct types and satisfies any
-//! preconditions.
+//! ```text
+//! runtime_code()
+//!   0x000 print_int
+//!   0x065 print_char
+//!   0x07e read_int
+//!   0x0d3 port_in
+//!   0x0dc port_out
+//!   0x0e4 region_enter
+//!   0x119 region_alloc
+//!   0x162 region_leave
+//! ```
+//!
+//! # Design Notes
+//!
+//! The runtime is stored as bytes rather than generated from DTAL because these
+//! operations cross into Linux syscalls, port I/O, and allocator-like region
+//! management. Offsets are constants so the ELF writer can resolve calls
+//! without symbol parsing.
+//!
+//! # Related Files
+//!
+//! See `docs/io_extension_design.md` for the assembly source and design notes.
 
 use std::collections::HashMap;
 
-/// Names of runtime functions (as they appear in user code)
+/// Runtime function names as they appear in source programs.
 pub const RT_PRINT_INT: &str = "print_int";
 pub const RT_PRINT_CHAR: &str = "print_char";
 pub const RT_READ_INT: &str = "read_int";
@@ -28,7 +43,7 @@ pub const RT_REGION_ENTER: &str = "__rt_region_enter";
 pub const RT_REGION_ALLOC: &str = "__rt_region_alloc";
 pub const RT_REGION_LEAVE: &str = "__rt_region_leave";
 
-/// Offsets of each function within the runtime blob
+/// Function offsets within the runtime blob.
 const PRINT_INT_OFFSET: usize = 0x00;
 const PRINT_CHAR_OFFSET: usize = 0x65;
 const READ_INT_OFFSET: usize = 0x7e;
@@ -38,7 +53,7 @@ const REGION_ENTER_OFFSET: usize = 0xE4; // after port_out (0xDC + 8 = 0xE4)
 const REGION_ALLOC_OFFSET: usize = 0x119; // after region_enter (0xE4 + 0x35 = 0x119)
 const REGION_LEAVE_OFFSET: usize = 0x162; // after region_alloc (0x119 + 0x49 = 0x162)
 
-/// Check whether a function name is a runtime intrinsic
+/// Check whether a function name is a runtime intrinsic.
 pub fn is_runtime_function(name: &str) -> bool {
     matches!(
         name,
@@ -46,9 +61,10 @@ pub fn is_runtime_function(name: &str) -> bool {
     )
 }
 
-/// Get the raw x86-64 machine code for the runtime functions.
+/// Return the raw x86-64 machine code for runtime functions.
 ///
-/// Assembled from verified assembly source (see docs/io_extension_design.md).
+/// Assembled from verified assembly source (see
+/// [`docs/io_extension_design.md`](../../docs/io_extension_design.md)).
 /// Total size: 418 bytes.
 pub fn runtime_code() -> Vec<u8> {
     vec![
@@ -162,10 +178,9 @@ pub fn runtime_code() -> Vec<u8> {
     ]
 }
 
-/// Get symbol offsets within the runtime blob.
+/// Return symbol offsets within the runtime blob.
 ///
-/// Maps user-visible function names to byte offsets within the blob
-/// returned by `runtime_code()`.
+/// Maps runtime function names to byte offsets within `runtime_code()`.
 pub fn runtime_symbols() -> HashMap<String, usize> {
     let mut symbols = HashMap::new();
     symbols.insert(RT_PRINT_INT.to_string(), PRINT_INT_OFFSET);

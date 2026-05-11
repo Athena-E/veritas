@@ -1,11 +1,38 @@
-//! Verification error types for the DTAL verifier.
+//! Verification errors reported by the DTAL verifier.
+//!
+//! # Error Categories
+//!
+//! ```text
+//! VerifyError
+//!   |- typing and singleton mismatches
+//!   |- ownership and consumed-register violations
+//!   |- CFG join failures
+//!   |- bounds, precondition, and postcondition failures
+//!   `- internal invariants
+//! ```
+//!
+//! # Design Notes
+//!
+//! The enum carries structured context instead of only formatted strings so
+//! callers can choose between human-readable reports and tooling-friendly
+//! diagnostics. Display formatting is intentionally concise and includes the
+//! current constraint context for proof failures.
+//!
+//! # Related Modules
+//!
+//! The verifier checker and dataflow modules produce these errors.
+//! [`crate::verifier::smt`] is the source of most proof-failure context.
 
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use std::fmt;
 
-/// Error emitted while verifying DTAL.
+/// Error emitted while verifying a DTAL program.
+///
+/// Variants are grouped by the invariant that failed: type derivation,
+/// ownership, control-flow joins, contract obligations, constraint proofs, or
+/// verifier-internal assumptions.
 #[derive(Debug)]
 pub enum VerifyError {
     TypeMismatch {
@@ -15,9 +42,15 @@ pub enum VerifyError {
         actual: DtalType,
     },
 
-    UndefinedRegister { reg: Reg, block: String },
+    UndefinedRegister {
+        reg: Reg,
+        block: String,
+    },
 
-    ConsumedRegister { reg: Reg, block: String },
+    ConsumedRegister {
+        reg: Reg,
+        block: String,
+    },
 
     UnprovableConstraint {
         constraint: Constraint,
@@ -52,9 +85,13 @@ pub enum VerifyError {
         actual: DtalType,
     },
 
-    UnknownFunction { name: String },
+    UnknownFunction {
+        name: String,
+    },
 
-    UnknownBlock { label: String },
+    UnknownBlock {
+        label: String,
+    },
 
     BoundsCheckFailed {
         block: String,
@@ -82,8 +119,10 @@ pub enum VerifyError {
         context: Vec<Constraint>,
     },
 
-    // Should not happen
-    InternalError { msg: String },
+    // Indicates an invariant violation inside the verifier.
+    InternalError {
+        msg: String,
+    },
 
     OwnershipViolation {
         block: String,

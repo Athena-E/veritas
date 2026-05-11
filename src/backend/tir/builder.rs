@@ -1,7 +1,30 @@
-//! TIR builder utilities
+//! Utilities for constructing TIR functions and constraints.
 //!
-//! This module provides a builder pattern for constructing TIR functions
-//! and helper functions for working with constraints.
+//! [`TirBuilder`] tracks the current block under construction, allocates
+//! virtual registers and block IDs, and packages completed blocks into a
+//! [`TirFunction`].
+//!
+//! # Example
+//!
+//! ```text
+//! let entry = builder.new_block();
+//! builder.start_block(entry);
+//! let value = builder.fresh_reg();
+//! builder.add_instr(...);
+//! builder.finish_block(return value, vec![]);
+//! ```
+//!
+//! # Design Notes
+//!
+//! The builder is intentionally small: it preserves construction order and
+//! enforces "one open block at a time", but it does not perform whole-function
+//! validation. That validation belongs in later passes that have complete CFG
+//! context.
+//!
+//! # Panics
+//!
+//! [`TirBuilder::start_block`] panics if another block is already open, and
+//! [`TirBuilder::finish_block`] panics if no block is open.
 
 use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
 use crate::backend::tir::instr::{Terminator, TirInstr};
@@ -12,19 +35,17 @@ use crate::common::ownership::ParameterKind;
 use crate::common::types::IType;
 use std::collections::HashMap;
 
-/// Builder for constructing TIR functions
+/// Stateful builder for TIR functions.
 pub struct TirBuilder<'src> {
-    /// Virtual register allocator
+    /// Virtual register allocator.
     pub reg_alloc: VirtualRegAllocator,
-    /// Block ID allocator
+    /// Block ID allocator.
     pub block_alloc: BlockIdAllocator,
-    /// All blocks built so far
+    /// Completed blocks.
     pub blocks: HashMap<BlockId, BasicBlock<'src>>,
-    /// Current block being built
+    /// Current block being built.
     current_block: Option<BlockId>,
-    /// Instructions for current block
     current_instructions: Vec<TirInstr<'src>>,
-    /// Phi nodes for current block
     current_phi_nodes: Vec<PhiNode<'src>>,
 }
 
@@ -40,17 +61,17 @@ impl<'src> TirBuilder<'src> {
         }
     }
 
-    /// Allocate a fresh virtual register
+    /// Allocate a fresh virtual register.
     pub fn fresh_reg(&mut self) -> VirtualReg {
         self.reg_alloc.fresh()
     }
 
-    /// Create a new block and return its ID
+    /// Create a new block ID.
     pub fn new_block(&mut self) -> BlockId {
         self.block_alloc.fresh()
     }
 
-    /// Start building a block
+    /// Start building a block.
     pub fn start_block(&mut self, id: BlockId) {
         assert!(
             self.current_block.is_none(),
@@ -61,17 +82,17 @@ impl<'src> TirBuilder<'src> {
         self.current_phi_nodes.clear();
     }
 
-    /// Add a phi node to the current block
+    /// Add a phi node to the current block.
     pub fn add_phi(&mut self, phi: PhiNode<'src>) {
         self.current_phi_nodes.push(phi);
     }
 
-    /// Add an instruction to the current block
+    /// Add an instruction to the current block.
     pub fn add_instr(&mut self, instr: TirInstr<'src>) {
         self.current_instructions.push(instr);
     }
 
-    /// Finish the current block with a terminator
+    /// Finish the current block with a terminator.
     pub fn finish_block(&mut self, terminator: Terminator, predecessors: Vec<BlockId>) {
         let id = self.current_block.take().expect("No block to finish");
 
@@ -87,17 +108,17 @@ impl<'src> TirBuilder<'src> {
         self.blocks.insert(id, block);
     }
 
-    /// Check if currently building a block
+    /// Return whether a block is currently being built.
     pub fn is_building(&self) -> bool {
         self.current_block.is_some()
     }
 
-    /// Get the current block ID (if building)
+    /// Return the current block ID, if any.
     pub fn current_block_id(&self) -> Option<BlockId> {
         self.current_block
     }
 
-    /// Build the function
+    /// Build the function.
     #[allow(clippy::too_many_arguments)]
     pub fn build(
         self,
@@ -132,11 +153,7 @@ impl<'src> Default for TirBuilder<'src> {
     }
 }
 
-// ============================================================================
-// Constraint helper functions
-// ============================================================================
-
-/// Create a constraint from a binary comparison operation
+/// Create a constraint from a comparison binary operation.
 pub fn constraint_from_binop(op: BinaryOp, lhs: &str, rhs: &str) -> Constraint {
     let lhs_expr = IndexExpr::Var(lhs.to_string());
     let rhs_expr = IndexExpr::Var(rhs.to_string());
@@ -147,11 +164,11 @@ pub fn constraint_from_binop(op: BinaryOp, lhs: &str, rhs: &str) -> Constraint {
         BinaryOp::Le => Constraint::Le(lhs_expr, rhs_expr),
         BinaryOp::Gt => Constraint::Gt(lhs_expr, rhs_expr),
         BinaryOp::Ge => Constraint::Ge(lhs_expr, rhs_expr),
-        _ => Constraint::True, // Non-comparison ops
+        _ => Constraint::True,
     }
 }
 
-/// Negate a constraint (De Morgan's laws applied)
+/// Negate a constraint, preserving quantifier structure where possible.
 pub fn negate_constraint(c: Constraint) -> Constraint {
     match c {
         Constraint::True => Constraint::False,
@@ -171,10 +188,7 @@ pub fn negate_constraint(c: Constraint) -> Constraint {
             Box::new(negate_constraint(*r)),
         ),
         Constraint::Not(c) => *c,
-        Constraint::Implies(l, r) => {
-            // !(P → Q) ≡ P ∧ ¬Q
-            Constraint::And(l, Box::new(negate_constraint(*r)))
-        }
+        Constraint::Implies(l, r) => Constraint::And(l, Box::new(negate_constraint(*r))),
         Constraint::Forall {
             var,
             lower,
@@ -200,7 +214,7 @@ pub fn negate_constraint(c: Constraint) -> Constraint {
     }
 }
 
-/// Combine two constraints with AND
+/// Combine two constraints with `AND`.
 pub fn and_constraints(c1: Constraint, c2: Constraint) -> Constraint {
     match (&c1, &c2) {
         (Constraint::True, _) => c2,
@@ -210,7 +224,7 @@ pub fn and_constraints(c1: Constraint, c2: Constraint) -> Constraint {
     }
 }
 
-/// Combine two constraints with OR
+/// Combine two constraints with `OR`.
 pub fn or_constraints(c1: Constraint, c2: Constraint) -> Constraint {
     match (&c1, &c2) {
         (Constraint::False, _) => c2,
