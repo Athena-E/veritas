@@ -279,12 +279,11 @@ pub fn synth_expr<'src>(
                 check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
 
-            // Phase 2: reject compile-time-known overflowing folds.
-            // In i64 mode or --check-overflow mode, check against i64 bounds.
-            // In u64 mode, check against u64 bounds.
+            // Reject compile-time-known overflowing folds for bounded machine
+            // integer modes.
             if u64_mode {
                 check_const_fold_overflow(*op, &ty1, &ty2, 0, u64::MAX as i128, span)?;
-            } else if i64_mode || ctx.check_overflow {
+            } else if i64_mode {
                 check_const_fold_overflow(
                     *op,
                     &ty1,
@@ -295,11 +294,11 @@ pub fn synth_expr<'src>(
                 )?;
             }
 
-            // i64/u64 mode: emit overflow obligation via Z3
+            // i64/u64 mode: emit overflow obligation via Z3.
             if u64_mode {
                 use crate::frontend::typechecker::helpers::check_no_overflow;
                 check_no_overflow(ctx, *op, &lhs.0, &rhs.0, 0, u64::MAX as i128, span)?;
-            } else if i64_mode || ctx.check_overflow {
+            } else if i64_mode {
                 use crate::frontend::typechecker::helpers::check_no_overflow;
                 check_no_overflow(
                     ctx,
@@ -465,7 +464,7 @@ pub fn synth_expr<'src>(
 
             // i64 negation: check operand != INT_MIN
             let neg_i64 = is_subtype(ctx, &ty, &IType::I64);
-            if neg_i64 || ctx.check_overflow {
+            if neg_i64 {
                 use crate::frontend::typechecker::helpers::check_no_negation_overflow;
                 check_no_negation_overflow(ctx, &cond.0, cond.1)?;
             }

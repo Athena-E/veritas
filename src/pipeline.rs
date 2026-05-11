@@ -278,60 +278,6 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
     })
 }
 
-/// Compile source code with overflow checking enabled.
-/// Phase 1: plumbing only — the typechecker helpers that actually emit the
-/// obligation are not yet wired. This entry point flips the context flag so
-/// Phase 3's wiring will begin checking as soon as it lands, without further
-/// changes in main.rs.
-pub fn compile_verbose_with_overflow<'src>(
-    source: &'src str,
-    bare_metal: bool,
-) -> Result<VerboseOutput<'src>, CompileError<'src>> {
-    use crate::frontend::typechecker::check_program_with_overflow;
-
-    reset_pipeline_state();
-
-    let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
-        CompileError::LexError(
-            errors
-                .iter()
-                .map(|e| format!("{:?}", e))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    })?;
-    let token_strings: Vec<(String, String)> = raw_tokens
-        .iter()
-        .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
-        .collect();
-    let eoi = (source.len()..source.len()).into();
-    let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
-    let ast = program_parser()
-        .parse(token_stream)
-        .into_result()
-        .map_err(|errors| {
-            CompileError::ParseError(
-                errors
-                    .iter()
-                    .map(|e| format!("{:?}", e))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            )
-        })?;
-    let tast =
-        check_program_with_overflow(&ast, bare_metal, true).map_err(CompileError::TypeError)?;
-    let tir = lower_program(&tast);
-    let dtal_program = codegen_program(&tir);
-    let dtal = emit_program(&dtal_program);
-    Ok(VerboseOutput {
-        tokens: token_strings,
-        tast,
-        tir,
-        dtal_program,
-        dtal,
-    })
-}
-
 /// Compile source code for bare-metal target (no Linux intrinsics)
 pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     use crate::frontend::typechecker::check_program_bare_metal;
@@ -385,6 +331,15 @@ pub fn compile_verbose_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
 ) -> Result<VerboseOutput<'src>, CompileError<'src>> {
+    compile_verbose_configured(source, Some(opt_config), false)
+}
+
+/// Compile source code with explicit target and optimization options.
+pub fn compile_verbose_configured<'src>(
+    source: &'src str,
+    opt_config: Option<&OptConfig>,
+    bare_metal: bool,
+) -> Result<VerboseOutput<'src>, CompileError<'src>> {
     reset_pipeline_state();
 
     // Stage 1: Lexical analysis
@@ -421,16 +376,27 @@ pub fn compile_verbose_optimized<'src>(
         })?;
 
     // Stage 3: Type checking
-    let tast = check_program(&ast).map_err(CompileError::TypeError)?;
+    let tast = if bare_metal {
+        crate::frontend::typechecker::check_program_bare_metal(&ast)
+    } else {
+        check_program(&ast)
+    }
+    .map_err(CompileError::TypeError)?;
 
     // Stage 4: Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
     // Stage 5: Generate DTAL
-    let mut dtal_program = codegen_program(&tir);
+    let mut dtal_program = if bare_metal {
+        crate::backend::codegen::codegen_program_with_target(&tir, true)
+    } else {
+        codegen_program(&tir)
+    };
 
     // Stage 5.5: Optimize (if enabled)
-    if opt_config.any_enabled() {
+    if let Some(opt_config) = opt_config
+        && opt_config.any_enabled()
+    {
         optimize_program(&mut dtal_program, opt_config);
     }
 

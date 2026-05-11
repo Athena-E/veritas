@@ -69,11 +69,6 @@ pub struct TypingContext<'src> {
     // True in specification contexts (invariants, requires, ensures)
     pub allow_quantifiers: bool,
 
-    // Whether arithmetic operations must be proved overflow-free.
-    // Phase 1: plumbing only — helpers exist but are not yet called from synth_expr.
-    // Phase 3 will gate `check_no_overflow` calls on this flag.
-    pub check_overflow: bool,
-
     // Whether the current compilation target is bare metal.
     // Hosted mode uses function-local regions for array allocation, so some
     // escape paths remain conservatively disallowed until ownership/regions are
@@ -126,7 +121,6 @@ impl<'src> TypingContext<'src> {
             postcondition: None,
             current_function: None,
             allow_quantifiers: false,
-            check_overflow: false,
             bare_metal: false,
             region_depth: 0,
             region_local_arrays: Vec::new(),
@@ -150,7 +144,6 @@ impl<'src> TypingContext<'src> {
             postcondition: None,
             current_function: None,
             allow_quantifiers: false,
-            check_overflow: false,
             bare_metal: false,
             region_depth: 0,
             region_local_arrays: Vec::new(),

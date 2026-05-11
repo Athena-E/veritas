@@ -7,10 +7,7 @@ use veritas::backend::elf::generate_elf;
 use veritas::backend::optimise::OptConfig;
 use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
 use veritas::frontend::typechecker::smt::{get_frontend_smt_stats, reset_frontend_smt_stats};
-use veritas::pipeline::{
-    CompileError, compile_verbose, compile_verbose_bare_metal, compile_verbose_optimized,
-    compile_verbose_with_overflow,
-};
+use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_configured};
 use veritas::verifier::smt::{get_verifier_smt_stats, reset_verifier_smt_stats};
 use veritas::verifier::verify_dtal;
 
@@ -269,10 +266,6 @@ fn main() {
         eprintln!("Veritas Compiler");
         eprintln!();
         eprintln!("Usage: {} <source_file> [OPTIONS]", args[0]);
-        eprintln!(
-            "       {} --generate-dtal-tampering [--tampering-out-dir <dir>]",
-            args[0]
-        );
         eprintln!();
         eprintln!("Output:");
         eprintln!("  -o <file>          Compile to native ELF executable");
@@ -286,17 +279,9 @@ fn main() {
         eprintln!("Code generation pipeline:");
         eprintln!("  --target-bare-metal  Generate Multiboot ELF for bare-metal/QEMU:");
         eprintln!("                       qemu-system-x86_64 -kernel <binary> -serial stdio");
-        eprintln!("  --check-overflow     Prove every arithmetic op cannot overflow i64");
-        eprintln!("                       (experimental, off by default)");
         eprintln!();
         eprintln!("Optimisation:");
         eprintln!("  -O, --optimize     Enable all optimisations");
-        eprintln!("  --const-fold       Constant folding and immediate folding");
-        eprintln!("  --peephole         Peephole simplifications");
-        eprintln!("  --copy-prop        Copy propagation only");
-        eprintln!("  --dce              Dead code elimination only");
-        eprintln!("  --licm             Loop-invariant code motion");
-        eprintln!("  --load-fusion      Fuse load+add patterns");
         eprintln!();
         eprintln!("Debug:");
         eprintln!("  -v, --verbose      Show compilation stages");
@@ -319,6 +304,12 @@ fn main() {
         eprintln!("                     Generate the tampered DTAL corpus");
         eprintln!("  --tampering-out-dir <dir>");
         eprintln!("                     Output directory for generated tampered DTAL");
+        eprintln!("  --const-fold       Constant folding and immediate folding");
+        eprintln!("  --peephole         Peephole simplifications");
+        eprintln!("  --copy-prop        Copy propagation only");
+        eprintln!("  --dce              Dead code elimination only");
+        eprintln!("  --licm             Loop-invariant code motion");
+        eprintln!("  --load-fusion      Fuse load+add patterns");
         eprintln!();
         eprintln!("Development Environment:");
         eprintln!("  VERITAS_LS=1           Use linear scan allocator (default: graph colouring)");
@@ -361,7 +352,6 @@ fn main() {
     let native = args.iter().any(|a| a == "--native");
     let physical = !args.iter().any(|a| a == "--legacy-pipeline");
     let bare_metal = args.iter().any(|a| a == "--target-bare-metal");
-    let check_overflow = args.iter().any(|a| a == "--check-overflow");
     let output_file = args
         .iter()
         .position(|a| a == "-o")
@@ -424,13 +414,12 @@ fn main() {
 
     let compile_start = Instant::now();
 
-    // Use optimized compilation if any optimizations are enabled
-    let compile_result = if opt_config.any_enabled() {
-        compile_verbose_optimized(&src, &opt_config)
-    } else if check_overflow {
-        compile_verbose_with_overflow(&src, bare_metal)
-    } else if bare_metal {
-        compile_verbose_bare_metal(&src)
+    let compile_result = if opt_config.any_enabled() || bare_metal {
+        compile_verbose_configured(
+            &src,
+            opt_config.any_enabled().then_some(&opt_config),
+            bare_metal,
+        )
     } else {
         compile_verbose(&src)
     };

@@ -1598,30 +1598,18 @@ pub fn check_function<'src>(
 
 /// Check an entire program
 pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, TypeError<'src>> {
-    check_program_with_options(program, false, false)
+    check_program_with_options(program, false)
 }
 
 pub fn check_program_bare_metal<'src>(
     program: &Program<'src>,
 ) -> Result<TProgram<'src>, TypeError<'src>> {
-    check_program_with_options(program, true, false)
-}
-
-/// Check a program with an explicit `check_overflow` flag.
-/// When `check_overflow` is true, arithmetic operations must be proved
-/// to stay within `[INT_MIN, INT_MAX]` (Phase 3 and later).
-pub fn check_program_with_overflow<'src>(
-    program: &Program<'src>,
-    bare_metal: bool,
-    check_overflow: bool,
-) -> Result<TProgram<'src>, TypeError<'src>> {
-    check_program_with_options(program, bare_metal, check_overflow)
+    check_program_with_options(program, true)
 }
 
 fn check_program_with_options<'src>(
     program: &Program<'src>,
     bare_metal: bool,
-    check_overflow: bool,
 ) -> Result<TProgram<'src>, TypeError<'src>> {
     let mut signatures = HashMap::new();
 
@@ -1809,7 +1797,6 @@ fn check_program_with_options<'src>(
     );
 
     let mut global_ctx = TypingContext::with_functions(signatures);
-    global_ctx.check_overflow = check_overflow;
     global_ctx.bare_metal = bare_metal;
 
     // Process constant declarations — add as immutable singleton bindings

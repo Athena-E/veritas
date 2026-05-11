@@ -123,14 +123,13 @@ pub fn checked_fold_in_range(op: BinOp, n1: i128, n2: i128, lo: i128, hi: i128) 
     }
 }
 
-/// Phase 2 entry point: when the typechecker detects i64-mode arithmetic
-/// (or has `check_overflow` enabled globally), this helper rejects any
+/// Phase 2 entry point: when the typechecker detects bounded machine-integer
+/// arithmetic, this helper rejects any
 /// compile-time-known arithmetic that would overflow the given bounds.
 ///
 /// `range_lo` and `range_hi` specify the valid result range:
 ///  - For i64: `(i64::MIN as i128, i64::MAX as i128)`
-///  - For u64 (future): `(0, u64::MAX as i128)`
-///  - For --check-overflow on int: same as i64
+///  - For u64: `(0, u64::MAX as i128)`
 ///
 /// If both operands are singleton ints and the result exceeds the range,
 /// this raises `IntegerOverflow`.
@@ -384,9 +383,6 @@ pub fn check_array_bounds_expr<'src>(
 /// to prove it under the current typing context. If the oracle cannot discharge it,
 /// returns `TypeError::IntegerOverflow`.
 ///
-/// Phase 1: this helper exists but is not yet called from `synth_expr`. Wiring happens
-/// in Phase 3 behind the `--check-overflow` flag.
-#[allow(dead_code)]
 pub fn check_no_overflow<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     op: BinOp,
@@ -533,8 +529,6 @@ pub fn check_no_overflow<'src>(
 
 /// Check that unary negation cannot overflow (operand must not be `INT_MIN`).
 ///
-/// Phase 1: not yet called from `synth_expr`. Wiring happens in Phase 3.
-#[allow(dead_code)]
 pub fn check_no_negation_overflow<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     operand_expr: &Expr<'src>,
