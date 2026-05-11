@@ -206,7 +206,6 @@ pub fn codegen_function_with_target<'src>(
     ctx.needs_hosted_region =
         !bare_metal && !ctx.returns_owned_array && function_needs_hosted_region(func);
 
-    // Build param name → register name substitution map
     ctx.var_subs = func
         .param_names
         .iter()
@@ -214,7 +213,6 @@ pub fn codegen_function_with_target<'src>(
         .map(|(name, (vreg, _))| (name.clone(), format!("{}", Reg::Virtual(*vreg))))
         .collect();
 
-    // Add "result" → return value register mapping for postcondition substitution
     for block in func.blocks.values() {
         if let Terminator::Return {
             value: Some(vreg), ..
@@ -226,13 +224,10 @@ pub fn codegen_function_with_target<'src>(
         }
     }
 
-    // Pre-generate labels for all blocks
     for block_id in func.blocks.keys() {
         ctx.label_for_block(*block_id);
     }
 
-    // Generate code for each block in a deterministic order
-    // Start with entry block, then remaining blocks sorted by ID
     let mut block_order: Vec<BlockId> = vec![func.entry_block];
     let mut other_blocks: Vec<BlockId> = func
         .blocks
@@ -250,7 +245,6 @@ pub fn codegen_function_with_target<'src>(
         }
     }
 
-    // Convert TIR params (VirtualReg) to DTAL params (Reg)
     let params: Vec<(Reg, DtalType)> = func
         .params
         .iter()
@@ -275,9 +269,6 @@ pub fn codegen_function_with_target<'src>(
         blocks: ctx.take_blocks(),
     };
 
-    // Compute and stamp entry states on blocks using dataflow analysis.
-    // This makes the DTAL program self-describing — the verifier can check
-    // each block independently using the declared entry state.
     stamp_entry_states(&mut dtal_func);
 
     dtal_func
@@ -318,20 +309,16 @@ fn codegen_block<'src>(
         });
     }
 
-    // 1. Lower phi nodes to mov instructions
     for phi in &block.phi_nodes {
         lower_phi_node(&mut instructions, phi, block, ctx);
     }
 
-    // 2. Lower each TIR instruction to DTAL
     for instr in &block.instructions {
         isel::lower_instruction(&mut instructions, instr, ctx.bare_metal);
     }
 
-    // 3. Lower the terminator (including phi moves for successors)
     lower_terminator(&mut instructions, &block.terminator, block.id, ctx, func);
 
-    // 4. Substitute source-level variable names with register names in constraints
     if !ctx.var_subs.is_empty() {
         for instr in &mut instructions {
             if let DtalInstr::ConstraintAssert { constraint, .. } = instr {
@@ -427,7 +414,6 @@ fn lower_terminator<'src>(
 
     match terminator {
         Terminator::Jump { target } => {
-            // Emit phi moves for the target block
             emit_phi_moves(instrs, *target, current_block, func);
 
             let label = ctx.label_for_block(*target);
@@ -444,14 +430,10 @@ fn lower_terminator<'src>(
             let true_label = ctx.label_for_block(*true_target);
             let false_label = ctx.label_for_block(*false_target);
 
-            // Try to find the original comparison that produced the condition
-            // register. If `cond` was defined by a SetCC, reuse the preceding
-            // Cmp operands for the branch so the verifier derives the actual
-            // comparison constraint (e.g., `v1 < v2`) instead of `v_cond != 0`.
+            // Reuse SetCC's source comparison so verification sees `v1 < v2`, not `v_cond != 0`.
             let (branch_cond, needs_cmp) = find_original_comparison(instrs, *cond);
 
             if needs_cmp {
-                // Couldn't find original comparison — fall back to cmp cond, 0
                 instrs.push(DtalInstr::CmpImm {
                     lhs: Reg::Virtual(*cond),
                     imm: 0,
@@ -461,21 +443,14 @@ fn lower_terminator<'src>(
                     target: true_label,
                 });
             } else {
-                // Reuse the original Cmp instruction's state — just emit the branch
-                // with the original comparison condition
                 instrs.push(DtalInstr::Branch {
                     cond: branch_cond,
                     target: true_label,
                 });
             }
 
-            // Branch constraints are derived independently by the verifier
-            // from Cmp+Branch and existential types — no ConstraintAssume needed.
-
-            // Emit phi moves for the false target (we're falling through to it)
             emit_phi_moves(instrs, *false_target, current_block, func);
 
-            // Fall through to false target
             instrs.push(DtalInstr::Jmp {
                 target: false_label,
             });

@@ -44,10 +44,8 @@ pub struct LivenessAnalysis;
 impl LivenessAnalysis {
     /// Analyze liveness for a function
     pub fn analyze(func: &DtalFunction) -> LivenessInfo {
-        // Build CFG
         let (successors, predecessors) = Self::build_cfg(func);
 
-        // Compute local USE and DEF sets for each block
         let mut blocks: HashMap<String, BlockLiveness> = HashMap::new();
         for block in &func.blocks {
             let (uses, defs) = Self::compute_use_def(block);
@@ -62,16 +60,13 @@ impl LivenessAnalysis {
             );
         }
 
-        // Fixed-point iteration for liveness
         let mut changed = true;
         while changed {
             changed = false;
 
-            // Process blocks in reverse order (more efficient for backward analysis)
             for block in func.blocks.iter().rev() {
                 let label = &block.label;
 
-                // Compute live_out = union of live_in of all successors
                 let mut new_live_out = HashSet::new();
                 if let Some(succs) = successors.get(label) {
                     for succ in succs {
@@ -81,7 +76,6 @@ impl LivenessAnalysis {
                     }
                 }
 
-                // Compute live_in = uses ∪ (live_out - defs)
                 let block_info = blocks.get(label).unwrap();
                 let mut new_live_in = block_info.uses.clone();
                 for reg in &new_live_out {
@@ -90,7 +84,6 @@ impl LivenessAnalysis {
                     }
                 }
 
-                // Check for changes
                 let block_info = blocks.get_mut(label).unwrap();
                 if new_live_in != block_info.live_in || new_live_out != block_info.live_out {
                     changed = true;
@@ -114,13 +107,11 @@ impl LivenessAnalysis {
         let mut successors: HashMap<String, Vec<String>> = HashMap::new();
         let mut predecessors: HashMap<String, Vec<String>> = HashMap::new();
 
-        // Initialize maps
         for block in &func.blocks {
             successors.insert(block.label.clone(), Vec::new());
             predecessors.insert(block.label.clone(), Vec::new());
         }
 
-        // Build edges based on terminators
         for (i, block) in func.blocks.iter().enumerate() {
             let succs = Self::get_block_successors(block, func, i);
             for succ in &succs {
@@ -329,12 +320,7 @@ impl InterferenceGraph {
         for block in &func.blocks {
             let block_info = &liveness.blocks[&block.label];
 
-            // Add interference edges for registers live at block entry.
-            // compute_instruction_liveness returns live-AFTER sets for each
-            // instruction, so the live-BEFORE set of the first instruction
-            // (= block live_in) is not included. Without this, registers
-            // that are simultaneously live at block entry but killed by the
-            // first instruction would miss interference edges.
+            // Include live-in pairs; per-instruction sets are live-after only.
             let live_in_regs: Vec<_> = block_info.live_in.iter().copied().collect();
             for i in 0..live_in_regs.len() {
                 for j in (i + 1)..live_in_regs.len() {
@@ -342,15 +328,10 @@ impl InterferenceGraph {
                 }
             }
 
-            // Get per-instruction liveness
             let live_sets =
                 LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
 
-            // Add interference edges for each instruction point.
-            // Two sources of interference:
-            // 1. All pairs of simultaneously live registers
-            // 2. Each def vs everything live after the def (even if the
-            //    def is immediately dead, it still clobbers its register)
+            // Defs interfere with every register live after the instruction.
             for (instr_idx, live_set) in live_sets.iter().enumerate() {
                 let regs: Vec<_> = live_set.iter().copied().collect();
                 for i in 0..regs.len() {
@@ -359,8 +340,6 @@ impl InterferenceGraph {
                     }
                 }
 
-                // Def-vs-live-after: the defined register interferes with
-                // everything live after this instruction
                 if let Some(def) = LivenessAnalysis::instruction_def(&block.instructions[instr_idx])
                 {
                     for &live_reg in live_set.iter() {

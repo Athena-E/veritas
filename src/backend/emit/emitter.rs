@@ -30,10 +30,8 @@ pub fn emit_program(program: &DtalProgram) -> String {
 
 /// Emit a DTAL function
 fn emit_function(output: &mut String, func: &DtalFunction) {
-    // Function header
     writeln!(output, ".function {}", func.name).unwrap();
 
-    // Parameters
     if !func.params.is_empty() {
         write!(output, ".params {{").unwrap();
         for (i, (reg, ty)) in func.params.iter().enumerate() {
@@ -45,25 +43,20 @@ fn emit_function(output: &mut String, func: &DtalFunction) {
         writeln!(output, "}}").unwrap();
     }
 
-    // Return type
     writeln!(output, ".returns {}", emit_type(&func.return_type)).unwrap();
 
-    // Precondition
     if let Some(ref pre) = func.precondition {
         writeln!(output, ".precondition {}", emit_constraint(pre)).unwrap();
     }
 
-    // Postcondition
     if let Some(ref post) = func.postcondition {
         writeln!(output, ".postcondition {}", emit_constraint(post)).unwrap();
     }
 
     writeln!(output).unwrap();
 
-    // Entry point label
     writeln!(output, "{}:", func.name).unwrap();
 
-    // Blocks
     for block in &func.blocks {
         emit_block(output, block);
     }
@@ -71,10 +64,8 @@ fn emit_function(output: &mut String, func: &DtalFunction) {
 
 /// Emit a basic block
 fn emit_block(output: &mut String, block: &DtalBlock) {
-    // Block label
     writeln!(output, "{}:", block.label).unwrap();
 
-    // Entry state directives (parseable, not just comments)
     if !block.entry_state.register_types.is_empty() {
         let mut entries: Vec<_> = block.entry_state.register_types.iter().collect();
         entries.sort_by_key(|(reg, _)| emit_reg(reg));
@@ -103,7 +94,6 @@ fn emit_block(output: &mut String, block: &DtalBlock) {
         writeln!(output, "    .assume {}", emit_constraint(constraint)).unwrap();
     }
 
-    // Instructions
     for instr in &block.instructions {
         emit_instruction(output, instr);
     }
@@ -505,13 +495,11 @@ fn emit_cmpop(op: &CmpOp) -> &'static str {
 
 /// Emit a type
 fn emit_type(ty: &DtalType) -> String {
-    // DtalType's Display impl already produces the correct format
     ty.to_string()
 }
 
 /// Emit a constraint
 fn emit_constraint(constraint: &Constraint) -> String {
-    // Constraint's Display impl already produces the correct format
     constraint.to_string()
 }
 

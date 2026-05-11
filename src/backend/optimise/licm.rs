@@ -52,7 +52,6 @@ pub fn licm_function(func: &mut DtalFunction) -> bool {
         return false;
     }
 
-    // Collect all defs per block for quick lookup
     let block_defs = collect_block_defs(func);
 
     let mut changed = false;
@@ -74,19 +73,16 @@ fn compute_dominators(
     let all_blocks: HashSet<String> = block_labels.iter().cloned().collect();
     let mut dom: HashMap<String, HashSet<String>> = HashMap::new();
 
-    // Entry block dominates only itself
     if let Some(entry) = block_labels.first() {
         let mut entry_set = HashSet::new();
         entry_set.insert(entry.clone());
         dom.insert(entry.clone(), entry_set);
     }
 
-    // All other blocks: start with all blocks
     for label in block_labels.iter().skip(1) {
         dom.insert(label.clone(), all_blocks.clone());
     }
 
-    // Iterate until stable
     let mut changed = true;
     while changed {
         changed = false;
@@ -96,7 +92,6 @@ fn compute_dominators(
                 None => continue,
             };
 
-            // Intersect dominator sets of all predecessors
             let mut new_dom: Option<HashSet<String>> = None;
             for pred in preds {
                 if let Some(pred_dom) = dom.get(pred) {
@@ -107,7 +102,6 @@ fn compute_dominators(
                 }
             }
 
-            // Add self
             let mut new_dom = new_dom.unwrap_or_default();
             new_dom.insert(label.clone());
 
@@ -130,7 +124,6 @@ fn find_loops(
 ) -> Vec<NaturalLoop> {
     let mut loops = Vec::new();
 
-    // Find back-edges: B → H where H dominates B
     for label in block_labels {
         if let Some(succs) = successors.get(label) {
             for succ in succs {
@@ -139,14 +132,10 @@ fn find_loops(
                     .is_some_and(|dom_set| dom_set.contains(succ));
 
                 if is_back_edge {
-                    // Found back-edge: label → succ
                     let header = succ.clone();
                     let loop_blocks = collect_natural_loop(&header, label, predecessors);
 
-                    // Find a unique preheader: the predecessor of the loop
-                    // header that is outside the loop. Hoisting into one of
-                    // several non-loop predecessors would skip other loop
-                    // entry paths and leave the hoisted value undefined.
+                    // Require a unique preheader so hoisted values dominate every entry.
                     if let Some(header_preds) = predecessors.get(&header) {
                         let non_loop_preds: Vec<_> = header_preds
                             .iter()
@@ -235,7 +224,6 @@ fn hoist_loop(
     lp: &NaturalLoop,
     block_defs: &HashMap<String, HashSet<VirtualReg>>,
 ) -> bool {
-    // Compute registers defined outside the loop
     let mut external_defs: HashSet<VirtualReg> = HashSet::new();
     for block in &func.blocks {
         if !lp.blocks.contains(&block.label)
@@ -245,10 +233,6 @@ fn hoist_loop(
         }
     }
 
-    // Also include function parameters (physical regs mapped to virtuals)
-    // These are implicitly available at function entry
-
-    // Collect registers defined inside the loop
     let mut loop_defs: HashSet<VirtualReg> = HashSet::new();
     for block_label in &lp.blocks {
         if let Some(defs) = block_defs.get(block_label) {
@@ -256,21 +240,9 @@ fn hoist_loop(
         }
     }
 
-    // Count total definitions per register across the entire function.
-    // DTAL isn't strict SSA: loop-carried virtuals (e.g. the induction
-    // variable) are written in both the pre-header and the loop body. Hoisting
-    // a second write of such a register into the pre-header destroys the
-    // loop's update step. Only registers with exactly one definition in the
-    // whole function are safe to relocate.
+    // DTAL is not strict SSA; only single-definition registers are safe to relocate.
     let def_counts = count_all_defs(func);
 
-    // Find hoistable instructions using fixed-point iteration
-    // An instruction is hoistable if:
-    // 1. It is a pure computation (is_hoistable_kind)
-    // 2. Its destination register has only one definition in the function
-    //    (otherwise we would break a loop-carried update)
-    // 3. All its operand registers are either external or defined by
-    //    another hoistable instruction
     let mut hoistable_defs: HashSet<VirtualReg> = HashSet::new();
     let mut hoistable_instrs: Vec<(String, usize)> = Vec::new(); // (block_label, instr_index)
 
@@ -284,7 +256,6 @@ fn hoist_loop(
             }
 
             for (i, instr) in block.instructions.iter().enumerate() {
-                // Skip if already identified as hoistable
                 if let Some(def) = instruction_def(instr)
                     && hoistable_defs.contains(&def)
                 {
@@ -295,18 +266,12 @@ fn hoist_loop(
                     continue;
                 }
 
-                // Refuse to hoist a definition of a register written anywhere
-                // else in the function — that signals a loop-carried variable
-                // whose update must stay in place.
                 if let Some(def) = instruction_def(instr)
                     && def_counts.get(&def).copied().unwrap_or(0) > 1
                 {
                     continue;
                 }
 
-                // Check all operands are either external-only or hoistable
-                // A register redefined inside the loop is NOT external even if
-                // it was also defined outside (the loop definition shadows it)
                 let uses = instruction_uses(instr);
                 let all_available = uses.iter().all(|u| {
                     hoistable_defs.contains(u)
@@ -328,7 +293,6 @@ fn hoist_loop(
         return false;
     }
 
-    // Collect hoisted instructions (in order)
     let mut hoisted: Vec<DtalInstr> = Vec::new();
     for (block_label, instr_idx) in &hoistable_instrs {
         let block = func
@@ -339,8 +303,6 @@ fn hoist_loop(
         hoisted.push(block.instructions[*instr_idx].clone());
     }
 
-    // Remove hoisted instructions from their source blocks
-    // Build a set of (block_label, index) pairs to remove
     let remove_set: HashSet<(String, usize)> = hoistable_instrs.into_iter().collect();
     for block in &mut func.blocks {
         if !lp.blocks.contains(&block.label) {
@@ -355,15 +317,13 @@ fn hoist_loop(
         });
     }
 
-    // Insert hoisted instructions into the entry block before the terminal Jmp
     let entry_block = func
         .blocks
         .iter_mut()
         .find(|b| b.label == lp.entry)
         .unwrap();
 
-    // Find insertion point: before the first MovReg that targets a phi dst,
-    // or before the terminal Jmp/Branch, whichever comes first
+    // Preserve existing phi moves at the end of the preheader.
     let insert_pos = entry_block
         .instructions
         .iter()
@@ -371,7 +331,6 @@ fn hoist_loop(
         .map(|p| p + 1)
         .unwrap_or(0);
 
-    // Insert all hoisted instructions at the insertion point
     for (offset, instr) in hoisted.into_iter().enumerate() {
         entry_block.instructions.insert(insert_pos + offset, instr);
     }

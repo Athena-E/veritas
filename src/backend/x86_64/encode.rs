@@ -398,7 +398,6 @@ impl Encoder {
             }
 
             X86Instr::TestRI { lhs, imm } => {
-                // test r/m64, imm32 (no short form)
                 let rex = 0x48 | if lhs.needs_rex_b() { 0x01 } else { 0 };
                 self.emit_byte(rex);
                 self.emit_byte(0xF7);
@@ -407,11 +406,7 @@ impl Encoder {
             }
 
             X86Instr::SetCC { dst, cond } => {
-                // setcc r8 - sets low byte based on condition
-                // Encoding: [REX] 0x0F 0x9x ModR/M
-                // A REX prefix is needed for registers with encoding >= 4
-                // (RSP/RBP/RSI/RDI) to access the low byte (spl/bpl/sil/dil)
-                // instead of the legacy high bytes (ah/ch/dh/bh).
+                // REX selects SPL/BPL/SIL/DIL instead of legacy high-byte registers.
                 if dst.needs_rex_for_byte() {
                     let rex = 0x40 | if dst.needs_rex_b() { 0x01 } else { 0 };
                     self.emit_byte(rex);
@@ -420,9 +415,6 @@ impl Encoder {
                 self.emit_byte(cond.setcc_byte());
                 self.emit_modrm(0b11, 0, dst.reg3());
 
-                // movzx r32, r8 - zero-extend to 32-bit (implicitly zeros upper 32 bits)
-                // Encoding: [REX if needed] 0x0F 0xB6 ModR/M
-                // Same REX requirement for the source byte register
                 if dst.needs_rex_for_byte() {
                     let rex = 0x40
                         | if dst.needs_rex_r() { 0x04 } else { 0 }

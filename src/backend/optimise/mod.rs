@@ -91,49 +91,42 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     for _ in 0..max_iters {
         let mut changed = false;
 
-        // Run constant folding (before peephole so folded constants expose patterns)
         if config.constant_folding {
             for func in &mut program.functions {
                 changed |= const_fold::constant_fold_function(func);
             }
         }
 
-        // Run peephole (before copy prop so new MovRegs get propagated)
         if config.peephole {
             for func in &mut program.functions {
                 changed |= peephole::peephole_function(func);
             }
         }
 
-        // Run copy propagation
         if config.copy_propagation {
             for func in &mut program.functions {
                 changed |= copy_prop::copy_propagate_function(func);
             }
         }
 
-        // Run dead code elimination
         if config.dead_code_elimination {
             for func in &mut program.functions {
                 changed |= dce::eliminate_dead_code(func);
             }
         }
 
-        // Run loop-invariant code motion
         if config.licm {
             for func in &mut program.functions {
                 changed |= licm::licm_function(func);
             }
         }
 
-        // Run load-op fusion (after LICM so any hoisted loads can be fused)
         if config.load_fusion {
             for func in &mut program.functions {
                 changed |= load_fusion::fuse_loads_function(func);
             }
         }
 
-        // Fixed-point reached
         if !changed {
             break;
         }
