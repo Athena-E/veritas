@@ -82,18 +82,10 @@ impl<'src> LoweringContext<'src> {
         }
     }
 
-    // ========================================================================
-    // Register allocation
-    // ========================================================================
-
     /// Allocate a fresh virtual register
     pub fn fresh_reg(&mut self) -> VirtualReg {
         self.builder.fresh_reg()
     }
-
-    // ========================================================================
-    // Variable mapping (SSA)
-    // ========================================================================
 
     /// Bind a variable name to an SSA register
     pub fn bind_var(&mut self, name: &str, reg: VirtualReg) {
@@ -214,10 +206,6 @@ impl<'src> LoweringContext<'src> {
         }
         diffs
     }
-
-    // ========================================================================
-    // Scope management
-    // ========================================================================
 
     /// Enter a new scope (pushes current var_map)
     pub fn enter_scope(&mut self) {
@@ -409,10 +397,6 @@ impl<'src> LoweringContext<'src> {
         self.current_region = self.region_stack.pop().unwrap_or(None);
     }
 
-    // ========================================================================
-    // Block management
-    // ========================================================================
-
     /// Create a new block and return its ID
     pub fn new_block(&mut self) -> BlockId {
         self.builder.new_block()
@@ -465,10 +449,6 @@ impl<'src> LoweringContext<'src> {
     pub fn current_block(&self) -> Option<BlockId> {
         self.builder.current_block_id()
     }
-
-    // ========================================================================
-    // Function building
-    // ========================================================================
 
     /// Build the final TIR function
     #[allow(clippy::too_many_arguments)]

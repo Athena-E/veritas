@@ -1,7 +1,33 @@
-//! Z3-based constraint oracle for the DTAL verifier
+//! Z3-backed constraint oracle for the DTAL verifier.
 //!
-//! This module provides SMT-based constraint provability checking,
-//! replacing the permissive syntactic fallback with a sound decision procedure.
+//! The oracle translates DTAL index expressions and constraints into Z3 terms
+//! and proves goals by checking whether the context plus the negated goal is
+//! unsatisfiable.
+//!
+//! # Proof Rule
+//!
+//! ```text
+//! context |= goal
+//!     iff
+//! context AND not(goal) is UNSAT
+//! ```
+//!
+//! # Design Notes
+//!
+//! Array selects are modeled as uninterpreted functions named after the current
+//! versioned array. That lets store operations introduce fresh array versions
+//! while keeping ordinary arithmetic constraints in integer logic.
+//!
+//! # Errors
+//!
+//! The public oracle returns `false` for goals it cannot prove. It does not
+//! expose solver errors; verifier callers turn failed proofs into
+//! [`crate::verifier::VerifyError`] variants with contextual constraints.
+//!
+//! # Related Modules
+//!
+//! The verifier checker builds the constraints proved here, and
+//! [`crate::backend::dtal::constraints`] defines the source syntax.
 
 use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,17 +35,16 @@ use std::time::Instant;
 use z3::ast::{Bool, Int};
 use z3::{FuncDecl, SatResult, Solver, Sort};
 
-// Global counters for verifier SMT query instrumentation
 static VERIFIER_SMT_QUERIES: AtomicU64 = AtomicU64::new(0);
 static VERIFIER_SMT_TIME_NS: AtomicU64 = AtomicU64::new(0);
 
-/// Reset verifier SMT counters
+/// Reset verifier SMT query counters.
 pub fn reset_verifier_smt_stats() {
     VERIFIER_SMT_QUERIES.store(0, Ordering::Relaxed);
     VERIFIER_SMT_TIME_NS.store(0, Ordering::Relaxed);
 }
 
-/// Get (query_count, total_time_ns) for verifier SMT queries
+/// Return `(query_count, total_time_ns)` for verifier SMT queries.
 pub fn get_verifier_smt_stats() -> (u64, u64) {
     (
         VERIFIER_SMT_QUERIES.load(Ordering::Relaxed),
@@ -37,11 +62,11 @@ fn z3_int_from_i128(n: i128) -> Int {
     }
 }
 
-/// Z3-based constraint oracle for the verifier
+/// SMT constraint oracle used by verifier checks.
 pub struct ConstraintOracle;
 
 impl ConstraintOracle {
-    /// Translate an IndexExpr into a Z3 integer expression
+    /// Translate an `IndexExpr` into a Z3 integer expression.
     fn translate_index_expr(expr: &IndexExpr) -> Int {
         match expr {
             IndexExpr::Const(n) => z3_int_from_i128(*n),
@@ -61,7 +86,7 @@ impl ConstraintOracle {
         }
     }
 
-    /// Translate a Constraint into a Z3 boolean expression
+    /// Translate a `Constraint` into a Z3 boolean expression.
     fn translate_constraint(c: &Constraint) -> Bool {
         match c {
             Constraint::True => Bool::from_bool(true),
@@ -141,7 +166,7 @@ impl ConstraintOracle {
         }
     }
 
-    /// Check if a goal constraint is provable from a set of context constraints.
+    /// Check whether a goal constraint is provable from context.
     ///
     /// Uses the standard "negate and check unsatisfiability" pattern:
     /// if context /\ !goal is UNSAT, then context |= goal (the goal is provable).
@@ -150,21 +175,18 @@ impl ConstraintOracle {
 
         let solver = Solver::new();
 
-        // Assert all context constraints
         for ctx in context {
             let formula = Self::translate_constraint(ctx);
             solver.assert(&formula);
         }
 
-        // Negate the goal
         let goal_formula = Self::translate_constraint(goal);
         let negated_goal = goal_formula.not();
         solver.assert(&negated_goal);
 
         let result = match solver.check() {
-            SatResult::Unsat => true,    // Goal is provable
-            SatResult::Sat => false,     // Counterexample exists
-            SatResult::Unknown => false, // Solver couldn't determine
+            SatResult::Unsat => true,
+            SatResult::Sat | SatResult::Unknown => false,
         };
 
         let elapsed = start.elapsed().as_nanos() as u64;
@@ -181,8 +203,6 @@ mod tests {
 
     #[test]
     fn test_existential_mid_plus_one_ge_zero() {
-        // (v11 + ((v10 - v11) / 2)) + 1 >= 0
-        // given: v11 >= 0, v11 <= v10, v10 < 10
         let v11 = IndexExpr::Var("v11".to_string());
         let v10 = IndexExpr::Var("v10".to_string());
         let mid = IndexExpr::Add(

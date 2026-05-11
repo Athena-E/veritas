@@ -36,11 +36,12 @@ snapshots.
 Concrete tampered `.dtal` artifacts can be regenerated with:
 
 ```bash
-cargo run --bin generate_dtal_tampering
+cargo run -- --generate-dtal-tampering
 ```
 
 This writes the current corpus to `eval/dtal_tampering/generated/`, so each
-case can be checked manually with `--verify-dtal`.
+case can be checked manually with `--verify-dtal`. To write the corpus
+somewhere else, use `--tampering-out-dir <dir>`.
 
 Current coverage:
 

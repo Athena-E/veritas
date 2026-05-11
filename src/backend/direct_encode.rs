@@ -1,11 +1,27 @@
-//! Trivial Physical DTAL → x86-64 Encoder
+//! Direct physical-DTAL to x86-64 encoder.
 //!
-//! Maps physically-allocated DTAL instructions 1:1 to x86-64 instructions,
-//! then uses the existing x86 instruction encoder to produce machine code.
+//! This trusted backend maps already-verified, physically allocated DTAL to
+//! x86-64 instructions and then invokes the instruction encoder.
 //!
-//! This module is part of the Trusted Computing Base. Its correctness is
-//! critical but easy to audit — each DTAL instruction maps to exactly one
-//! x86 instruction (or a small fixed sequence for Prologue/Epilogue).
+//! # Expected Input
+//!
+//! ```text
+//! virtual DTAL --physalloc--> physical DTAL --verifier--> direct encoder
+//! ```
+//!
+//! All virtual registers must already be removed. Encountering one here means
+//! [`crate::backend::physalloc`] missed a live register and this module panics.
+//!
+//! # Design Notes
+//!
+//! The encoder deliberately performs little analysis: it trusts the verifier
+//! result and lowers physical DTAL one instruction at a time. Keeping this
+//! layer simple makes the trusted computing base easier to audit.
+//!
+//! # Related Modules
+//!
+//! [`crate::backend::x86_64::encode`] performs byte encoding, while
+//! [`crate::backend::runtime`] supplies trusted runtime entry points.
 
 use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
 use crate::backend::dtal::regs::{PhysicalReg, Reg};
@@ -13,7 +29,7 @@ use crate::backend::x86_64::encode::{EncodedProgram, Encoder};
 use crate::backend::x86_64::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use crate::backend::x86_64::regs::X86Reg;
 
-/// Map a DTAL PhysicalReg to an x86-64 register.
+/// Map a DTAL `PhysicalReg` to an x86-64 register.
 fn phys_to_x86(preg: PhysicalReg) -> X86Reg {
     match preg {
         PhysicalReg::R0 => X86Reg::Rdi,
@@ -58,6 +74,12 @@ fn cmpop_to_condition(op: CmpOp) -> Condition {
 }
 
 /// Encode a physically-allocated DTAL program to machine code.
+///
+/// # Panics
+///
+/// Panics if a live virtual register reaches this trusted encoder. Run
+/// [`crate::backend::physalloc::physically_allocate`] and verify the result
+/// before calling this function.
 pub fn encode_physical_dtal(program: &DtalProgram) -> EncodedProgram {
     let x86_program = lower_to_x86(program);
     let mut encoder = Encoder::new();
@@ -280,15 +302,13 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::PortIn { .. } => {
-            // in al, dx (port in DX, result in AL)
+            // Read from the port in DX; the byte result is returned in AL.
             out.push(X86Instr::InAlDx);
-            // movzx rax, al (zero-extend byte to 64-bit)
-            // Note: the runtime blob handles this; in direct encode we trust
-            // the physalloc has set up the registers correctly
+            // Physalloc is responsible for placing operands in the right regs.
         }
 
         DtalInstr::PortOut { .. } => {
-            // out dx, al (value in AL, port in DX)
+            // Write the byte in AL to the port in DX.
             out.push(X86Instr::OutDxAl);
         }
 

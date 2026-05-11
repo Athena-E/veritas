@@ -16,8 +16,6 @@ fn sort(arr: [int; 5]) -> [int; 5] {
                 let tmp: int = a[j];
                 a[j] = a[j + 1];
                 a[j + 1] = tmp;
-            } else {
-                let skip: int = 0;
             }
         }
     }

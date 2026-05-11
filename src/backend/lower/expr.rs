@@ -91,7 +91,6 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
 /// Returns Constraint::True if the expression cannot be represented.
 fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
     match &expr.0 {
-        // Boolean literals
         TExpr::Literal {
             value: Literal::Bool(true),
             ..
@@ -101,7 +100,6 @@ fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
             ..
         } => Constraint::False,
 
-        // Comparison operations
         TExpr::BinOp {
             op,
             lhs,
@@ -137,7 +135,6 @@ fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
             _ => Constraint::True,
         },
 
-        // Negation
         TExpr::UnaryOp {
             op: AstUnaryOp::Not,
             operand,
@@ -157,7 +154,6 @@ pub fn lower_expr<'src>(
 ) -> VirtualReg {
     match &expr.0 {
         TExpr::Error { ty } => {
-            // Error recovery: emit a placeholder value
             let dst = ctx.fresh_reg();
             ctx.emit(TirInstr::LoadImm {
                 dst,
@@ -170,13 +166,9 @@ pub fn lower_expr<'src>(
         TExpr::Literal { value, ty } => lower_literal(ctx, value, ty),
 
         TExpr::Variable { name, ty } => {
-            // Look up the variable in the current scope.
-            // If not found, it may be a global constant — emit its value directly
-            // using the singleton type from the typechecker.
             if let Some(reg) = ctx.lookup_var(name) {
                 reg
             } else if let IType::SingletonInt(IValue::Int(n)) = ty {
-                // Global constant with known value — inline as LoadImm
                 let dst = ctx.fresh_reg();
                 ctx.emit(TirInstr::LoadImm {
                     dst,
@@ -360,7 +352,6 @@ fn lower_call<'src>(
     ownership: OwnershipMode,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    // Lower all arguments
     let mut borrow_end_regs = Vec::new();
     let lowered_args: Vec<(VirtualReg, IType<'src>)> = args
         .iter()
@@ -461,7 +452,6 @@ fn lower_call<'src>(
     let (arg_regs, arg_types): (Vec<VirtualReg>, Vec<IType<'src>>) =
         lowered_args.into_iter().unzip();
 
-    // For unit-returning functions, don't try to capture the return value
     if matches!(ty, IType::Unit) {
         ctx.emit(TirInstr::Call {
             dst: None,
@@ -484,7 +474,6 @@ fn lower_call<'src>(
             }
         }
 
-        // Return a dummy unit value
         let dst = ctx.fresh_reg();
         ctx.emit(TirInstr::LoadImm {
             dst,
@@ -660,14 +649,12 @@ fn lower_array_init<'src>(
         _ => panic!("Array size must be a constant integer"),
     };
 
-    // Walk into nested ArrayInits to get the scalar init and total flat count.
     let (scalar_expr, inner_flat) = extract_flat_init(value);
     let total_flat = outer_size * inner_flat;
 
     let scalar_ty = scalar_expr.0.get_type().clone();
 
-    // Allocate total_flat slots. element_ty records the scalar type; codegen
-    // treats each slot as 8 bytes regardless.
+    // Codegen treats each flattened scalar slot as 8 bytes.
     let arr_reg = ctx.fresh_reg();
     ctx.emit(TirInstr::AllocArray {
         dst: arr_reg,
@@ -676,10 +663,7 @@ fn lower_array_init<'src>(
         region: ctx.current_region(),
     });
 
-    // Zero-init fast path: hosted `__rt_alloc` (mmap) returns zero-filled
-    // pages, so literal-zero initializers need no explicit stores. This makes
-    // `[[0; N]; N]` viable for large N (polybench-scale matrices) — otherwise
-    // the unrolled stores blow up TIR size.
+    // Avoid unrolling stores for large zero-filled matrices.
     let is_zero_literal = matches!(
         &scalar_expr.0,
         TExpr::Literal {
@@ -748,20 +732,16 @@ pub fn lower_if_expr<'src>(
     else_block: Option<&TBlock<'src>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    // 1. Lower the condition expression in the current block
     let cond_reg = lower_expr(ctx, cond);
     let cond_block = ctx.current_block().expect("Should be in a block");
 
-    // 2. Create CFG blocks for then, else, and merge
     let then_cfg_block = ctx.new_block();
     let else_cfg_block = ctx.new_block();
     let merge_block = ctx.new_block();
 
-    // 3. Derive constraints from the condition expression
     let true_constraint = expr_to_constraint(cond);
     let false_constraint = negate_constraint(true_constraint.clone());
 
-    // 4. Finish the condition block with a branch
     ctx.finish_block(
         Terminator::Branch {
             cond: cond_reg,
@@ -773,22 +753,17 @@ pub fn lower_if_expr<'src>(
         vec![], // predecessors filled by builder
     );
 
-    // 5. Lower the then branch
     ctx.start_block(then_cfg_block);
 
-    // Snapshot variable state before then branch
     let vars_before_then = ctx.snapshot_var_map();
     let var_types_before_then = ctx.snapshot_var_type_map();
 
-    // Lower the then block and get its result
     let then_result = lower_block_with_result(ctx, then_block, ty);
 
-    // Record then block's end for phi
     let then_end_block = ctx.current_block().expect("Should be in then block");
     let vars_after_then = ctx.snapshot_var_map();
     let var_types_after_then = ctx.snapshot_var_type_map();
 
-    // Jump to merge
     ctx.finish_block(
         Terminator::Jump {
             target: merge_block,
@@ -796,21 +771,15 @@ pub fn lower_if_expr<'src>(
         vec![cond_block],
     );
 
-    // 5. Lower the else branch
     ctx.start_block(else_cfg_block);
 
-    // Restore variable state to before the if (for else branch)
-    // The else branch should see variables as they were BEFORE the then branch,
-    // not after. This ensures proper phi node creation at the merge point.
+    // Lower else from the same incoming bindings as then.
     ctx.restore_var_map(vars_before_then.clone());
     ctx.restore_var_type_map(var_types_before_then.clone());
 
     let else_result = if let Some(else_block_ref) = else_block {
         lower_block_with_result(ctx, else_block_ref, ty)
     } else {
-        // No else block - produce a default value
-        // For Unit type, this is fine; for other types this shouldn't happen
-        // (type checker should have caught it)
         let dst = ctx.fresh_reg();
         ctx.emit(TirInstr::LoadImm {
             dst,
@@ -824,7 +793,6 @@ pub fn lower_if_expr<'src>(
     let vars_after_else = ctx.snapshot_var_map();
     let var_types_after_else = ctx.snapshot_var_type_map();
 
-    // Jump to merge
     ctx.finish_block(
         Terminator::Jump {
             target: merge_block,
@@ -832,11 +800,8 @@ pub fn lower_if_expr<'src>(
         vec![cond_block],
     );
 
-    // 6. Create merge block with phi nodes
     ctx.start_block(merge_block);
 
-    // Create phi nodes for any variables modified in either branch
-    // Compare vars_after_then and vars_after_else with vars_before_then
     create_phi_nodes_for_modified_vars(
         ctx,
         BranchPhiInputs {
@@ -860,7 +825,6 @@ pub fn lower_if_expr<'src>(
         });
         result_reg
     } else {
-        // Create phi node for the result value.
         let result_reg = ctx.fresh_reg();
         let mut result_phi = PhiNode::new(result_reg, widen_itype(ty.clone()));
         result_phi.add_incoming(then_end_block, then_result);
@@ -884,12 +848,10 @@ fn lower_block_with_result<'src>(
 
     ctx.enter_scope();
 
-    // Lower all statements
     for stmt in &block.statements {
         lower_stmt(ctx, stmt);
     }
 
-    // If there's a trailing expression, that's the block's value
     if let Some(trailing) = &block.trailing_expr {
         let result = lower_expr(ctx, trailing);
         ctx.emit_scope_exit_drops();
@@ -897,10 +859,7 @@ fn lower_block_with_result<'src>(
         return result;
     }
 
-    // No trailing expression - check if last statement is an expression whose
-    // value we need (backward compat for blocks that use the last statement as
-    // their value). Skip for Unit-typed blocks to avoid double-lowering
-    // if-else statements that are used purely for side effects.
+    // Compatibility: non-unit blocks may use the last expression statement as a value.
     if !matches!(ty, IType::Unit)
         && let Some(last) = block.statements.last()
         && let TStmt::Expr(expr) = &last.0
@@ -911,7 +870,6 @@ fn lower_block_with_result<'src>(
         return result;
     }
 
-    // No value - emit default
     let dst = ctx.fresh_reg();
     ctx.emit(TirInstr::LoadImm {
         dst,
@@ -950,14 +908,11 @@ fn create_phi_nodes_for_modified_vars<'src>(
         else_block,
     } = inputs;
 
-    // Find variables that were modified in either branch
     for (name, &before_reg) in vars_before {
         let then_reg = vars_after_then.get(name).copied().unwrap_or(before_reg);
         let else_reg = vars_after_else.get(name).copied().unwrap_or(before_reg);
 
-        // If the variable has different values in then vs else (or vs before)
         if then_reg != else_reg {
-            // Need a phi node
             let phi_dst = ctx.fresh_reg();
             let before_ty = var_types_before
                 .get(name)
@@ -977,10 +932,8 @@ fn create_phi_nodes_for_modified_vars<'src>(
             phi.add_incoming(else_block, else_reg);
             ctx.emit_phi(phi);
 
-            // Update var_map to point to the phi result
             ctx.bind_var_typed(name, phi_dst, var_ty);
         } else if then_reg != before_reg {
-            // Both branches modified it the same way - just update binding
             let var_ty = var_types_after_then
                 .get(name)
                 .cloned()

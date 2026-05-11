@@ -1,17 +1,40 @@
-//! Verification error types
+//! Verification errors reported by the DTAL verifier.
 //!
-//! This module defines error types for the DTAL verifier with
-//! detailed diagnostics for debugging verification failures.
+//! # Error Categories
+//!
+//! ```text
+//! VerifyError
+//!   |- typing and singleton mismatches
+//!   |- ownership and consumed-register violations
+//!   |- CFG join failures
+//!   |- bounds, precondition, and postcondition failures
+//!   `- internal invariants
+//! ```
+//!
+//! # Design Notes
+//!
+//! The enum carries structured context instead of only formatted strings so
+//! callers can choose between human-readable reports and tooling-friendly
+//! diagnostics. Display formatting is intentionally concise and includes the
+//! current constraint context for proof failures.
+//!
+//! # Related Modules
+//!
+//! The verifier checker and dataflow modules produce these errors.
+//! [`crate::verifier::smt`] is the source of most proof-failure context.
 
 use crate::backend::dtal::constraints::Constraint;
 use crate::backend::dtal::regs::Reg;
 use crate::backend::dtal::types::DtalType;
 use std::fmt;
 
-/// Verification error
+/// Error emitted while verifying a DTAL program.
+///
+/// Variants are grouped by the invariant that failed: type derivation,
+/// ownership, control-flow joins, contract obligations, constraint proofs, or
+/// verifier-internal assumptions.
 #[derive(Debug)]
 pub enum VerifyError {
-    /// Type annotation doesn't match actual value
     TypeMismatch {
         block: String,
         instr_desc: String,
@@ -19,20 +42,22 @@ pub enum VerifyError {
         actual: DtalType,
     },
 
-    /// Register used before definition
-    UndefinedRegister { reg: Reg, block: String },
+    UndefinedRegister {
+        reg: Reg,
+        block: String,
+    },
 
-    /// Register used after its owned value was consumed by move/drop
-    ConsumedRegister { reg: Reg, block: String },
+    ConsumedRegister {
+        reg: Reg,
+        block: String,
+    },
 
-    /// Constraint cannot be proven from context
     UnprovableConstraint {
         constraint: Constraint,
         context: Vec<Constraint>,
         block: String,
     },
 
-    /// Type states incompatible at join point
     JoinMismatch {
         block: String,
         reg: Reg,
@@ -41,14 +66,12 @@ pub enum VerifyError {
         from_block: String,
     },
 
-    /// Singleton type value mismatch
     SingletonMismatch {
         block: String,
         expected_value: i128,
         actual_value: i128,
     },
 
-    /// Binary operation type error
     BinOpTypeMismatch {
         block: String,
         op: String,
@@ -56,20 +79,20 @@ pub enum VerifyError {
         rhs_type: DtalType,
     },
 
-    /// Return type doesn't match function signature
     ReturnTypeMismatch {
         function: String,
         expected: DtalType,
         actual: DtalType,
     },
 
-    /// Function not found
-    UnknownFunction { name: String },
+    UnknownFunction {
+        name: String,
+    },
 
-    /// Block not found
-    UnknownBlock { label: String },
+    UnknownBlock {
+        label: String,
+    },
 
-    /// Bounds check failed for memory access
     BoundsCheckFailed {
         block: String,
         instr_desc: String,
@@ -77,14 +100,12 @@ pub enum VerifyError {
         context: Vec<Constraint>,
     },
 
-    /// Postcondition not provable at return
     PostconditionFailed {
         function: String,
         constraint: Constraint,
         context: Vec<Constraint>,
     },
 
-    /// Precondition not provable at call site
     PreconditionFailed {
         block: String,
         callee: String,
@@ -92,17 +113,17 @@ pub enum VerifyError {
         context: Vec<Constraint>,
     },
 
-    /// Arithmetic overflow on i64-typed operation
     ArithmeticOverflow {
         block: String,
         op: String,
         context: Vec<Constraint>,
     },
 
-    /// Internal error (should not happen)
-    InternalError { msg: String },
+    // Indicates an invariant violation inside the verifier.
+    InternalError {
+        msg: String,
+    },
 
-    /// Ownership rule violated
     OwnershipViolation {
         block: String,
         instr_desc: String,

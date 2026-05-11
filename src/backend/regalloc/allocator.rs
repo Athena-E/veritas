@@ -77,38 +77,29 @@ impl LinearScanAllocator {
 
     /// Allocate registers for a function
     pub fn allocate(&mut self, func: &DtalFunction) -> AllocationResult {
-        // Reset state
         self.active.clear();
         self.free_regs = self.available_regs.clone();
         self.allocation.clear();
         self.next_spill_slot = -8;
         self.callee_saved_used.clear();
 
-        // Compute liveness
         let liveness = LivenessAnalysis::analyze(func);
 
-        // Build live intervals
         let mut intervals = self.compute_live_intervals(func, &liveness);
 
-        // Sort intervals by start position
         intervals.sort_by_key(|i| i.start);
 
-        // Process each interval
         for interval in intervals {
-            // Expire old intervals
             self.expire_old_intervals(interval.start);
 
             if self.free_regs.is_empty() {
-                // Need to spill
                 self.spill_at_interval(&interval);
             } else {
-                // Allocate a free register
                 let reg = self.free_regs.pop().unwrap();
                 self.allocation.insert(interval.vreg, Location::Reg(reg));
                 self.active.push((interval, reg));
                 self.active.sort_by_key(|(i, _)| i.end);
 
-                // Track callee-saved usage
                 if reg.is_callee_saved() {
                     self.callee_saved_used.insert(reg);
                 }
@@ -131,7 +122,6 @@ impl LinearScanAllocator {
         func: &DtalFunction,
         liveness: &LivenessInfo,
     ) -> Vec<LiveInterval> {
-        // Track first def and last use for each register
         let mut intervals: BTreeMap<VirtualReg, LiveInterval> = BTreeMap::new();
 
         let mut position = 0usize;
@@ -139,7 +129,6 @@ impl LinearScanAllocator {
         for block in &func.blocks {
             let block_info = &liveness.blocks[&block.label];
 
-            // Registers live at block entry extend their intervals
             for &vreg in &block_info.live_in {
                 intervals.entry(vreg).or_insert(LiveInterval {
                     vreg,
@@ -150,7 +139,6 @@ impl LinearScanAllocator {
             }
 
             for instr in &block.instructions {
-                // Handle definitions
                 if let Some(vreg) = Self::get_def(instr) {
                     let interval = intervals.entry(vreg).or_insert(LiveInterval {
                         vreg,
@@ -159,15 +147,10 @@ impl LinearScanAllocator {
                         uses: Vec::new(),
                     });
                     interval.start = interval.start.min(position);
-                    // Also extend end to cover this def point. This prevents
-                    // the allocator from reusing the register between defs,
-                    // which would cause a later def to clobber another variable
-                    // that was assigned the same register after the interval
-                    // appeared to expire.
+                    // Keep multi-def intervals live through each definition.
                     interval.end = interval.end.max(position);
                 }
 
-                // Handle uses
                 for vreg in Self::get_uses(instr) {
                     let interval = intervals.entry(vreg).or_insert(LiveInterval {
                         vreg,
@@ -182,7 +165,6 @@ impl LinearScanAllocator {
                 position += 1;
             }
 
-            // Registers live at block exit extend their intervals
             for &vreg in &block_info.live_out {
                 if let Some(interval) = intervals.get_mut(&vreg) {
                     interval.end = interval.end.max(position.saturating_sub(1));
@@ -195,13 +177,11 @@ impl LinearScanAllocator {
 
     /// Expire intervals that end before the current position
     fn expire_old_intervals(&mut self, position: usize) {
-        // Find intervals that have ended
         let (expired, still_active): (Vec<_>, Vec<_>) = self
             .active
             .drain(..)
             .partition(|(interval, _)| interval.end < position);
 
-        // Return expired registers to free pool
         for (_, reg) in expired {
             self.free_regs.push(reg);
         }
@@ -212,16 +192,13 @@ impl LinearScanAllocator {
     /// Spill a register to make room for a new interval
     fn spill_at_interval(&mut self, interval: &LiveInterval) {
         if let Some(last_idx) = self.active.iter().position(|(i, _)| i.end > interval.end) {
-            // Spill the interval with furthest endpoint
             let (spilled_interval, reg) = self.active.remove(last_idx);
 
-            // Allocate stack slot for spilled register
             let slot = self.next_spill_slot;
             self.next_spill_slot -= 8;
             self.allocation
                 .insert(spilled_interval.vreg, Location::Stack(slot));
 
-            // Give the freed register to the new interval
             self.allocation.insert(interval.vreg, Location::Reg(reg));
             self.active.push((interval.clone(), reg));
             self.active.sort_by_key(|(i, _)| i.end);
@@ -230,7 +207,6 @@ impl LinearScanAllocator {
                 self.callee_saved_used.insert(reg);
             }
         } else {
-            // Spill the new interval instead
             let slot = self.next_spill_slot;
             self.next_spill_slot -= 8;
             self.allocation.insert(interval.vreg, Location::Stack(slot));
@@ -332,9 +308,7 @@ impl GraphColoringAllocator {
         let liveness = LivenessAnalysis::analyze(func);
         let graph = InterferenceGraph::build(func, &liveness);
 
-        // Compute which virtual registers are live across call instructions.
-        // These must NOT be assigned to caller-saved registers because the
-        // callee will clobber them.
+        // Values live across calls must avoid caller-saved registers.
         let mut live_across_calls: HashSet<VirtualReg> = HashSet::new();
         for block in &func.blocks {
             let block_info = &liveness.blocks[&block.label];
@@ -342,29 +316,23 @@ impl GraphColoringAllocator {
                 LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
             for (instr_idx, live_set) in live_sets.iter().enumerate() {
                 if matches!(block.instructions[instr_idx], DtalInstr::Call { .. }) {
-                    // Everything live AFTER the call is live across it
                     live_across_calls.extend(live_set.iter().copied());
                 }
             }
         }
 
-        // Collect all virtual registers from the function (sorted for determinism)
         let mut all_vregs: Vec<VirtualReg> = Self::collect_all_vregs(func).into_iter().collect();
         all_vregs.sort_by_key(|v| v.0);
 
-        // Simplify: repeatedly remove nodes with degree < k
         let mut stack: Vec<VirtualReg> = Vec::new();
         let mut removed: HashSet<VirtualReg> = HashSet::new();
         let mut current_degree: BTreeMap<VirtualReg, usize> = BTreeMap::new();
 
-        // Initialize degrees (registers not in graph have degree 0)
         for &vreg in &all_vregs {
             current_degree.insert(vreg, graph.degree(vreg));
         }
 
-        // Simplify phase
         while removed.len() < all_vregs.len() {
-            // Find a node with degree < k (pick smallest vreg for determinism)
             let candidate = current_degree
                 .iter()
                 .filter(|(node, deg)| !removed.contains(node) && **deg < self.num_regs)
@@ -372,19 +340,15 @@ impl GraphColoringAllocator {
                 .map(|(node, _)| *node);
 
             if let Some(node) = candidate {
-                // Remove this node
                 stack.push(node);
                 removed.insert(node);
 
-                // Decrease degree of neighbors
                 for neighbor in graph.neighbors(node) {
                     if !removed.contains(&neighbor) {
                         *current_degree.get_mut(&neighbor).unwrap() -= 1;
                     }
                 }
             } else {
-                // No low-degree node found - need to spill
-                // Choose node with highest degree (break ties by smallest vreg)
                 let spill_candidate = current_degree
                     .iter()
                     .filter(|(node, _)| !removed.contains(node))
@@ -406,13 +370,11 @@ impl GraphColoringAllocator {
             }
         }
 
-        // Select phase: assign colors by popping from stack
         let mut allocation: BTreeMap<VirtualReg, Location> = BTreeMap::new();
         let mut callee_saved_used: HashSet<X86Reg> = HashSet::new();
         let mut next_spill_slot: i32 = -8;
 
         while let Some(node) = stack.pop() {
-            // Find colors used by neighbors
             let neighbor_colors: HashSet<X86Reg> = graph
                 .neighbors(node)
                 .filter_map(|n| {
@@ -423,9 +385,6 @@ impl GraphColoringAllocator {
                 })
                 .collect();
 
-            // Find an available color.
-            // If this vreg is live across a call, exclude caller-saved registers
-            // (the callee will clobber them).
             let must_use_callee_saved = live_across_calls.contains(&node);
             let available_color = self.available_regs.iter().find(|r| {
                 !neighbor_colors.contains(r) && (!must_use_callee_saved || r.is_callee_saved())
@@ -437,7 +396,6 @@ impl GraphColoringAllocator {
                     callee_saved_used.insert(reg);
                 }
             } else {
-                // Must spill
                 allocation.insert(node, Location::Stack(next_spill_slot));
                 next_spill_slot -= 8;
             }

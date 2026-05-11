@@ -1,30 +1,39 @@
-//! Veritas Compiler Backend
+//! Veritas compiler backend.
 //!
-//! This module implements the backend of the Veritas compiler, which translates
-//! the typed AST from the frontend into DTAL (Dependently Typed Assembly Language)
-//! and optionally to native x86-64 machine code.
+//! The backend owns every representation after frontend type checking. It
+//! lowers typed AST into [`tir`], emits DTAL through [`codegen`], and can
+//! continue through physical allocation and x86-64 encoding for native
+//! execution.
 //!
-//! # Architecture
+//! # Pipeline
 //!
 //! ```text
-//! ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-//! │   Typed AST     │────▶│  TIR Lowering   │────▶│  DTAL Emitter   │
-//! │   (TProgram)    │      │   (SSA form)    │      │                 │
-//! └─────────────────┘      └─────────────────┘      └─────────────────┘
-//!                                                         │
-//!                                                         ▼
-//!                                                 ┌─────────────────┐
-//!                                                 │   x86-64        │
-//!                                                 │   Assembler     │
-//!                                                 └─────────────────┘
+//! typed frontend program
+//!        |
+//!        v
+//! TIR: typed SSA control-flow graph
+//!        |
+//!        v
+//! DTAL: verifier-visible assembly with types and constraints
+//!        |
+//!        v
+//! physical DTAL -> x86-64 IR -> encoded program
 //! ```
 //!
-//! # Modules
+//! # Design Notes
 //!
-//! - `dtal`: DTAL AST definitions (target language)
-//! - `tir`: Typed Intermediate Representation with SSA
-//! - `lower`: TAST to TIR lowering
-//! - `x86_64`: x86-64 code generation backend
+//! DTAL remains the trust boundary: optimisation, register allocation, and
+//! lowering may transform programs, but the verifier can re-check the emitted
+//! types, ownership facts, contracts, and constraints before machine-code
+//! emission. This keeps backend passes useful for performance without making
+//! them part of the proof story.
+//!
+//! # Related Modules
+//!
+//! - [`tir`] defines the typed SSA IR used by frontend lowering.
+//! - [`physalloc`] maps virtual-register DTAL to physical-register DTAL.
+//! - [`x86_64`] contains the target instruction IR and encoder.
+//! - [`crate::verifier`] validates DTAL before native execution.
 
 pub mod codegen;
 pub mod direct_encode;
@@ -39,19 +48,14 @@ pub mod runtime;
 pub mod tir;
 pub mod x86_64;
 
-// Re-export commonly used types from dtal
 pub use dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
 
-// Re-export commonly used types from tir
 pub use tir::{
     BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr, TirProgram,
 };
 
-// Re-export lowering function
 pub use lower::lower_program;
 
-// Re-export codegen function
 pub use codegen::codegen_program;
 
-// Re-export emit function
 pub use emit::emit_program;

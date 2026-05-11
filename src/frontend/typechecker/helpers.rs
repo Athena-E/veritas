@@ -5,23 +5,33 @@ use crate::common::ast::{BinOp, Block, Expr, Literal, UnaryOp};
 use crate::common::span::Span;
 use crate::common::types::{IProposition, IType, IValue};
 use chumsky::prelude::SimpleSpan;
+use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Global counter for generating fresh variable names
-static FRESH_VAR_COUNTER: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    /// Per-compilation-thread counter for generating fresh variable names.
+    ///
+    /// The pipeline resets this before each compile to keep emitted DTAL stable.
+    /// Keeping it thread-local avoids parallel test runs resetting another
+    /// compilation while that compilation is still synthesizing refinements.
+    static FRESH_VAR_COUNTER: Cell<u64> = const { Cell::new(0) };
+}
 
 /// Generate a fresh variable name that won't conflict with user variables
 /// Uses the prefix `_synth_` which is unlikely to be used by programmers
 pub fn fresh_var_name() -> String {
-    let id = FRESH_VAR_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let id = FRESH_VAR_COUNTER.with(|counter| {
+        let id = counter.get();
+        counter.set(id + 1);
+        id
+    });
     format!("_synth_{}", id)
 }
 
 /// Reset the fresh variable counter (useful for testing)
 #[allow(dead_code)]
 pub fn reset_fresh_var_counter() {
-    FRESH_VAR_COUNTER.store(0, Ordering::SeqCst);
+    FRESH_VAR_COUNTER.with(|counter| counter.set(0));
 }
 
 /// Build a refined type that captures the expression's value symbolically
@@ -123,14 +133,13 @@ pub fn checked_fold_in_range(op: BinOp, n1: i128, n2: i128, lo: i128, hi: i128) 
     }
 }
 
-/// Phase 2 entry point: when the typechecker detects i64-mode arithmetic
-/// (or has `check_overflow` enabled globally), this helper rejects any
+/// Phase 2 entry point: when the typechecker detects bounded machine-integer
+/// arithmetic, this helper rejects any
 /// compile-time-known arithmetic that would overflow the given bounds.
 ///
 /// `range_lo` and `range_hi` specify the valid result range:
 ///  - For i64: `(i64::MIN as i128, i64::MAX as i128)`
-///  - For u64 (future): `(0, u64::MAX as i128)`
-///  - For --check-overflow on int: same as i64
+///  - For u64: `(0, u64::MAX as i128)`
 ///
 /// If both operands are singleton ints and the result exceeds the range,
 /// this raises `IntegerOverflow`.
@@ -384,9 +393,6 @@ pub fn check_array_bounds_expr<'src>(
 /// to prove it under the current typing context. If the oracle cannot discharge it,
 /// returns `TypeError::IntegerOverflow`.
 ///
-/// Phase 1: this helper exists but is not yet called from `synth_expr`. Wiring happens
-/// in Phase 3 behind the `--check-overflow` flag.
-#[allow(dead_code)]
 pub fn check_no_overflow<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     op: BinOp,
@@ -453,7 +459,9 @@ pub fn check_no_overflow<'src>(
         predicate: Arc::new((in_range, dummy_span)),
     };
 
-    if !check_provable(ctx, &prop) {
+    if !interval_proves_no_overflow(ctx, op, lhs_expr, rhs_expr, range_lo, range_hi)
+        && !check_provable(ctx, &prop)
+    {
         return Err(TypeError::IntegerOverflow {
             op: op_str.to_string(),
             span,
@@ -531,10 +539,174 @@ pub fn check_no_overflow<'src>(
     Ok(())
 }
 
+fn interval_proves_no_overflow<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    op: BinOp,
+    lhs_expr: &Expr<'src>,
+    rhs_expr: &Expr<'src>,
+    range_lo: i128,
+    range_hi: i128,
+) -> bool {
+    let Some((lhs_lo, lhs_hi)) = expr_interval(ctx, lhs_expr) else {
+        return false;
+    };
+    let Some((rhs_lo, rhs_hi)) = expr_interval(ctx, rhs_expr) else {
+        return false;
+    };
+
+    let result = match op {
+        BinOp::Add => checked_add_interval(lhs_lo, lhs_hi, rhs_lo, rhs_hi),
+        BinOp::Sub => checked_sub_interval(lhs_lo, lhs_hi, rhs_lo, rhs_hi),
+        BinOp::Mul => mul_interval(lhs_lo, lhs_hi, rhs_lo, rhs_hi),
+        _ => None,
+    };
+
+    let Some((result_lo, result_hi)) = result else {
+        return false;
+    };
+    result_lo >= range_lo && result_hi <= range_hi
+}
+
+fn checked_add_interval(
+    lhs_lo: i128,
+    lhs_hi: i128,
+    rhs_lo: i128,
+    rhs_hi: i128,
+) -> Option<(i128, i128)> {
+    Some((lhs_lo.checked_add(rhs_lo)?, lhs_hi.checked_add(rhs_hi)?))
+}
+
+fn checked_sub_interval(
+    lhs_lo: i128,
+    lhs_hi: i128,
+    rhs_lo: i128,
+    rhs_hi: i128,
+) -> Option<(i128, i128)> {
+    Some((lhs_lo.checked_sub(rhs_hi)?, lhs_hi.checked_sub(rhs_lo)?))
+}
+
+fn mul_interval(lhs_lo: i128, lhs_hi: i128, rhs_lo: i128, rhs_hi: i128) -> Option<(i128, i128)> {
+    let products = [
+        lhs_lo.checked_mul(rhs_lo)?,
+        lhs_lo.checked_mul(rhs_hi)?,
+        lhs_hi.checked_mul(rhs_lo)?,
+        lhs_hi.checked_mul(rhs_hi)?,
+    ];
+    let lo = *products.iter().min()?;
+    let hi = *products.iter().max()?;
+    Some((lo, hi))
+}
+
+fn expr_interval<'src>(
+    ctx: &crate::frontend::typechecker::TypingContext<'src>,
+    expr: &Expr<'src>,
+) -> Option<(i128, i128)> {
+    match expr {
+        Expr::Literal(Literal::Int(n)) => Some((*n, *n)),
+        Expr::Variable(name) => match ctx.lookup_var(name)? {
+            crate::frontend::typechecker::VarBinding::Immutable(ty) => type_interval(&ty),
+            crate::frontend::typechecker::VarBinding::Mutable(binding) => {
+                type_interval(&binding.current_type)
+            }
+        },
+        Expr::BinOp { op, lhs, rhs } => {
+            let (lhs_lo, lhs_hi) = expr_interval(ctx, &lhs.0)?;
+            let (rhs_lo, rhs_hi) = expr_interval(ctx, &rhs.0)?;
+            match op {
+                BinOp::Add => Some((lhs_lo.checked_add(rhs_lo)?, lhs_hi.checked_add(rhs_hi)?)),
+                BinOp::Sub => Some((lhs_lo.checked_sub(rhs_hi)?, lhs_hi.checked_sub(rhs_lo)?)),
+                BinOp::Mul => mul_interval(lhs_lo, lhs_hi, rhs_lo, rhs_hi),
+                _ => None,
+            }
+        }
+        Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            cond,
+        } => {
+            let (lo, hi) = expr_interval(ctx, &cond.0)?;
+            Some((hi.checked_neg()?, lo.checked_neg()?))
+        }
+        _ => None,
+    }
+}
+
+fn type_interval(ty: &IType) -> Option<(i128, i128)> {
+    match ty {
+        IType::SingletonInt(IValue::Int(n)) => Some((*n, *n)),
+        IType::I64 => Some((i64::MIN as i128, i64::MAX as i128)),
+        IType::U64 => Some((0, u64::MAX as i128)),
+        IType::RefinedInt { base, prop } => {
+            let interval = type_interval(base)?;
+            refine_interval_with_expr(interval, &prop.var, &prop.predicate.0)
+        }
+        IType::Master(inner) => type_interval(inner),
+        _ => None,
+    }
+}
+
+fn refine_interval_with_expr<'src>(
+    interval: (i128, i128),
+    var_name: &str,
+    expr: &Expr<'src>,
+) -> Option<(i128, i128)> {
+    match expr {
+        Expr::BinOp {
+            op: BinOp::And,
+            lhs,
+            rhs,
+        } => {
+            let interval = refine_interval_with_expr(interval, var_name, &lhs.0)?;
+            refine_interval_with_expr(interval, var_name, &rhs.0)
+        }
+        Expr::BinOp { op, lhs, rhs } => {
+            refine_interval_with_bound(interval, var_name, *op, &lhs.0, &rhs.0).or(Some(interval))
+        }
+        _ => Some(interval),
+    }
+}
+
+fn refine_interval_with_bound<'src>(
+    (lo, hi): (i128, i128),
+    var_name: &str,
+    op: BinOp,
+    lhs: &Expr<'src>,
+    rhs: &Expr<'src>,
+) -> Option<(i128, i128)> {
+    match (lhs, rhs) {
+        (Expr::Variable(name), Expr::Literal(Literal::Int(n))) if *name == var_name => {
+            apply_upper_lower_bound((lo, hi), op, *n)
+        }
+        (Expr::Literal(Literal::Int(n)), Expr::Variable(name)) if *name == var_name => {
+            apply_upper_lower_bound((lo, hi), reverse_cmp(op)?, *n)
+        }
+        _ => None,
+    }
+}
+
+fn apply_upper_lower_bound((lo, hi): (i128, i128), op: BinOp, n: i128) -> Option<(i128, i128)> {
+    match op {
+        BinOp::Eq => Some((lo.max(n), hi.min(n))),
+        BinOp::Lt => Some((lo, hi.min(n.checked_sub(1)?))),
+        BinOp::Lte => Some((lo, hi.min(n))),
+        BinOp::Gt => Some((lo.max(n.checked_add(1)?), hi)),
+        BinOp::Gte => Some((lo.max(n), hi)),
+        _ => None,
+    }
+}
+
+fn reverse_cmp(op: BinOp) -> Option<BinOp> {
+    match op {
+        BinOp::Eq => Some(BinOp::Eq),
+        BinOp::Lt => Some(BinOp::Gt),
+        BinOp::Lte => Some(BinOp::Gte),
+        BinOp::Gt => Some(BinOp::Lt),
+        BinOp::Gte => Some(BinOp::Lte),
+        _ => None,
+    }
+}
+
 /// Check that unary negation cannot overflow (operand must not be `INT_MIN`).
 ///
-/// Phase 1: not yet called from `synth_expr`. Wiring happens in Phase 3.
-#[allow(dead_code)]
 pub fn check_no_negation_overflow<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     operand_expr: &Expr<'src>,

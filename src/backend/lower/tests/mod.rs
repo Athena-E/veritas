@@ -245,7 +245,6 @@ fn test_lower_function_with_postcondition() {
     use chumsky::prelude::SimpleSpan;
     use std::sync::Arc;
 
-    // Create postcondition: result == 5
     let postcond_expr = Expr::BinOp {
         op: BinOp::Eq,
         lhs: Box::new((Expr::Variable("result"), SimpleSpan::new(0, 0))),

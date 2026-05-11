@@ -29,27 +29,22 @@ use std::collections::HashSet;
 pub fn eliminate_dead_code(func: &mut DtalFunction) -> bool {
     let mut changed = false;
 
-    // Run liveness analysis
     let liveness = LivenessAnalysis::analyze(func);
 
-    // Process each block
     for block in &mut func.blocks {
         let block_liveness = match liveness.blocks.get(&block.label) {
             Some(l) => l,
             None => continue,
         };
 
-        // Get per-instruction liveness (live_after for each instruction)
         let live_after_sets =
             LivenessAnalysis::compute_instruction_liveness(block, &block_liveness.live_out);
 
-        // Build list of instruction indices to keep
         let mut keep_indices = Vec::new();
         for (i, instr) in block.instructions.iter().enumerate() {
             let live_after = if i < live_after_sets.len() {
                 &live_after_sets[i]
             } else {
-                // Fallback to live_out if we don't have per-instruction info
                 &block_liveness.live_out
             };
 
@@ -60,7 +55,6 @@ pub fn eliminate_dead_code(func: &mut DtalFunction) -> bool {
             }
         }
 
-        // Rebuild instruction list with only kept instructions
         if changed {
             let new_instructions: Vec<_> = keep_indices
                 .into_iter()
@@ -80,17 +74,15 @@ pub fn eliminate_dead_code(func: &mut DtalFunction) -> bool {
 /// - Its defined register is live after the instruction
 /// - It's not a trivial self-move (mov r, r)
 fn should_keep_instruction(instr: &DtalInstr, live_after: &HashSet<VirtualReg>) -> bool {
-    // Remove trivial self-moves (mov r, r where src == dst)
     if is_trivial_move(instr) {
         return false;
     }
 
-    // Always keep instructions with side effects
     if has_side_effects(instr) {
         return true;
     }
 
-    // TypeAnnotation is metadata — keep only if its register is still live
+    // Keep metadata only while its target is live.
     if let DtalInstr::TypeAnnotation { reg, .. } = instr {
         return match reg {
             Reg::Virtual(vreg) => live_after.contains(vreg),
@@ -98,13 +90,10 @@ fn should_keep_instruction(instr: &DtalInstr, live_after: &HashSet<VirtualReg>) 
         };
     }
 
-    // Check if the instruction defines a register
     let def_reg = instruction_def(instr);
 
     match def_reg {
-        // If no definition, keep it (shouldn't happen for non-side-effect instrs)
         None => true,
-        // Keep if the defined register is live after this instruction
         Some(vreg) => live_after.contains(&vreg),
     }
 }
@@ -206,10 +195,8 @@ mod tests {
         let changed = eliminate_dead_code(&mut func);
         assert!(changed);
 
-        // v1 = 100 should have been removed
         assert_eq!(func.blocks[0].instructions.len(), 3);
 
-        // Check remaining instructions
         assert!(matches!(
             &func.blocks[0].instructions[0],
             DtalInstr::MovImm { dst, imm: 42, .. } if *dst == v0

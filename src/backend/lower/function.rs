@@ -18,11 +18,9 @@ use crate::common::types::{IProposition, IType};
 pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     let mut ctx = LoweringContext::new();
 
-    // Create the entry block
     let entry_block = ctx.new_block();
     ctx.start_block(entry_block);
 
-    // Allocate registers for parameters and bind them
     let mut params: Vec<(VirtualReg, IType<'src>)> = Vec::new();
     let mut param_names: Vec<String> = Vec::new();
     for param in &func.parameters {
@@ -36,10 +34,8 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
 
     ctx.enter_scope();
 
-    // Lower the function body statements
     lower_stmts(&mut ctx, &func.body.statements);
 
-    // Lower the return expression (if any) and create the return terminator
     let return_value = func.body.trailing_expr.as_ref().map(|trailing_expr| {
         let value_reg = lower_expr(&mut ctx, trailing_expr);
         if func.returns_owned && matches!(&trailing_expr.0, TExpr::Variable { .. }) {
@@ -61,7 +57,6 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     ctx.emit_scope_exit_drops();
     ctx.exit_scope();
 
-    // Finish the entry block with a return terminator
     ctx.finish_block(
         Terminator::Return {
             value: return_value,
@@ -74,8 +69,7 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         vec![], // Entry block has no predecessors
     );
 
-    // Lower precondition, but skip quantified preconditions (forall/exists)
-    // since the verifier can't yet reason about array contents
+    // Quantified preconditions are still verifier-only for arrays.
     let precondition = func
         .precondition
         .as_ref()
@@ -87,7 +81,6 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
         .as_ref()
         .and_then(|prop| proposition_to_constraint(prop));
 
-    // Build and return the function
     ctx.build_function(
         func.name.clone(),
         params,

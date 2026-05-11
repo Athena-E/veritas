@@ -1,22 +1,37 @@
-//! Verified Runtime
+//! Trusted runtime machine-code blob.
 //!
-//! Provides trusted machine code implementations of I/O primitives:
-//! - `print_int(n: int)`: Print a signed 64-bit integer followed by newline to stdout
-//! - `print_char(c: int)`: Print a single byte to stdout
-//! - `read_int() -> int`: Read a decimal integer from stdin
+//! Provides hand-assembled x86-64 Linux implementations of I/O primitives and
+//! hosted region helpers. This module is part of the trusted computing base;
+//! the DTAL verifier checks call signatures and preconditions at each call site.
 //!
-//! These are hand-assembled x86-64 Linux code sequences using the SysV ABI
-//! (first argument in rdi, return value in rax) and Linux syscalls
-//! (write=1, read=0 via the syscall instruction).
+//! # Layout
 //!
-//! This module is part of the Trusted Computing Base — its correctness is
-//! assumed, not verified by the DTAL verifier. The DTAL verifier checks that
-//! user code calls these functions with correct types and satisfies any
-//! preconditions.
+//! ```text
+//! runtime_code()
+//!   0x000 print_int
+//!   0x065 print_char
+//!   0x07e read_int
+//!   0x0d3 port_in
+//!   0x0dc port_out
+//!   0x0e4 region_enter
+//!   0x119 region_alloc
+//!   0x162 region_leave
+//! ```
+//!
+//! # Design Notes
+//!
+//! The runtime is stored as bytes rather than generated from DTAL because these
+//! operations cross into Linux syscalls, port I/O, and allocator-like region
+//! management. Offsets are constants so the ELF writer can resolve calls
+//! without symbol parsing.
+//!
+//! # Related Files
+//!
+//! See `docs/io_extension_design.md` for the assembly source and design notes.
 
 use std::collections::HashMap;
 
-/// Names of runtime functions (as they appear in user code)
+/// Runtime function names as they appear in source programs.
 pub const RT_PRINT_INT: &str = "print_int";
 pub const RT_PRINT_CHAR: &str = "print_char";
 pub const RT_READ_INT: &str = "read_int";
@@ -28,7 +43,7 @@ pub const RT_REGION_ENTER: &str = "__rt_region_enter";
 pub const RT_REGION_ALLOC: &str = "__rt_region_alloc";
 pub const RT_REGION_LEAVE: &str = "__rt_region_leave";
 
-/// Offsets of each function within the runtime blob
+/// Function offsets within the runtime blob.
 const PRINT_INT_OFFSET: usize = 0x00;
 const PRINT_CHAR_OFFSET: usize = 0x65;
 const READ_INT_OFFSET: usize = 0x7e;
@@ -38,7 +53,7 @@ const REGION_ENTER_OFFSET: usize = 0xE4; // after port_out (0xDC + 8 = 0xE4)
 const REGION_ALLOC_OFFSET: usize = 0x119; // after region_enter (0xE4 + 0x35 = 0x119)
 const REGION_LEAVE_OFFSET: usize = 0x162; // after region_alloc (0x119 + 0x49 = 0x162)
 
-/// Check whether a function name is a runtime intrinsic
+/// Check whether a function name is a runtime intrinsic.
 pub fn is_runtime_function(name: &str) -> bool {
     matches!(
         name,
@@ -46,15 +61,14 @@ pub fn is_runtime_function(name: &str) -> bool {
     )
 }
 
-/// Get the raw x86-64 machine code for the runtime functions.
+/// Return the raw x86-64 machine code for runtime functions.
 ///
-/// Assembled from verified assembly source (see docs/io_extension_design.md).
+/// Assembled from verified assembly source (see
+/// [`docs/io_extension_design.md`](../../docs/io_extension_design.md)).
 /// Total size: 418 bytes.
 pub fn runtime_code() -> Vec<u8> {
     vec![
-        // __rt_print_int (offset 0x00, 101 bytes)
-        // Input: rdi = signed 64-bit integer
-        // Output: writes decimal representation + newline to stdout
+        // __rt_print_int: rdi -> signed decimal + newline
         0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x20, 0x48, 0x89, 0xf8, 0x45, 0x31, 0xc0, 0x48,
         0x85, 0xc0, 0x79, 0x09, 0x48, 0xf7, 0xd8, 0x41, 0xb8, 0x01, 0x00, 0x00, 0x00, 0x48, 0x8d,
         0x7d, 0xff, 0xc6, 0x07, 0x0a, 0x31, 0xc9, 0x49, 0xc7, 0xc1, 0x0a, 0x00, 0x00, 0x00, 0x31,
@@ -62,38 +76,27 @@ pub fn runtime_code() -> Vec<u8> {
         0x85, 0xc0, 0x75, 0xec, 0x45, 0x85, 0xc0, 0x74, 0x08, 0x48, 0xff, 0xcf, 0xc6, 0x07, 0x2d,
         0xff, 0xc1, 0x48, 0x89, 0xfe, 0x67, 0x8d, 0x51, 0x01, 0xb8, 0x01, 0x00, 0x00, 0x00, 0xbf,
         0x01, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x48, 0x89, 0xec, 0x5d, 0xc3,
-        // __rt_print_char (offset 0x65, 25 bytes)
-        // Input: rdi = ASCII byte value
-        // Output: writes single byte to stdout
+        // __rt_print_char: rdi -> one stdout byte
         0x57, 0x48, 0xc7, 0xc0, 0x01, 0x00, 0x00, 0x00, 0x48, 0x89, 0xe6, 0xba, 0x01, 0x00, 0x00,
         0x00, 0xbf, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x5f, 0xc3,
-        // __rt_read_int (offset 0x7e, 85 bytes)
-        // Input: none
-        // Output: rax = parsed decimal integer from stdin
+        // __rt_read_int: stdin decimal -> rax
         0x55, 0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 0x20, 0x31, 0xc0, 0x31, 0xff, 0x48, 0x8d, 0x75,
         0xec, 0xba, 0x14, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x48, 0x8d, 0x75, 0xec, 0x31, 0xc0, 0x31,
         0xc9, 0x0f, 0xb6, 0x16, 0x80, 0xfa, 0x2d, 0x75, 0x08, 0xb9, 0x01, 0x00, 0x00, 0x00, 0x48,
         0xff, 0xc6, 0x0f, 0xb6, 0x16, 0x80, 0xea, 0x30, 0x80, 0xfa, 0x09, 0x77, 0x0f, 0x48, 0x6b,
         0xc0, 0x0a, 0x0f, 0xb6, 0xd2, 0x48, 0x01, 0xd0, 0x48, 0xff, 0xc6, 0xeb, 0xe6, 0x85, 0xc9,
         0x74, 0x03, 0x48, 0xf7, 0xd8, 0x48, 0x89, 0xec, 0x5d, 0xc3,
-        // __rt_port_in (offset 0xD3, 9 bytes)
-        // Input: rdi = port number
-        // Output: rax = byte read from port
+        // __rt_port_in: rdi port -> rax byte
         0x66, 0x89, 0xfa, // mov dx, di
         0xec, // in al, dx
         0x48, 0x0f, 0xb6, 0xc0, // movzx rax, al
         0xc3, // ret
-        // __rt_port_out (offset 0xDC, 8 bytes)
-        // Input: rdi = port number, rsi = byte value
+        // __rt_port_out: rdi port, rsi byte
         0x66, 0x89, 0xfa, // mov dx, di
         0x40, 0x88, 0xf0, // mov al, sil
         0xee, // out dx, al
         0xc3, // ret
-        // __rt_region_enter (offset 0xE4, 53 bytes)
-        // Input:  none
-        // Output: rax = region header pointer, with head = NULL
-        // Calls: mmap(NULL, 4096, PROT_READ|PROT_WRITE,
-        //             MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+        // __rt_region_enter: mmap a zeroed region header -> rax
         0xbe, 0x00, 0x10, 0x00, 0x00, // mov  esi, 4096
         0x31, 0xff, // xor  edi, edi
         0xba, 0x03, 0x00, 0x00, 0x00, // mov  edx, 3
@@ -107,10 +110,7 @@ pub fn runtime_code() -> Vec<u8> {
         0x48, 0xc7, 0x00, 0x00, 0x00, 0x00, 0x00, // mov qword ptr [rax], 0
         0xc3, // ret
         0x0f, 0x0b, // ud2
-        // __rt_region_alloc (offset 0x119, 73 bytes)
-        // Input:  rdi = region header pointer, rsi = payload size in bytes
-        // Output: rax = payload pointer (or trap on failure)
-        // Layout of mapping: [next:8][len:8][payload...]
+        // __rt_region_alloc: rdi region, rsi payload bytes -> rax payload
         0x53, // push rbx
         0x48, 0x89, 0xfb, // mov  rbx, rdi
         0x48, 0x83, 0xc6, 0x10, // add  rsi, 16
@@ -132,9 +132,7 @@ pub fn runtime_code() -> Vec<u8> {
         0xc3, // ret
         0x5b, // pop  rbx
         0x0f, 0x0b, // ud2
-        // __rt_region_leave (offset 0x162, 64 bytes)
-        // Input:  rdi = region header pointer
-        // Output: none (or trap on failure)
+        // __rt_region_leave: unmap all allocations for rdi region
         0x53, // push rbx
         0x57, // push rdi
         0x48, 0x8b, 0x1f, // mov  rbx, [rdi]
@@ -162,10 +160,9 @@ pub fn runtime_code() -> Vec<u8> {
     ]
 }
 
-/// Get symbol offsets within the runtime blob.
+/// Return symbol offsets within the runtime blob.
 ///
-/// Maps user-visible function names to byte offsets within the blob
-/// returned by `runtime_code()`.
+/// Maps runtime function names to byte offsets within `runtime_code()`.
 pub fn runtime_symbols() -> HashMap<String, usize> {
     let mut symbols = HashMap::new();
     symbols.insert(RT_PRINT_INT.to_string(), PRINT_INT_OFFSET);

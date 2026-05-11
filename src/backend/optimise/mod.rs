@@ -7,6 +7,8 @@
 //!
 //! - **Copy Propagation**: Replaces uses of `dst` with `src` when `MovReg { dst, src }` is encountered
 //! - **Dead Code Elimination**: Removes instructions whose destination registers are never used
+//! - **Loop-Invariant Code Motion**: Hoists pure loop-invariant instructions into a unique preheader
+//! - **Load-Op Fusion**: Fuses single-use load plus add into a memory-operand add
 
 pub mod const_fold;
 pub mod copy_prop;
@@ -38,24 +40,14 @@ pub struct OptConfig {
 
 impl OptConfig {
     /// Create config with all stable optimizations enabled by default.
-    ///
-    /// LICM is disabled: it produces incorrect code on non-trivial programs
-    /// (constants hoisted from loop bodies interact badly with register
-    /// allocation across multiple call sites).
-    ///
-    /// Load-fusion is disabled: it triggers non-deterministic compilation
-    /// failures on larger programs (intermittent SIGSEGV in output binary
-    /// even when the generated DTAL looks correct).
-    ///
-    /// Both can be re-enabled via `--licm` / `--load-fusion` flags.
     pub fn all() -> Self {
         Self {
             constant_folding: true,
             peephole: true,
             copy_propagation: true,
             dead_code_elimination: true,
-            licm: false,
-            load_fusion: false,
+            licm: true,
+            load_fusion: true,
             max_iterations: Some(10),
         }
     }
@@ -88,7 +80,7 @@ impl OptConfig {
 /// 3. Copy propagation (exposes dead copies)
 /// 4. Dead code elimination (removes useless copies and folded-away MovImms)
 /// 5. LICM (hoists loop-invariant computations to before the loop)
-/// 6. Load-op fusion (fuses Load + BinOp Add/Sub into LoadOp)
+/// 6. Load-op fusion (fuses Load + BinOp Add into LoadOp)
 pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     if !config.any_enabled() {
         return;
@@ -99,49 +91,42 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     for _ in 0..max_iters {
         let mut changed = false;
 
-        // Run constant folding (before peephole so folded constants expose patterns)
         if config.constant_folding {
             for func in &mut program.functions {
                 changed |= const_fold::constant_fold_function(func);
             }
         }
 
-        // Run peephole (before copy prop so new MovRegs get propagated)
         if config.peephole {
             for func in &mut program.functions {
                 changed |= peephole::peephole_function(func);
             }
         }
 
-        // Run copy propagation
         if config.copy_propagation {
             for func in &mut program.functions {
                 changed |= copy_prop::copy_propagate_function(func);
             }
         }
 
-        // Run dead code elimination
         if config.dead_code_elimination {
             for func in &mut program.functions {
                 changed |= dce::eliminate_dead_code(func);
             }
         }
 
-        // Run loop-invariant code motion
         if config.licm {
             for func in &mut program.functions {
                 changed |= licm::licm_function(func);
             }
         }
 
-        // Run load-op fusion (after LICM so any hoisted loads can be fused)
         if config.load_fusion {
             for func in &mut program.functions {
                 changed |= load_fusion::fuse_loads_function(func);
             }
         }
 
-        // Fixed-point reached
         if !changed {
             break;
         }
@@ -204,8 +189,12 @@ mod tests {
     #[test]
     fn test_opt_config_all() {
         let config = OptConfig::all();
+        assert!(config.constant_folding);
+        assert!(config.peephole);
         assert!(config.copy_propagation);
         assert!(config.dead_code_elimination);
+        assert!(config.licm);
+        assert!(config.load_fusion);
         assert!(config.any_enabled());
     }
 

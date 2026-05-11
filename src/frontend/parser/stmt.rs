@@ -3,10 +3,7 @@ use crate::common::ast::{Block, Expr, Stmt, Token};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
-/// If a block has no trailing expression but its last statement is a bare
-/// if-else expression (no semicolon), promote it to the trailing expression.
-/// This is needed because the statement parser greedily consumes if-else as
-/// `Stmt::Expr`, but in block-final position it should be the block's value.
+// If a block has no trailing expression but its last statement is a bare if-else expression, promote it to the trailing expression.
 pub fn promote_trailing_if<'src>(
     mut statements: Vec<Spanned<Stmt<'src>>>,
     trailing_expr: Option<Spanned<Expr<'src>>>,

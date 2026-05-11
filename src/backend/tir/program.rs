@@ -1,6 +1,30 @@
-//! TIR program structures
+//! TIR program, function, and basic block structures.
 //!
-//! This module defines the program, function, and basic block structures for TIR.
+//! A TIR function is a typed SSA control-flow graph. Blocks contain phi nodes,
+//! ordinary instructions, and a terminator; functions also keep contract and
+//! ownership metadata needed by DTAL generation.
+//!
+//! # Control Flow
+//!
+//! ```text
+//! entry
+//!  | \
+//!  |  `-> then
+//!  |      |
+//!  `-> else
+//!         |
+//!         v
+//!       join(phi)
+//! ```
+//!
+//! [`BasicBlock::successors`] derives graph edges from the terminator. The
+//! predecessor list is stored separately because phi nodes and join-state
+//! checks need to know which incoming edge produced each value.
+//!
+//! # Related Modules
+//!
+//! [`crate::backend::tir::instr`] defines block contents and terminators, while
+//! [`crate::backend::tir::phi`] defines the join nodes attached to block entry.
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::instr::{Terminator, TirInstr};
@@ -10,7 +34,7 @@ use crate::common::ownership::ParameterKind;
 use crate::common::types::IType;
 use std::collections::HashMap;
 
-/// A TIR program consists of functions
+/// Collection of TIR functions.
 #[derive(Clone, Debug)]
 pub struct TirProgram<'src> {
     pub functions: Vec<TirFunction<'src>>,
@@ -34,66 +58,65 @@ impl<'src> Default for TirProgram<'src> {
     }
 }
 
-/// A function in TIR is a CFG in SSA form
+/// TIR function represented as a typed SSA control-flow graph.
 #[derive(Clone, Debug)]
 pub struct TirFunction<'src> {
     pub name: String,
-    /// Parameters with their SSA registers and types
+    /// Parameters with their SSA registers and types.
     pub params: Vec<(VirtualReg, IType<'src>)>,
     /// Parameter passing kind for each parameter, parallel to `params`.
     pub parameter_kinds: Vec<ParameterKind>,
-    /// Parameter names (parallel to `params`), for translating constraints
-    /// from source-level variable names to register names
+    /// Parameter names parallel to `params`, used when translating constraints.
     pub param_names: Vec<String>,
-    /// Return type
+    /// Return type.
     pub return_type: IType<'src>,
     /// Whether returning from this function transfers ownership of the result.
     pub returns_owned: bool,
-    /// Precondition (optional)
+    /// Optional precondition.
     pub precondition: Option<Constraint>,
-    /// Postcondition (optional)
+    /// Optional postcondition.
     pub postcondition: Option<Constraint>,
-    /// Entry block ID
+    /// Entry block ID.
     pub entry_block: BlockId,
-    /// All basic blocks
+    /// Basic blocks keyed by ID.
     pub blocks: HashMap<BlockId, BasicBlock<'src>>,
 }
 
 impl<'src> TirFunction<'src> {
-    /// Get a reference to a block by ID
+    /// Get a block by ID.
     pub fn get_block(&self, id: BlockId) -> Option<&BasicBlock<'src>> {
         self.blocks.get(&id)
     }
 
-    /// Get a mutable reference to a block by ID
+    /// Get a mutable block by ID.
     pub fn get_block_mut(&mut self, id: BlockId) -> Option<&mut BasicBlock<'src>> {
         self.blocks.get_mut(&id)
     }
 
-    /// Iterate over all blocks
+    /// Iterate over all blocks.
     pub fn iter_blocks(&self) -> impl Iterator<Item = (&BlockId, &BasicBlock<'src>)> {
         self.blocks.iter()
     }
 }
 
-/// A basic block in SSA form
+/// Basic block in a TIR control-flow graph.
 #[derive(Clone, Debug)]
 pub struct BasicBlock<'src> {
     pub id: BlockId,
-    /// Phi nodes at block entry (SSA merge points)
+    /// Phi nodes at block entry.
     pub phi_nodes: Vec<PhiNode<'src>>,
-    /// Instructions in this block
+    /// Instructions in this block.
     pub instructions: Vec<TirInstr<'src>>,
-    /// Block terminator
+    /// Block terminator.
     pub terminator: Terminator,
-    /// Predecessor blocks
+    /// Predecessor blocks.
     pub predecessors: Vec<BlockId>,
-    /// Type state at block entry (after phi nodes)
+    /// Type state at block entry after phi nodes.
     pub entry_state: RegisterState<'src>,
 }
 
 impl<'src> BasicBlock<'src> {
-    /// Create a new basic block with the given ID and terminator
+    /// Create a basic block with the given ID and terminator.
     pub fn new(id: BlockId, terminator: Terminator) -> Self {
         Self {
             id,
@@ -105,24 +128,24 @@ impl<'src> BasicBlock<'src> {
         }
     }
 
-    /// Add an instruction to this block
+    /// Add an instruction to this block.
     pub fn add_instruction(&mut self, instr: TirInstr<'src>) {
         self.instructions.push(instr);
     }
 
-    /// Add a phi node to this block
+    /// Add a phi node to this block.
     pub fn add_phi(&mut self, phi: PhiNode<'src>) {
         self.phi_nodes.push(phi);
     }
 
-    /// Add a predecessor block
+    /// Add a predecessor block.
     pub fn add_predecessor(&mut self, pred: BlockId) {
         if !self.predecessors.contains(&pred) {
             self.predecessors.push(pred);
         }
     }
 
-    /// Get successor blocks from the terminator
+    /// Return successor blocks from the terminator.
     pub fn successors(&self) -> Vec<BlockId> {
         match &self.terminator {
             Terminator::Jump { target } => vec![*target],

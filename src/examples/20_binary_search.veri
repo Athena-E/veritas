@@ -31,8 +31,6 @@ fn binary_search(arr: [int; 10], target: int) -> int
                     hi = mid - 1;
                 }
             }
-        } else {
-            let done: int = 0;
         }
     }
 
@@ -58,8 +56,6 @@ fn count_equal(arr: [{v: int | v >= 0}; 10], target: {v: int | v >= 0}) -> {v: i
         let val: int = arr[i];
         if val == target {
             count = count + 1;
-        } else {
-            let skip: int = 0;
         }
     }
     count

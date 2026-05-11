@@ -162,12 +162,10 @@ pub fn lower_instruction<'src>(
             use crate::backend::dtal::regs::PhysicalReg;
             use std::sync::Arc;
 
-            // Calculate total size in bytes (assuming 8 bytes per element)
             let element_size = 8u32;
             let total_size = element_size * (*size as u32);
 
-            // Create array type — widen element type to base (Int/Bool)
-            // since different values will be stored into the array.
+            // Arrays store mutable elements, so singleton refinements are widened.
             let element_dtal_ty = widen_to_base(DtalType::from_itype(element_ty));
             let array_ty = DtalType::Array {
                 element_type: Arc::new(element_dtal_ty),
@@ -175,16 +173,14 @@ pub fn lower_instruction<'src>(
             };
 
             if bare_metal {
-                // Bare-metal: stack alloc (no kernel mmap available).
-                // A bump allocator for unikernels is planned separately.
+                // Bare-metal has no hosted allocator.
                 instrs.push(DtalInstr::Alloca {
                     dst: Reg::Virtual(*dst),
                     size: total_size,
                     ty: array_ty,
                 });
             } else {
-                // Hosted Linux: allocate from the current function-local region.
-                // Pass region in r0 and size in r1; result returns in r0.
+                // Runtime ABI: region in r0, size in r1, result in r0.
                 instrs.push(DtalInstr::MovImm {
                     dst: Reg::Physical(PhysicalReg::R1),
                     imm: total_size as i128,
@@ -271,7 +267,6 @@ fn lower_binop<'src>(
 ) {
     let dtal_ty = DtalType::from_itype(ty);
     match op {
-        // Arithmetic operations map directly
         TirBinaryOp::Add => {
             instrs.push(DtalInstr::BinOp {
                 op: DtalBinaryOp::Add,
@@ -318,7 +313,6 @@ fn lower_binop<'src>(
             });
         }
 
-        // Comparison operations
         TirBinaryOp::Eq => lower_comparison(instrs, dst, lhs, rhs, "eq"),
         TirBinaryOp::Ne => lower_comparison(instrs, dst, lhs, rhs, "ne"),
         TirBinaryOp::Lt => lower_comparison(instrs, dst, lhs, rhs, "lt"),
@@ -326,7 +320,6 @@ fn lower_binop<'src>(
         TirBinaryOp::Gt => lower_comparison(instrs, dst, lhs, rhs, "gt"),
         TirBinaryOp::Ge => lower_comparison(instrs, dst, lhs, rhs, "ge"),
 
-        // Bitwise operations (integer operands, integer result)
         TirBinaryOp::BitAnd => {
             instrs.push(DtalInstr::BinOp {
                 op: DtalBinaryOp::BitAnd,
@@ -373,7 +366,6 @@ fn lower_binop<'src>(
             });
         }
 
-        // Logical operations
         TirBinaryOp::And => {
             instrs.push(DtalInstr::BinOp {
                 op: DtalBinaryOp::And,
@@ -405,13 +397,11 @@ fn lower_comparison(
 ) {
     use crate::backend::dtal::instr::CmpOp;
 
-    // Emit comparison to set CPU flags
     instrs.push(DtalInstr::Cmp {
         lhs: Reg::Virtual(lhs),
         rhs: Reg::Virtual(rhs),
     });
 
-    // Map comparison kind to CmpOp
     let cond = match cmp_kind {
         "eq" => CmpOp::Eq,
         "ne" => CmpOp::Ne,
@@ -422,13 +412,11 @@ fn lower_comparison(
         _ => panic!("Unknown comparison kind: {}", cmp_kind),
     };
 
-    // Emit SetCC to materialize comparison result (0 or 1)
     instrs.push(DtalInstr::SetCC {
         dst: Reg::Virtual(dst),
         cond,
     });
 
-    // Type annotation for verification
     instrs.push(DtalInstr::TypeAnnotation {
         reg: Reg::Virtual(dst),
         ty: DtalType::Bool,
@@ -495,7 +483,6 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
 
     let dtal_result_ty = DtalType::from_itype(result_ty);
 
-    // Move arguments to parameter registers (r0, r1, r2, ...)
     for (i, ((arg, arg_ty), arg_kind)) in args
         .iter()
         .zip(arg_types.iter())
@@ -503,7 +490,6 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
         .enumerate()
     {
         if i < 8 {
-            // Use physical parameter registers
             let param_reg = match i {
                 0 => PhysicalReg::R0,
                 1 => PhysicalReg::R1,
@@ -557,7 +543,6 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
                 });
             }
         } else {
-            // Push extra arguments onto stack (not implemented yet)
             instrs.push(DtalInstr::Push {
                 src: Reg::Virtual(*arg),
                 ty: DtalType::Int,
@@ -565,7 +550,6 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
         }
     }
 
-    // Emit call instruction
     instrs.push(DtalInstr::Call {
         target: func.to_string(),
         arg_kinds: arg_kinds.to_vec(),
@@ -573,7 +557,6 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
         ownership,
     });
 
-    // Move result from r0 to destination
     if let Some(dst_reg) = dst {
         if ownership.produces_owned_output() {
             instrs.push(DtalInstr::MoveOwned {

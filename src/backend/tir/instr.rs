@@ -1,57 +1,85 @@
-//! TIR instructions and terminators
+//! TIR instructions and block terminators.
 //!
-//! This module defines the instruction set for TIR (Typed Intermediate Representation).
+//! Instructions are typed, SSA-style operations over virtual registers. They
+//! preserve source-level ownership and constraint information until DTAL
+//! generation can turn those facts into verifier-visible annotations.
+//!
+//! # Example
+//!
+//! ```text
+//! v0 = immediate 40 : int(40)
+//! v1 = immediate 2  : int(2)
+//! v2 = v0 + v1      : int
+//! return v2
+//! ```
+//!
+//! # Design Notes
+//!
+//! Ownership-changing operations are first-class variants (`MoveOwned`,
+//! `DropOwned`, `BorrowShared`, `BorrowMut`, and `BorrowEnd`). Later passes
+//! should not infer ownership behavior from plain copies or calls; the typed
+//! frontend records that intent here.
+//!
+//! # Error Behavior
+//!
+//! This module is structural and does not validate programs itself. Invalid
+//! type, ownership, or constraint combinations are rejected downstream by DTAL
+//! generation and [`crate::verifier`].
 
 use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::backend::tir::types::{BinaryOp, BlockId, UnaryOp};
 use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::types::IType;
 
-/// TIR instructions (three-address code in SSA form)
+/// Typed SSA instruction.
+///
+/// Most variants define at most one destination virtual register. Ownership
+/// operations are explicit so later lowering stages do not infer moves,
+/// borrows, or drops from source syntax.
 #[derive(Clone, Debug)]
 pub enum TirInstr<'src> {
-    /// dst = immediate
+    /// `dst = immediate`
     LoadImm {
         dst: VirtualReg,
         value: i64,
         ty: IType<'src>,
     },
 
-    /// dst = src (copy)
+    /// `dst = src`
     Copy {
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// dst = move src (ownership transfer)
+    /// `dst = move src`
     MoveOwned {
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// drop src (ownership destruction)
+    /// `drop src`
     DropOwned { src: VirtualReg, ty: IType<'src> },
 
-    /// dst = shared borrow src
+    /// `dst = &src`
     BorrowShared {
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// dst = mutable borrow src
+    /// `dst = &mut src`
     BorrowMut {
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// end shared borrow held in src
+    /// End the borrow held in `src`.
     BorrowEnd { src: VirtualReg, ty: IType<'src> },
 
-    /// dst = lhs op rhs
+    /// `dst = lhs op rhs`
     BinOp {
         dst: VirtualReg,
         op: BinaryOp,
@@ -60,7 +88,7 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
-    /// dst = op operand
+    /// `dst = op operand`
     UnaryOp {
         dst: VirtualReg,
         op: UnaryOp,
@@ -68,7 +96,7 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
-    /// dst = base[index]
+    /// `dst = base[index]`
     ArrayLoad {
         dst: VirtualReg,
         base: VirtualReg,
@@ -77,7 +105,7 @@ pub enum TirInstr<'src> {
         bounds_constraint: Constraint,
     },
 
-    /// base[index] = value
+    /// `base[index] = value`
     ArrayStore {
         base: VirtualReg,
         index: VirtualReg,
@@ -85,7 +113,7 @@ pub enum TirInstr<'src> {
         bounds_constraint: Constraint,
     },
 
-    /// dst = call func(args...)
+    /// `dst = call func(args...)`
     Call {
         dst: Option<VirtualReg>,
         func: String,
@@ -96,7 +124,7 @@ pub enum TirInstr<'src> {
         result_ty: IType<'src>,
     },
 
-    /// Allocate array on stack
+    /// Allocate an array on the stack.
     AllocArray {
         dst: VirtualReg,
         element_ty: IType<'src>,
@@ -110,15 +138,15 @@ pub enum TirInstr<'src> {
     /// Leave a nested lexical region.
     RegionLeave { region: VirtualReg },
 
-    /// Assume a constraint (from branch or precondition)
+    /// Assume a branch or precondition constraint.
     AssumeConstraint { constraint: Constraint },
 
-    /// Assert a constraint (proven by frontend, carried for verification)
+    /// Carry a frontend-proven constraint for verification.
     AssertConstraint { constraint: Constraint },
 }
 
 impl<'src> TirInstr<'src> {
-    /// Get the destination register of this instruction (if any)
+    /// Return the destination register, if any.
     pub fn dst(&self) -> Option<VirtualReg> {
         match self {
             TirInstr::LoadImm { dst, .. } => Some(*dst),
@@ -141,7 +169,7 @@ impl<'src> TirInstr<'src> {
         }
     }
 
-    /// Get the type of the result (if any)
+    /// Return the result type, if any.
     pub fn result_type(&self) -> Option<&IType<'src>> {
         match self {
             TirInstr::LoadImm { ty, .. } => Some(ty),
@@ -165,29 +193,29 @@ impl<'src> TirInstr<'src> {
     }
 }
 
-/// Block terminator
+/// Control-flow terminator for a TIR basic block.
 #[derive(Clone, Debug)]
 pub enum Terminator {
-    /// Unconditional jump
+    /// Unconditional jump.
     Jump { target: BlockId },
 
-    /// Conditional branch
+    /// Conditional branch.
     Branch {
         cond: VirtualReg,
         true_target: BlockId,
         false_target: BlockId,
-        /// Constraint added to true branch
+        /// Constraint added to the true branch.
         true_constraint: Box<Constraint>,
-        /// Constraint added to false branch
+        /// Constraint added to the false branch.
         false_constraint: Box<Constraint>,
     },
 
-    /// Return from function
+    /// Return from the function.
     Return {
         value: Option<VirtualReg>,
         ownership: OwnershipMode,
     },
 
-    /// Unreachable (after error or infinite loop)
+    /// Unreachable control flow.
     Unreachable,
 }

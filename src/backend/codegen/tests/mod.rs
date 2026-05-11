@@ -44,22 +44,18 @@ fn test_pipeline_identity_function() {
         }],
     };
 
-    // Lower to TIR
     let tir = lower_program(&program);
     assert_eq!(tir.functions.len(), 1);
 
-    // Generate DTAL
     let dtal = codegen_program(&tir);
     // 1 user function + 8 runtime stubs (including hosted region helpers)
     assert_eq!(dtal.functions.len(), 9);
     assert_eq!(dtal.functions[0].name, "id");
 
-    // Emit text
     let output = emit_program(&dtal);
     assert!(output.contains(".function id"));
     assert!(output.contains("ret"));
 
-    // Print for debugging
     println!("=== Identity Function DTAL ===\n{}", output);
 }
 
@@ -114,13 +110,10 @@ fn test_pipeline_add_function() {
         }],
     };
 
-    // Lower to TIR
     let tir = lower_program(&program);
 
-    // Generate DTAL
     let dtal = codegen_program(&tir);
 
-    // Emit text
     let output = emit_program(&dtal);
     assert!(output.contains(".function add"));
     assert!(output.contains("add")); // Should contain add instruction
@@ -344,7 +337,6 @@ fn test_pipeline_function_with_postcondition() {
     use chumsky::prelude::SimpleSpan;
     use std::sync::Arc;
 
-    // Create postcondition: result == 5
     let postcond_expr = Expr::BinOp {
         op: BinOp::Eq,
         lhs: Box::new((Expr::Variable("result"), SimpleSpan::new(0, 0))),
@@ -375,7 +367,6 @@ fn test_pipeline_function_with_postcondition() {
         }],
     };
 
-    // Lower to TIR
     let tir = lower_program(&program);
     assert_eq!(tir.functions.len(), 1);
     assert!(
@@ -383,7 +374,6 @@ fn test_pipeline_function_with_postcondition() {
         "TIR should have postcondition"
     );
 
-    // Generate DTAL
     let dtal = codegen_program(&tir);
     // 1 user function + 8 runtime stubs (including hosted region helpers)
     assert_eq!(dtal.functions.len(), 9);
@@ -392,7 +382,6 @@ fn test_pipeline_function_with_postcondition() {
         "DTAL should have postcondition"
     );
 
-    // Emit text
     let output = emit_program(&dtal);
     assert!(output.contains(".function five"));
     assert!(
@@ -413,7 +402,6 @@ fn test_pipeline_function_with_inequality_postcondition() {
     use chumsky::prelude::SimpleSpan;
     use std::sync::Arc;
 
-    // Create postcondition: result > 0
     let postcond_expr = Expr::BinOp {
         op: BinOp::Gt,
         lhs: Box::new((Expr::Variable("result"), SimpleSpan::new(0, 0))),

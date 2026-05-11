@@ -1,17 +1,230 @@
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::time::Instant;
 use veritas::backend::elf::generate_elf;
 use veritas::backend::optimise::OptConfig;
 use veritas::backend::x86_64::{Encoder, lower_program as lower_to_x86};
 use veritas::frontend::typechecker::smt::{get_frontend_smt_stats, reset_frontend_smt_stats};
-use veritas::pipeline::{
-    CompileError, compile_verbose, compile_verbose_bare_metal, compile_verbose_optimized,
-    compile_verbose_with_overflow,
-};
+use veritas::pipeline::{CompileError, compile_verbose, compile_verbose_configured};
 use veritas::verifier::smt::{get_verifier_smt_stats, reset_verifier_smt_stats};
 use veritas::verifier::verify_dtal;
+
+struct TamperCase {
+    id: &'static str,
+    name: &'static str,
+    source: &'static str,
+    mutate: fn(&str) -> String,
+    expected_error: &'static str,
+}
+
+fn replace_once(haystack: &str, needle: &str, replacement: &str) -> String {
+    haystack.replacen(needle, replacement, 1)
+}
+
+fn compile_to_dtal(source: &str) -> String {
+    compile_verbose(source)
+        .unwrap_or_else(|err| panic!("expected source to compile successfully: {}", err))
+        .dtal
+}
+
+fn dtal_tamper_cases() -> [TamperCase; 14] {
+    [
+        TamperCase {
+            id: "T01",
+            name: "return_signature_mismatch",
+            source: include_str!("../eval/feature_suite/programs/01_simple.veri"),
+            mutate: |dtal| replace_once(dtal, ".returns int", ".returns bool"),
+            expected_error: "Return type mismatch",
+        },
+        TamperCase {
+            id: "T02",
+            name: "strengthened_precondition_breaks_call_site",
+            source: include_str!("../eval/feature_suite/programs/17_preconditions.veri"),
+            mutate: |dtal| {
+                let dtal = replace_once(
+                    dtal,
+                    ".precondition (v0 >= 0 && v0 < 4)",
+                    ".precondition (v0 >= 0 && v0 < 2)",
+                );
+                replace_once(
+                    &dtal,
+                    ".assume (v0 >= 0 && v0 < 4)",
+                    ".assume (v0 >= 0 && v0 < 2)",
+                )
+            },
+            expected_error: "Precondition not provable",
+        },
+        TamperCase {
+            id: "T03",
+            name: "shared_borrow_out_of_bounds_index",
+            source: include_str!("../eval/feature_suite/programs/34_shared_scalar_deref.veri"),
+            mutate: |dtal| replace_once(dtal, "mov v4, 0    : int", "mov v4, 1    : int(1)"),
+            expected_error: "Bounds check failed",
+        },
+        TamperCase {
+            id: "T04",
+            name: "move_owned_while_shared_borrow_live",
+            source: include_str!("../eval/feature_suite/programs/34_shared_scalar_deref.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "    borrow_end v3    : &[int(7); 1]",
+                    "    move_owned v6, v1    : [int(7); 1]\n    borrow_end v3    : &[int(7); 1]",
+                )
+            },
+            expected_error: "Ownership violation",
+        },
+        TamperCase {
+            id: "T05",
+            name: "i64_add_overflow_from_tampered_constants",
+            source: include_str!("../eval/feature_suite/programs/01_simple.veri"),
+            mutate: |dtal| {
+                let dtal = replace_once(
+                    dtal,
+                    "mov v0, 42    : int(42)",
+                    "mov v0, 9223372036854775807    : int(9223372036854775807)",
+                );
+                let dtal = replace_once(
+                    dtal.as_str(),
+                    "mov v1, 10    : int(10)",
+                    "mov v1, 1    : int(1)",
+                );
+                replace_once(
+                    dtal.as_str(),
+                    "add v2, v0, v1    : int(52)",
+                    "add v2, v0, v1    : i64",
+                )
+            },
+            expected_error: "Arithmetic overflow",
+        },
+        TamperCase {
+            id: "T06",
+            name: "shared_borrow_negative_index",
+            source: include_str!("../eval/feature_suite/programs/34_shared_scalar_deref.veri"),
+            mutate: |dtal| replace_once(dtal, "mov v4, 0    : int", "mov v4, -1    : int(-1)"),
+            expected_error: "Bounds check failed",
+        },
+        TamperCase {
+            id: "T07",
+            name: "use_after_drop_owned",
+            source: include_str!("../eval/feature_suite/programs/34_shared_scalar_deref.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "    borrow_end v3    : &[int(7); 1]\n    push v5",
+                    "    borrow_end v3    : &[int(7); 1]\n    drop_owned v1    : [int(7); 1]\n    move_owned v6, v1    : [int(7); 1]\n    push v5",
+                )
+            },
+            expected_error: "used after ownership was consumed",
+        },
+        TamperCase {
+            id: "T08",
+            name: "plain_mov_duplicates_owned_value",
+            source: include_str!("../eval/feature_suite/programs/34_shared_scalar_deref.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "    borrow_end v3    : &[int(7); 1]\n    push v5",
+                    "    borrow_end v3    : &[int(7); 1]\n    mov v6, v1    : [int(7); 1]\n    push v5",
+                )
+            },
+            expected_error: "Ownership violation",
+        },
+        TamperCase {
+            id: "T09",
+            name: "alias_shared_while_mutable_borrow_live",
+            source: include_str!("../eval/feature_suite/programs/33_mutable_borrow.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "borrow_mut r0, v0    : int",
+                    "borrow_mut r0, v0    : int\n    alias_borrow v9, v0    : &[int; 1]",
+                )
+            },
+            expected_error: "Ownership violation",
+        },
+        TamperCase {
+            id: "T10",
+            name: "double_mutable_borrow",
+            source: include_str!(
+                "../eval/feature_suite/programs/37_mutable_scalar_borrow_call.veri"
+            ),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "borrow_mut r0, v1    : int",
+                    "borrow_mut r0, v1    : int\n    borrow_mut r1, v1    : int",
+                )
+            },
+            expected_error: "Ownership violation",
+        },
+        TamperCase {
+            id: "T11",
+            name: "mutable_store_out_of_bounds_index",
+            source: include_str!("../eval/feature_suite/programs/33_mutable_borrow.veri"),
+            mutate: |dtal| replace_once(dtal, "mov v1, 0    : int(0)", "mov v1, 1    : int(1)"),
+            expected_error: "Bounds check failed",
+        },
+        TamperCase {
+            id: "T12",
+            name: "entry_param_type_weakened_from_mutable_to_shared",
+            source: include_str!("../eval/feature_suite/programs/33_mutable_borrow.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    ".params {v0: &mut [int; 1]}",
+                    ".params {v0: &[int; 1]}",
+                )
+            },
+            expected_error: "Type mismatch",
+        },
+        TamperCase {
+            id: "T13",
+            name: "tampered_entry_state_type",
+            source: include_str!("../eval/feature_suite/programs/17_preconditions.veri"),
+            mutate: |dtal| replace_once(dtal, ".entry {v0: int}", ".entry {v0: bool}"),
+            expected_error: "Type mismatch",
+        },
+        TamperCase {
+            id: "T14",
+            name: "impossible_assertion_inserted",
+            source: include_str!("../eval/feature_suite/programs/17_preconditions.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "    .assume (v0 >= 0 && v0 < 4)",
+                    "    .assume (v0 >= 0 && v0 < 4)\n    .assert (v0 < 0)",
+                )
+            },
+            expected_error: "Cannot prove constraint",
+        },
+    ]
+}
+
+fn option_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
+}
+
+fn generate_dtal_tampering(out_dir: &str) {
+    let out_dir = PathBuf::from(out_dir);
+    fs::create_dir_all(&out_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {}", out_dir.display(), err));
+
+    for case in dtal_tamper_cases() {
+        let dtal = compile_to_dtal(case.source);
+        let tampered = (case.mutate)(&dtal);
+        let file_name = format!("{}_{}.dtal", case.id, case.name);
+        let path = out_dir.join(file_name);
+        fs::write(&path, tampered)
+            .unwrap_or_else(|err| panic!("failed to write {}: {}", path.display(), err));
+        println!("{}\t{}\t{}", case.id, path.display(), case.expected_error);
+    }
+}
 
 fn print_bench_json(
     file: &str,
@@ -38,51 +251,65 @@ fn print_bench_json(
 fn main() {
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
+    let generate_tampering = args.iter().any(|a| a == "--generate-dtal-tampering");
 
     let show_help = args.iter().any(|a| a == "--help" || a == "-h");
 
+    if generate_tampering {
+        let out_dir =
+            option_value(&args, "--tampering-out-dir").unwrap_or("eval/dtal_tampering/generated");
+        generate_dtal_tampering(out_dir);
+        return;
+    }
+
     if args.len() < 2 || show_help {
-        eprintln!("Veritas - A type-preserving compiler with refinement types");
+        eprintln!("Veritas Compiler");
         eprintln!();
         eprintln!("Usage: {} <source_file> [OPTIONS]", args[0]);
         eprintln!();
         eprintln!("Output:");
-        eprintln!("  -o <file>          Compile to native ELF executable");
-        eprintln!("  --native           Print x86-64 assembly to stdout");
-        eprintln!();
-        eprintln!("Verification:");
-        eprintln!("  --verify           Verify DTAL before code generation");
-        eprintln!("  --verify-only      Verify DTAL and exit (no codegen)");
-        eprintln!("  --verify-dtal      Verify a standalone .dtal file");
-        eprintln!();
-        eprintln!("Code generation pipeline:");
-        eprintln!("  --legacy-pipeline  Use the old trusted-lowering pipeline instead of");
-        eprintln!("                       the default verify-after-regalloc pipeline");
+        eprintln!("  -o <file>            Compile to native ELF executable");
+        eprintln!("  --native             Print x86-64 assembly to stdout");
         eprintln!("  --target-bare-metal  Generate Multiboot ELF for bare-metal/QEMU:");
         eprintln!("                       qemu-system-x86_64 -kernel <binary> -serial stdio");
-        eprintln!("  --check-overflow     Prove every arithmetic op cannot overflow i64");
-        eprintln!("                       (experimental, off by default)");
+        eprintln!();
+        eprintln!("Verification:");
+        eprintln!("  --verify             Verify DTAL before code generation");
+        eprintln!("  --verify-only        Verify DTAL and exit (no codegen)");
+        eprintln!("  --verify-dtal        Verify a standalone .dtal file");
         eprintln!();
         eprintln!("Optimisation:");
-        eprintln!("  -O, --optimize     Enable all optimisations");
-        eprintln!("  --copy-prop        Copy propagation only");
-        eprintln!("  --dce              Dead code elimination only");
+        eprintln!("  -O, --optimize       Enable all optimisations");
         eprintln!();
         eprintln!("Debug:");
-        eprintln!("  -v, --verbose      Show compilation stages");
-        eprintln!("  --tokens           Show lexer tokens");
-        eprintln!("  --ast              Show typed AST");
-        eprintln!("  --tir              Show TIR (SSA form)");
-        eprintln!("  -q, --quiet        Suppress non-error output");
-        eprintln!("  --bench            Output benchmark JSON");
-        eprintln!("  -h, --help         Show this help message");
+        eprintln!("  -v, --verbose        Show compilation stages");
+        eprintln!("  --tokens             Show lexer tokens");
+        eprintln!("  --ast                Show typed AST");
+        eprintln!("  --tir                Show TIR (SSA form)");
+        eprintln!("  -q, --quiet          Suppress non-error output");
+        eprintln!("  --bench              Output benchmark JSON");
+        eprintln!("  -h, --help           Show this help message");
         eprintln!();
         eprintln!("Runtime intrinsics:");
         eprintln!("  print_int(n: int)      Print integer + newline to stdout");
         eprintln!("  print_char(c: int)     Print single byte to stdout");
         eprintln!("  read_int() -> int      Read decimal integer from stdin");
         eprintln!();
-        eprintln!("Environment:");
+        eprintln!("Development:");
+        eprintln!("  --legacy-pipeline  Use the old trusted-lowering pipeline instead of");
+        eprintln!("                     the default verify-after-regalloc pipeline");
+        eprintln!("  --generate-dtal-tampering");
+        eprintln!("                     Generate the tampered DTAL corpus");
+        eprintln!("  --tampering-out-dir <dir>");
+        eprintln!("                     Output directory for generated tampered DTAL");
+        eprintln!("  --const-fold       Constant folding and immediate folding");
+        eprintln!("  --peephole         Peephole simplifications");
+        eprintln!("  --copy-prop        Copy propagation only");
+        eprintln!("  --dce              Dead code elimination only");
+        eprintln!("  --licm             Loop-invariant code motion");
+        eprintln!("  --load-fusion      Fuse load+add patterns");
+        eprintln!();
+        eprintln!("Development Environment:");
         eprintln!("  VERITAS_LS=1           Use linear scan allocator (default: graph colouring)");
         eprintln!("  VERITAS_DEBUG_ALLOC=1  Dump register allocation details");
         std::process::exit(if show_help { 0 } else { 1 });
@@ -123,13 +350,12 @@ fn main() {
     let native = args.iter().any(|a| a == "--native");
     let physical = !args.iter().any(|a| a == "--legacy-pipeline");
     let bare_metal = args.iter().any(|a| a == "--target-bare-metal");
-    let check_overflow = args.iter().any(|a| a == "--check-overflow");
     let output_file = args
         .iter()
         .position(|a| a == "-o")
         .and_then(|i| args.get(i + 1));
 
-    // Optimization flags
+    // Optimisation flags
     let optimize_all = args.iter().any(|a| a == "-O" || a == "--optimize");
     let const_fold = args.iter().any(|a| a == "--const-fold");
     let peephole = args.iter().any(|a| a == "--peephole");
@@ -138,7 +364,7 @@ fn main() {
     let licm = args.iter().any(|a| a == "--licm");
     let load_fusion = args.iter().any(|a| a == "--load-fusion");
 
-    // Build optimization config
+    // Build optimisation config
     let opt_config = if optimize_all {
         OptConfig::all()
     } else {
@@ -186,13 +412,12 @@ fn main() {
 
     let compile_start = Instant::now();
 
-    // Use optimized compilation if any optimizations are enabled
-    let compile_result = if opt_config.any_enabled() {
-        compile_verbose_optimized(&src, &opt_config)
-    } else if check_overflow {
-        compile_verbose_with_overflow(&src, bare_metal)
-    } else if bare_metal {
-        compile_verbose_bare_metal(&src)
+    let compile_result = if opt_config.any_enabled() || bare_metal {
+        compile_verbose_configured(
+            &src,
+            opt_config.any_enabled().then_some(&opt_config),
+            bare_metal,
+        )
     } else {
         compile_verbose(&src)
     };
@@ -233,14 +458,10 @@ fn main() {
                 }
             }
 
-            // Benchmark output should attribute verifier SMT work to the
-            // explicit verification stage only, not to earlier pipeline work.
+            // Reset verifier SMT counters after compilation, before benchmarking
             reset_verifier_smt_stats();
 
-            // Verify DTAL if requested.
-            // When using the physical pipeline (default), skip the virtual DTAL
-            // verifier — the physical verifier is strictly stronger and runs
-            // after register allocation.
+            // Verify DTAL if requested
             let mut verify_elapsed = std::time::Duration::ZERO;
             if verify && !physical {
                 if verbose {
@@ -331,8 +552,7 @@ fn main() {
             // Generate native code if requested
             if native || output_file.is_some() {
                 let encoded = if physical {
-                    // NEW PIPELINE: physalloc → verify physical → direct encode
-                    // Register allocation is UNTRUSTED — verifier checks the output
+                    // Verification after physical allocation
                     if verbose {
                         println!("\n[8] Physical allocation (regalloc → physical DTAL)...");
                     }
@@ -375,7 +595,7 @@ fn main() {
                     }
                     veritas::backend::direct_encode::encode_physical_dtal(&physical_dtal)
                 } else {
-                    // OLD PIPELINE: x86 lowering (trusted regalloc + isel + encode)
+                    // Legacy: x86 lowering (trusted regalloc + isel + encode)
                     if verbose {
                         println!("\n[8] Lowering to x86-64...");
                     }
@@ -398,11 +618,10 @@ fn main() {
                         println!("\n[10] Generating ELF executable...");
                     }
 
-                    // Determine entry point (use "main" or first function)
+                    // Determine entry point (use main or first function)
                     let entry = if encoded.symbols.contains_key("main") {
                         "main"
                     } else {
-                        // Use first user function from DTAL program
                         output
                             .dtal_program
                             .functions
