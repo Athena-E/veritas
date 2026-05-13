@@ -102,6 +102,11 @@ impl<'src> LoweringContext<'src> {
             name.to_string(),
             is_borrow_type(&self.lookup_var_type(name)),
         );
+    }
+
+    /// Declare a new lexical binding in the current scope.
+    pub fn declare_var_typed(&mut self, name: &str, reg: VirtualReg, ty: IType<'src>) {
+        self.bind_var_typed(name, reg, ty);
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.declared_names.insert(name.to_string());
         }
@@ -158,6 +163,16 @@ impl<'src> LoweringContext<'src> {
         self.owned_live_map.insert(name.to_string(), false);
         self.borrow_live_map.insert(name.to_string(), true);
         self.scalar_borrow_map.insert(name.to_string(), binding);
+    }
+
+    pub fn declare_scalar_borrow(
+        &mut self,
+        name: &str,
+        borrow_reg: VirtualReg,
+        lowered_ref_ty: IType<'src>,
+        binding: ScalarBorrowBinding<'src>,
+    ) {
+        self.bind_scalar_borrow(name, borrow_reg, lowered_ref_ty, binding);
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.declared_names.insert(name.to_string());
         }
@@ -252,11 +267,37 @@ impl<'src> LoweringContext<'src> {
     /// Exit a scope (restores previous variable state)
     pub fn exit_scope(&mut self) {
         if let Some(snapshot) = self.scope_stack.pop() {
-            self.var_map = snapshot.var_map;
-            self.var_type_map = snapshot.var_type_map;
-            self.owned_live_map = snapshot.owned_live_map;
-            self.borrow_live_map = snapshot.borrow_live_map;
-            self.scalar_borrow_map = snapshot.scalar_borrow_map;
+            for name in snapshot.declared_names {
+                if let Some(reg) = snapshot.var_map.get(&name).copied() {
+                    self.var_map.insert(name.clone(), reg);
+                } else {
+                    self.var_map.remove(&name);
+                }
+
+                if let Some(ty) = snapshot.var_type_map.get(&name).cloned() {
+                    self.var_type_map.insert(name.clone(), ty);
+                } else {
+                    self.var_type_map.remove(&name);
+                }
+
+                if let Some(live) = snapshot.owned_live_map.get(&name).copied() {
+                    self.owned_live_map.insert(name.clone(), live);
+                } else {
+                    self.owned_live_map.remove(&name);
+                }
+
+                if let Some(live) = snapshot.borrow_live_map.get(&name).copied() {
+                    self.borrow_live_map.insert(name.clone(), live);
+                } else {
+                    self.borrow_live_map.remove(&name);
+                }
+
+                if let Some(binding) = snapshot.scalar_borrow_map.get(&name).cloned() {
+                    self.scalar_borrow_map.insert(name, binding);
+                } else {
+                    self.scalar_borrow_map.remove(&name);
+                }
+            }
         }
     }
 

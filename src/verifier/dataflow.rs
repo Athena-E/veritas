@@ -600,53 +600,159 @@ fn verify_borrow_join_compatibility(
         return Ok(());
     }
 
-    let baseline = pred_states[0];
+    let baseline_shared_objects = shared_borrow_objects(pred_states[0]);
+    let baseline_mutable_objects = mutable_borrow_objects(pred_states[0]);
     for state in pred_states.iter().skip(1) {
-        if baseline.shared_borrow_object_ids != state.shared_borrow_object_ids {
+        if baseline_shared_objects != shared_borrow_objects(state) {
             return Err(VerifyError::OwnershipViolation {
                 block: target_label.to_string(),
                 instr_desc: "join".to_string(),
-                msg: "predecessors disagree on shared-borrow register state".to_string(),
+                msg: "predecessors disagree on shared-borrow object state".to_string(),
             });
         }
-        if baseline.mutable_borrow_object_ids != state.mutable_borrow_object_ids {
+        if baseline_mutable_objects != mutable_borrow_objects(state) {
             return Err(VerifyError::OwnershipViolation {
                 block: target_label.to_string(),
                 instr_desc: "join".to_string(),
-                msg: "predecessors disagree on mutable-borrow register state".to_string(),
+                msg: "predecessors disagree on mutable-borrow object state".to_string(),
             });
         }
-        if baseline.shared_borrow_stack_object_ids != state.shared_borrow_stack_object_ids {
+    }
+
+    for object_id in baseline_shared_objects {
+        if !has_common_shared_borrow_location(pred_states, object_id) {
             return Err(VerifyError::OwnershipViolation {
                 block: target_label.to_string(),
                 instr_desc: "join".to_string(),
-                msg: "predecessors disagree on shared-borrow stack state".to_string(),
+                msg: format!("shared-borrow object {object_id} has no common join location"),
             });
         }
-        if baseline.mutable_borrow_stack_object_ids != state.mutable_borrow_stack_object_ids {
+    }
+
+    for object_id in baseline_mutable_objects {
+        if !has_common_mutable_borrow_location(pred_states, object_id) {
             return Err(VerifyError::OwnershipViolation {
                 block: target_label.to_string(),
                 instr_desc: "join".to_string(),
-                msg: "predecessors disagree on mutable-borrow stack state".to_string(),
-            });
-        }
-        if baseline.shared_borrow_spill_object_ids != state.shared_borrow_spill_object_ids {
-            return Err(VerifyError::OwnershipViolation {
-                block: target_label.to_string(),
-                instr_desc: "join".to_string(),
-                msg: "predecessors disagree on shared-borrow spill state".to_string(),
-            });
-        }
-        if baseline.mutable_borrow_spill_object_ids != state.mutable_borrow_spill_object_ids {
-            return Err(VerifyError::OwnershipViolation {
-                block: target_label.to_string(),
-                instr_desc: "join".to_string(),
-                msg: "predecessors disagree on mutable-borrow spill state".to_string(),
+                msg: format!("mutable-borrow object {object_id} has no common join location"),
             });
         }
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+enum BorrowLocation {
+    Reg(Reg),
+    Stack(usize),
+    Spill(i32),
+}
+
+fn shared_borrow_objects(state: &TypeState) -> HashSet<u32> {
+    borrow_objects(
+        state.shared_borrow_object_ids.values().copied(),
+        state
+            .shared_borrow_stack_object_ids
+            .iter()
+            .filter_map(|object_id| *object_id),
+        state.shared_borrow_spill_object_ids.values().copied(),
+    )
+}
+
+fn mutable_borrow_objects(state: &TypeState) -> HashSet<u32> {
+    borrow_objects(
+        state.mutable_borrow_object_ids.values().copied(),
+        state
+            .mutable_borrow_stack_object_ids
+            .iter()
+            .filter_map(|object_id| *object_id),
+        state.mutable_borrow_spill_object_ids.values().copied(),
+    )
+}
+
+fn borrow_objects(
+    register_objects: impl Iterator<Item = u32>,
+    stack_objects: impl Iterator<Item = u32>,
+    spill_objects: impl Iterator<Item = u32>,
+) -> HashSet<u32> {
+    register_objects
+        .chain(stack_objects)
+        .chain(spill_objects)
+        .collect()
+}
+
+fn has_common_shared_borrow_location(pred_states: &[&TypeState], object_id: u32) -> bool {
+    has_common_borrow_location(pred_states, object_id, shared_borrow_locations)
+}
+
+fn has_common_mutable_borrow_location(pred_states: &[&TypeState], object_id: u32) -> bool {
+    has_common_borrow_location(pred_states, object_id, mutable_borrow_locations)
+}
+
+fn has_common_borrow_location(
+    pred_states: &[&TypeState],
+    object_id: u32,
+    locations_for_state: fn(&TypeState, u32) -> HashSet<BorrowLocation>,
+) -> bool {
+    let Some((first_state, rest)) = pred_states.split_first() else {
+        return false;
+    };
+
+    let mut common_locations = locations_for_state(first_state, object_id);
+    for state in rest {
+        let locations = locations_for_state(state, object_id);
+        common_locations.retain(|location| locations.contains(location));
+    }
+
+    !common_locations.is_empty()
+}
+
+fn shared_borrow_locations(state: &TypeState, object_id: u32) -> HashSet<BorrowLocation> {
+    borrow_locations(
+        state.shared_borrow_object_ids.iter(),
+        state.shared_borrow_stack_object_ids.iter(),
+        state.shared_borrow_spill_object_ids.iter(),
+        object_id,
+    )
+}
+
+fn mutable_borrow_locations(state: &TypeState, object_id: u32) -> HashSet<BorrowLocation> {
+    borrow_locations(
+        state.mutable_borrow_object_ids.iter(),
+        state.mutable_borrow_stack_object_ids.iter(),
+        state.mutable_borrow_spill_object_ids.iter(),
+        object_id,
+    )
+}
+
+fn borrow_locations<'a>(
+    register_objects: impl Iterator<Item = (&'a Reg, &'a u32)>,
+    stack_objects: impl Iterator<Item = &'a Option<u32>>,
+    spill_objects: impl Iterator<Item = (&'a i32, &'a u32)>,
+    object_id: u32,
+) -> HashSet<BorrowLocation> {
+    let mut locations = HashSet::new();
+
+    for (reg, reg_object_id) in register_objects {
+        if *reg_object_id == object_id {
+            locations.insert(BorrowLocation::Reg(*reg));
+        }
+    }
+
+    for (idx, stack_object_id) in stack_objects.enumerate() {
+        if *stack_object_id == Some(object_id) {
+            locations.insert(BorrowLocation::Stack(idx));
+        }
+    }
+
+    for (offset, spill_object_id) in spill_objects {
+        if *spill_object_id == object_id {
+            locations.insert(BorrowLocation::Spill(*offset));
+        }
+    }
+
+    locations
 }
 
 /// Join multiple types into their least upper bound.
@@ -691,10 +797,26 @@ fn join_types(types: &[DtalType]) -> DtalType {
         return DtalType::Int;
     }
 
+    let all_machine_i64_like = types
+        .iter()
+        .all(|t| matches!(t, DtalType::I64 | DtalType::SingletonInt(_)));
+    if all_machine_i64_like {
+        return DtalType::I64;
+    }
+
+    let all_machine_u64_like = types
+        .iter()
+        .all(|t| matches!(t, DtalType::U64 | DtalType::SingletonInt(_)));
+    if all_machine_u64_like {
+        return DtalType::U64;
+    }
+
     let all_numeric = types.iter().all(|t| {
         matches!(
             t,
             DtalType::Int
+                | DtalType::I64
+                | DtalType::U64
                 | DtalType::SingletonInt(_)
                 | DtalType::RefinedInt { .. }
                 | DtalType::ExistentialInt { .. }

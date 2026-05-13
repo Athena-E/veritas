@@ -29,12 +29,12 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
         TStmt::Let {
             is_mut: _,
             name,
-            declared_ty: _,
+            declared_ty,
             value,
-            checked_ty,
+            checked_ty: _,
             ownership,
         } => {
-            lower_let(ctx, name, value, checked_ty, *ownership);
+            lower_let(ctx, name, value, declared_ty, *ownership);
         }
 
         TStmt::Assignment {
@@ -126,7 +126,7 @@ fn lower_let<'src>(
         };
         let (borrow_reg, cell_reg, lowered_ref_ty) =
             ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind);
-        ctx.bind_scalar_borrow(
+        ctx.declare_scalar_borrow(
             name,
             borrow_reg,
             lowered_ref_ty,
@@ -174,7 +174,7 @@ fn lower_let<'src>(
         ctx.emit_borrow_end_for_binding(name);
     }
 
-    ctx.bind_var_typed(name, bound_reg, ty.clone());
+    ctx.declare_var_typed(name, bound_reg, ty.clone());
 }
 
 /// Lower an assignment statement

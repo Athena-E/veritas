@@ -101,6 +101,7 @@ verify_example!(e2e_18_precondition_use, "18_precondition_use.veri");
 verify_example!(e2e_18_quantifiers, "18_quantifiers.veri");
 verify_example!(e2e_19_loop_invariant, "19_loop_invariant.veri");
 verify_example!(e2e_19_quantifier_showcase, "19_quantifier_showcase.veri");
+verify_example!(e2e_20_binary_search, "20_binary_search.veri");
 verify_example!(e2e_21_safe_division, "21_safe_division.veri");
 verify_example!(e2e_22_bubble_sort, "22_bubble_sort.veri");
 verify_example!(e2e_23_modulo, "23_modulo.veri");
@@ -110,6 +111,7 @@ verify_example!(e2e_26_io, "26_io.veri");
 verify_example!(e2e_27_digit_sum_io, "27_digit_sum_io.veri");
 verify_example!(e2e_28_read_input, "28_read_input.veri");
 verify_example!(e2e_add, "add.veri");
+verify_example!(e2e_binary_search, "binary_search.veri");
 verify_example!(e2e_bubble_sort, "bubble_sort.veri");
 verify_example!(e2e_linear_search, "linear_search.veri");
 verify_example!(e2e_serial_driver, "serial_driver.veri");
@@ -144,10 +146,8 @@ verify_example!(
     "37_mutable_scalar_borrow_call.veri"
 );
 
-// These examples currently compile but exceed the verifier's supported join/type model.
-expect_verification_failure!(e2e_verify_fail_20_binary_search, "20_binary_search.veri");
+// This example currently compiles but exceeds the verifier's supported join/type model.
 expect_verification_failure!(e2e_verify_fail_28_nested_array, "28_nested_array.veri");
-expect_verification_failure!(e2e_verify_fail_binary_search, "binary_search.veri");
 
 // ============================================================================
 // Error cases: should fail during compilation
