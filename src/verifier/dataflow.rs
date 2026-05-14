@@ -45,6 +45,11 @@ use crate::dtal::regs::Reg;
 use crate::dtal::types::DtalType;
 use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
+use crate::verifier::ownership::{
+    assign_mutable_borrow_from, assign_shared_borrow_from, clear_owned_alias_group,
+    consume_owned_alias_group, fresh_object_id, preserve_plain_mov_alias_ownership,
+    preserve_plain_mov_mutable_borrow, preserve_plain_mov_shared_borrow, transfer_owned,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Entry, exit, edge, and predecessor state computed for a function.
@@ -587,7 +592,7 @@ fn join_states(
         .max()
         .unwrap_or(0);
 
-    checker::verify_unique_owned_objects(&result, target_label, "join")?;
+    crate::verifier::ownership::verify_unique_owned_objects(&result, target_label, "join")?;
 
     Ok(result)
 }
@@ -1425,125 +1430,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             consume_owned_alias_group(*src, object_id, state);
         }
     }
-}
-
-fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
-    let object_id = state.owned_object_ids.get(&src).copied();
-    clear_owned_alias_group(src, object_id, state);
-    if let Some(object_id) = object_id {
-        state.owned_registers.insert(dst);
-        state.owned_object_ids.insert(dst, object_id);
-        state.shared_borrow_object_ids.remove(&dst);
-        state.mutable_borrow_object_ids.remove(&dst);
-    } else {
-        state.owned_registers.remove(&dst);
-        state.owned_object_ids.remove(&dst);
-        state.shared_borrow_object_ids.remove(&dst);
-        state.mutable_borrow_object_ids.remove(&dst);
-    }
-}
-
-fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
-    match reg {
-        Reg::Physical(crate::dtal::regs::PhysicalReg::R0) => {
-            Some(Reg::Physical(crate::dtal::regs::PhysicalReg::LR))
-        }
-        Reg::Physical(crate::dtal::regs::PhysicalReg::LR) => {
-            Some(Reg::Physical(crate::dtal::regs::PhysicalReg::R0))
-        }
-        _ => None,
-    }
-}
-
-fn clear_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
-    state.owned_registers.remove(&reg);
-    state.owned_object_ids.remove(&reg);
-    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
-        let same_object = object_id
-            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
-        if same_object {
-            state.owned_registers.remove(&counterpart);
-            state.owned_object_ids.remove(&counterpart);
-        }
-    }
-}
-
-fn consume_owned_alias_group(reg: Reg, object_id: Option<u32>, state: &mut TypeState) {
-    state.consumed_registers.insert(reg);
-    if let Some(counterpart) = abi_owned_alias_counterpart(reg) {
-        let same_object = object_id
-            .is_some_and(|owned| state.owned_object_ids.get(&counterpart).copied() == Some(owned));
-        if same_object {
-            state.consumed_registers.insert(counterpart);
-        }
-    }
-}
-
-fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState) {
-    let is_abi_return_alias = matches!(
-        (src, dst),
-        (
-            Reg::Physical(crate::dtal::regs::PhysicalReg::LR),
-            Reg::Physical(crate::dtal::regs::PhysicalReg::R0)
-        ) | (
-            Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
-            Reg::Physical(crate::dtal::regs::PhysicalReg::LR)
-        )
-    );
-    if is_abi_return_alias && let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        state.owned_registers.insert(dst);
-        state.owned_object_ids.insert(dst, object_id);
-    } else {
-        state.owned_registers.remove(&dst);
-        state.owned_object_ids.remove(&dst);
-    }
-}
-
-fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
-    if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
-        state.shared_borrow_object_ids.insert(dst, object_id);
-    } else {
-        state.shared_borrow_object_ids.remove(&dst);
-    }
-}
-
-fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
-    if src == dst {
-        if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied() {
-            state.mutable_borrow_object_ids.insert(dst, object_id);
-        } else {
-            state.mutable_borrow_object_ids.remove(&dst);
-        }
-    } else {
-        state.mutable_borrow_object_ids.remove(&dst);
-    }
-}
-
-fn assign_shared_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
-    if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        state.shared_borrow_object_ids.insert(dst, object_id);
-    } else if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
-        state.shared_borrow_object_ids.insert(dst, object_id);
-    } else {
-        state.shared_borrow_object_ids.remove(&dst);
-    }
-}
-
-fn assign_mutable_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
-    if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        state.owned_registers.remove(&dst);
-        state.owned_object_ids.remove(&dst);
-        state.shared_borrow_object_ids.remove(&dst);
-        state.mutable_borrow_object_ids.insert(dst, object_id);
-    } else {
-        state.mutable_borrow_object_ids.remove(&dst);
-    }
-}
-
-fn fresh_object_id(state: &mut TypeState) -> u32 {
-    let object_id = state.next_object_id;
-    state.next_object_id += 1;
-    object_id
 }
 
 /// Check whether two type states are equivalent for dataflow convergence.
