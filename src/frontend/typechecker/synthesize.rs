@@ -4,6 +4,7 @@ use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr};
 use crate::common::types::{IType, IValue};
+use crate::frontend::typechecker::context::join_types;
 use crate::frontend::typechecker::helpers::check_const_fold_overflow;
 use crate::frontend::typechecker::{
     TypeError, TypingContext, VarBinding, build_equality_refinement, check_array_bounds_expr,
@@ -693,7 +694,7 @@ pub fn synth_expr<'src>(
                         } else if is_subtype(ctx, t2, t1) {
                             t1.clone()
                         } else {
-                            IType::Int // widen to int as fallback
+                            join_types(t1, t2)
                         }
                     }
                     _ => IType::Unit,

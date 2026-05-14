@@ -272,8 +272,8 @@ fn test_proposition_difference_cleared() {
 }
 
 #[test]
-fn test_join_different_singletons_to_int() {
-    // int(5) ∨ int(10) should produce int
+fn test_join_different_singletons_to_refined_disjunction() {
+    // int(5) ∨ int(10) should produce {v: int | v == 5 || v == 10}
     let singleton1 = IType::SingletonInt(IValue::Int(5));
     let singleton2 = IType::SingletonInt(IValue::Int(10));
 
@@ -283,10 +283,21 @@ fn test_join_different_singletons_to_int() {
     let joined = TypingContext::join_mutable_contexts(&ctx1, &ctx2);
     let binding = joined.lookup_mutable("r").unwrap();
 
-    // Different singletons should widen to int
     match &binding.current_type {
-        IType::Int => {} // Expected
-        other => panic!("Expected Int for different singletons, got {}", other),
+        IType::RefinedInt { prop, .. } => {
+            let pred_str = format!("{}", prop);
+            assert!(
+                pred_str.contains("v == 5")
+                    && pred_str.contains("v == 10")
+                    && pred_str.contains("||"),
+                "Expected disjunctive singleton refinement, got: {}",
+                pred_str
+            );
+        }
+        other => panic!(
+            "Expected RefinedInt for different singletons, got {}",
+            other
+        ),
     }
 }
 

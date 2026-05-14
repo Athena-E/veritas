@@ -542,6 +542,29 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_branch_joined_singletons_as_array_index() {
+        let source = r#"
+            fn choose(flag: bool) -> int {
+                let arr: [int; 2] = [7; 2];
+                let mut i: int = 0;
+                if flag {
+                    i = 0;
+                } else {
+                    i = 1;
+                }
+                arr[i]
+            }
+        "#;
+
+        let result = compile(source);
+        assert!(
+            result.is_ok(),
+            "Compilation should preserve singleton alternatives across join: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
     fn test_compile_multi_function() {
         let source = r#"
             fn helper(n: int) -> int {

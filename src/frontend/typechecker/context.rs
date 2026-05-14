@@ -521,7 +521,7 @@ impl<'src> TypingContext<'src> {
     ///
     /// For each mutable variable present in both contexts:
     /// - If types are equal, keep that type
-    /// - Otherwise, widen to the base type (least upper bound)
+    /// - Otherwise, widen to the base type when no compact refinement join exists
     ///
     /// Propositions: Keep intersection (propositions that appear in both branches)
     pub fn join_mutable_contexts(ctx1: &Self, ctx2: &Self) -> Self {
@@ -750,8 +750,17 @@ pub(crate) fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src
             IType::SingletonInt(v1.clone())
         }
 
-        // Different singletons - widen to int
-        (IType::SingletonInt(_), IType::SingletonInt(_)) => IType::Int,
+        // Different integer singletons: promote both to refinements and disjoin.
+        // Boolean singletons still widen to bool because RefinedInt only models integers.
+        (IType::SingletonInt(IValue::Int(_)), IType::SingletonInt(IValue::Int(_))) => {
+            let prop1 = singleton_to_proposition(t1);
+            let prop2 = singleton_to_proposition(t2);
+            IType::RefinedInt {
+                base: std::sync::Arc::new(IType::Int),
+                prop: disjoin_propositions(&prop1, &prop2),
+            }
+        }
+        (IType::SingletonInt(IValue::Bool(_)), IType::SingletonInt(IValue::Bool(_))) => IType::Bool,
 
         // Singleton and int - widen to int
         (IType::SingletonInt(_), IType::Int) | (IType::Int, IType::SingletonInt(_)) => IType::Int,
@@ -766,9 +775,12 @@ pub(crate) fn join_types<'src>(t1: &IType<'src>, t2: &IType<'src>) -> IType<'src
         }
 
         // Refined + Singleton: promote singleton to refined, then join
-        (IType::RefinedInt { base, prop }, IType::SingletonInt(v))
-        | (IType::SingletonInt(v), IType::RefinedInt { base, prop }) => {
-            let singleton_prop = singleton_to_proposition(v);
+        (IType::RefinedInt { base, prop }, IType::SingletonInt(_))
+        | (IType::SingletonInt(_), IType::RefinedInt { base, prop }) => {
+            let singleton_prop = singleton_to_proposition(match (t1, t2) {
+                (IType::SingletonInt(_), _) => t1,
+                _ => t2,
+            });
             let disjoined = disjoin_propositions(prop, &singleton_prop);
             IType::RefinedInt {
                 base: base.clone(),
@@ -839,17 +851,18 @@ fn disjoin_propositions<'src>(
 }
 
 /// Convert a singleton type int(n) to a proposition {v: int | v == n}
-fn singleton_to_proposition<'src>(value: &IValue) -> IProposition<'src> {
+fn singleton_to_proposition<'src>(ty: &IType<'src>) -> IProposition<'src> {
     let var = "v".to_string();
     let dummy_span = SimpleSpan::new(0, 0);
 
-    let value_literal = match value {
-        IValue::Int(n) => Expr::Literal(Literal::Int(*n)),
-        IValue::Symbolic(s) => {
+    let value_literal = match ty {
+        IType::SingletonInt(IValue::Int(n)) => Expr::Literal(Literal::Int(*n)),
+        IType::SingletonInt(IValue::Symbolic(s)) => {
             let leaked: &'src str = Box::leak(s.clone().into_boxed_str());
             Expr::Variable(leaked)
         }
-        IValue::Bool(b) => Expr::Literal(Literal::Bool(*b)),
+        IType::SingletonInt(IValue::Bool(b)) => Expr::Literal(Literal::Bool(*b)),
+        _ => unreachable!("singleton_to_proposition called with non-singleton type"),
     };
 
     let eq_expr = Expr::BinOp {
