@@ -1,13 +1,18 @@
 // src/frontend/typechecker/mod.rs
 
+mod array_props;
 pub mod check;
 pub mod context;
 pub mod error;
 pub mod helpers;
+mod ownership;
+mod postconditions;
 pub mod report;
 pub mod smt;
+mod substitution;
 pub mod subtyping;
 pub mod synthesize;
+mod type_utils;
 
 #[cfg(test)]
 mod tests;
