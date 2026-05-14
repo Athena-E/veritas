@@ -1,12 +1,12 @@
 //! Tests for TAST to TIR lowering
 
-use crate::backend::lower::lower_function;
-use crate::backend::tir::{Terminator, TirInstr};
 use crate::common::ast::Literal;
 use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TStmt};
 use crate::common::types::IType;
+use crate::middle::lower::lower_function;
+use crate::middle::tir::{Terminator, TirInstr};
 
 /// Helper to create a spanned value with a dummy span
 fn spanned<T>(value: T) -> Spanned<T> {

@@ -27,9 +27,9 @@
 //! - Overflow wraps using standard two's-complement semantics (i128::wrapping_*)
 //! - Conservative at block boundaries (clears map at each block entry)
 
-use crate::backend::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
-use crate::backend::dtal::types::DtalType;
+use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
+use crate::dtal::types::DtalType;
 use std::collections::HashMap;
 
 /// Type alias for the constant map: virtual register → known immediate value
@@ -323,8 +323,8 @@ fn instruction_dst(instr: &DtalInstr) -> Option<Reg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{DtalBlock, DtalFunction, TypeState};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{DtalBlock, DtalFunction, TypeState};
+    use crate::dtal::types::DtalType;
 
     fn vreg(n: u32) -> Reg {
         Reg::Virtual(VirtualReg(n))

@@ -15,10 +15,10 @@
 //! Loop-counter phis may carry an existential constraint so a widened join type
 //! can still expose the invariant needed by DTAL generation and verification.
 
-use crate::backend::dtal::VirtualReg;
-use crate::backend::dtal::constraints::Constraint;
-use crate::backend::tir::types::BlockId;
 use crate::common::types::IType;
+use crate::dtal::VirtualReg;
+use crate::dtal::constraints::Constraint;
+use crate::middle::tir::types::BlockId;
 
 /// SSA phi node for a block entry.
 #[derive(Clone, Debug)]

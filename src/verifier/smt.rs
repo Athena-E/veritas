@@ -27,9 +27,9 @@
 //! # Related Modules
 //!
 //! The verifier checker builds the constraints proved here, and
-//! [`crate::backend::dtal::constraints`] defines the source syntax.
+//! [`crate::dtal::constraints`] defines the source syntax.
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
+use crate::dtal::constraints::{Constraint, IndexExpr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use z3::ast::{Bool, Int};

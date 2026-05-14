@@ -25,8 +25,8 @@
 //! - No `Store`/`Call` between Load and BinOp (aliasing)
 //! - No instruction between them redefines `base`, `offset`, or `rhs`
 
-use crate::backend::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
+use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashMap;
 
 /// Apply load-op fusion to a function
@@ -293,9 +293,9 @@ fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{DtalBlock, DtalFunction, TypeState};
-    use crate::backend::dtal::regs::VirtualReg;
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{DtalBlock, DtalFunction, TypeState};
+    use crate::dtal::regs::VirtualReg;
+    use crate::dtal::types::DtalType;
 
     fn vreg(n: u32) -> Reg {
         Reg::Virtual(VirtualReg(n))

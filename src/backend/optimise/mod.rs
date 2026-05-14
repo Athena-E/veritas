@@ -17,7 +17,7 @@ pub mod licm;
 pub mod load_fusion;
 pub mod peephole;
 
-use crate::backend::dtal::instr::DtalProgram;
+use crate::dtal::instr::DtalProgram;
 
 /// Configuration for optimization passes
 #[derive(Clone, Debug, Default)]
@@ -136,9 +136,9 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
-    use crate::backend::dtal::regs::{Reg, VirtualReg};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
+    use crate::dtal::regs::{Reg, VirtualReg};
+    use crate::dtal::types::DtalType;
 
     fn make_copy_chain_function() -> DtalFunction {
         // v0 = 42

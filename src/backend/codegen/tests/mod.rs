@@ -4,12 +4,12 @@
 
 use crate::backend::codegen::codegen_program;
 use crate::backend::emit::emit_program;
-use crate::backend::lower::lower_program;
 use crate::common::ast::{BinOp, Literal};
 use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::IType;
+use crate::middle::lower::lower_program;
 use crate::verifier::verify_dtal;
 
 /// Helper to create a spanned value with a dummy span

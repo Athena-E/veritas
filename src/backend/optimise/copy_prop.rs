@@ -20,8 +20,8 @@
 //!   see explicit materialisation of params/returns into virtual temporaries
 //! - Conservative at block boundaries (clears map at each block entry)
 
-use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
+use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashMap;
 
 /// Type alias for copy map: virtual destination → virtual source register
@@ -232,8 +232,8 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{BinaryOp, TypeState};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{BinaryOp, TypeState};
+    use crate::dtal::types::DtalType;
 
     #[test]
     fn test_simple_copy_propagation() {
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_does_not_propagate_from_physical_regs() {
-        use crate::backend::dtal::regs::PhysicalReg;
+        use crate::dtal::regs::PhysicalReg;
 
         // v0 = r0  (copy from physical)
         // v1 = v0 + v0  (must stay v0 + v0 so later backend stages still see

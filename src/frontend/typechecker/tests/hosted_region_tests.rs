@@ -1,5 +1,3 @@
-use crate::backend::lower::lower_program;
-use crate::backend::tir::{Terminator, TirInstr};
 use crate::common::ast::{Expr, Stmt};
 use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::types::{FunctionSignature, IType, IValue};
@@ -9,6 +7,8 @@ use crate::frontend::typechecker::check::check_stmt;
 use crate::frontend::typechecker::{
     TypeError, TypingContext, check_program, check_program_bare_metal,
 };
+use crate::middle::lower::lower_program;
+use crate::middle::tir::{Terminator, TirInstr};
 use chumsky::prelude::*;
 use im::HashMap;
 use std::sync::Arc;

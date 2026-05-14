@@ -31,13 +31,13 @@
 //! [`crate::backend::x86_64::instr`] defines the target IR emitted here, and
 //! [`crate::backend::regalloc`] provides the allocation algorithms.
 
-use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
-use crate::backend::dtal::regs::Reg;
-#[cfg(test)]
-use crate::backend::dtal::regs::VirtualReg;
 use crate::backend::regalloc::{AllocationResult, GraphColoringAllocator, LinearScanAllocator};
 use crate::backend::x86_64::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use crate::backend::x86_64::regs::{Location, X86Reg};
+use crate::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
+use crate::dtal::regs::Reg;
+#[cfg(test)]
+use crate::dtal::regs::VirtualReg;
 
 /// Lower a DTAL program to x86-64 machine-level IR.
 pub fn lower_program(program: &DtalProgram) -> X86Program {
@@ -122,7 +122,7 @@ fn lower_function(func: &DtalFunction) -> X86Function {
 }
 
 fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
-    use crate::backend::dtal::regs::PhysicalReg;
+    use crate::dtal::regs::PhysicalReg;
 
     func.blocks.iter().any(|block| {
         block.instructions.iter().any(|instr| match instr {
@@ -645,7 +645,7 @@ impl<'a> FunctionLowerer<'a> {
         // After a call, `Physical(R0)` reads the RAX return value once.
         let src_loc = if self.return_value_in_rax {
             if let Reg::Physical(preg) = src {
-                use crate::backend::dtal::regs::PhysicalReg;
+                use crate::dtal::regs::PhysicalReg;
                 if preg == PhysicalReg::R0 {
                     self.return_value_in_rax = false;
                     Location::Reg(X86Reg::Rax)
@@ -839,13 +839,13 @@ impl<'a> FunctionLowerer<'a> {
     /// Lower `dst = *[base + offset*8] op other`.
     fn lower_load_op(
         &mut self,
-        op: crate::backend::dtal::instr::BinaryOp,
+        op: crate::dtal::instr::BinaryOp,
         dst: Reg,
         base: Reg,
         offset: Reg,
         other: Reg,
     ) {
-        use crate::backend::dtal::instr::BinaryOp;
+        use crate::dtal::instr::BinaryOp;
         let base_loc = self.get_reg_location(base);
         let offset_loc = self.get_reg_location(offset);
         let other_loc = self.get_reg_location(other);
@@ -997,7 +997,7 @@ impl<'a> FunctionLowerer<'a> {
         match reg {
             Reg::Virtual(vreg) => self.get_vreg_location(Reg::Virtual(vreg)),
             Reg::Physical(preg) => {
-                use crate::backend::dtal::regs::PhysicalReg;
+                use crate::dtal::regs::PhysicalReg;
                 let x86_reg = match preg {
                     PhysicalReg::R0 => X86Reg::Rdi,
                     PhysicalReg::R1 => X86Reg::Rsi,
@@ -1086,8 +1086,8 @@ impl<'a> FunctionLowerer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{DtalBlock, TypeState};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{DtalBlock, TypeState};
+    use crate::dtal::types::DtalType;
 
     #[test]
     fn test_lower_simple_function() {
@@ -1147,7 +1147,7 @@ mod tests {
 
     #[test]
     fn test_lower_with_branch() {
-        use crate::backend::dtal::instr::CmpOp;
+        use crate::dtal::instr::CmpOp;
 
         let v0 = Reg::Virtual(VirtualReg(0));
 

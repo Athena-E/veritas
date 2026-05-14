@@ -23,11 +23,11 @@
 //! [`crate::backend::x86_64::encode`] performs byte encoding, while
 //! [`crate::backend::runtime`] supplies trusted runtime entry points.
 
-use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
-use crate::backend::dtal::regs::{PhysicalReg, Reg};
 use crate::backend::x86_64::encode::{EncodedProgram, Encoder};
 use crate::backend::x86_64::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use crate::backend::x86_64::regs::X86Reg;
+use crate::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
+use crate::dtal::regs::{PhysicalReg, Reg};
 
 /// Map a DTAL `PhysicalReg` to an x86-64 register.
 fn phys_to_x86(preg: PhysicalReg) -> X86Reg {
@@ -223,7 +223,7 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
             other,
             ..
         } => {
-            use crate::backend::dtal::instr::BinaryOp;
+            use crate::dtal::instr::BinaryOp;
             let other_x86 = reg_to_x86(other);
             let mem = MemOperand::base_index_disp(reg_to_x86(base), reg_to_x86(offset), 8, 0);
             let instr = match op {

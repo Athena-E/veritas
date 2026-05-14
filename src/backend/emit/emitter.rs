@@ -4,12 +4,10 @@
 //! The format is human-readable and includes type state information
 //! for verification purposes.
 
-use crate::backend::dtal::Constraint;
-use crate::backend::dtal::instr::{
-    BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram,
-};
-use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::DtalType;
+use crate::dtal::Constraint;
+use crate::dtal::instr::{BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram};
+use crate::dtal::regs::Reg;
+use crate::dtal::types::DtalType;
 use std::fmt::Write;
 
 /// Emit a DTAL program as text
@@ -506,8 +504,8 @@ fn emit_constraint(constraint: &Constraint) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::VirtualReg;
-    use crate::backend::dtal::instr::TypeState;
+    use crate::dtal::VirtualReg;
+    use crate::dtal::instr::TypeState;
 
     #[test]
     fn test_emit_simple_function() {

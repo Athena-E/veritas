@@ -18,9 +18,9 @@
 //! - Store, Call, Jmp, Branch, Ret, Push
 //! - ConstraintAssert, ConstraintAssume
 
-use crate::backend::dtal::instr::{DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
 use crate::backend::regalloc::liveness::LivenessAnalysis;
+use crate::dtal::instr::{DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashSet;
 
 /// Eliminate dead code from a function
@@ -150,8 +150,8 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{BinaryOp, DtalBlock, TypeState};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{BinaryOp, DtalBlock, TypeState};
+    use crate::dtal::types::DtalType;
 
     #[test]
     fn test_remove_unused_mov() {

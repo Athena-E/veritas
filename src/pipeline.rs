@@ -31,15 +31,17 @@
 //!
 //! # Related Modules
 //!
-//! [`crate::frontend`] owns lexing, parsing, and type checking. The backend
-//! stages are implemented under [`crate::backend`].
+//! [`crate::frontend`] owns lexing, parsing, and type checking; [`crate::middle`]
+//! owns TIR lowering; [`crate::backend`] owns DTAL generation and target-facing
+//! stages.
 
 use crate::backend::optimise::{OptConfig, optimize_program};
-use crate::backend::{codegen_program, emit_program, lower_program};
+use crate::backend::{codegen_program, emit_program};
 use crate::frontend::lexer::lexer;
 use crate::frontend::parser::program_parser;
 use crate::frontend::typechecker::helpers::reset_fresh_var_counter;
 use crate::frontend::typechecker::{TypeError, check_program, report_type_error};
+use crate::middle::lower_program;
 use chumsky::prelude::*;
 use std::fmt;
 
@@ -75,8 +77,8 @@ pub struct CompileOutput {
 pub struct VerboseOutput<'src> {
     pub tokens: Vec<(String, String)>,
     pub tast: crate::common::tast::TProgram<'src>,
-    pub tir: crate::backend::TirProgram<'src>,
-    pub dtal_program: crate::backend::dtal::instr::DtalProgram,
+    pub tir: crate::middle::TirProgram<'src>,
+    pub dtal_program: crate::dtal::instr::DtalProgram,
     pub dtal: String,
 }
 

@@ -1,8 +1,8 @@
 //! Shared compiler data structures.
 //!
 //! The `common` module contains syntax trees, typed syntax trees, semantic
-//! types, source spans, and ownership metadata used by both the frontend and
-//! backend.
+//! types, source spans, and ownership metadata used across the frontend, middle
+//! end, backend, and verifier.
 //!
 //! # Data Flow
 //!
@@ -16,16 +16,16 @@
 //! tast::TProgram with types, ownership, and contract metadata
 //!        |
 //!        v
-//! backend lowering
+//! middle-end lowering
 //! ```
 //!
 //! # Design Notes
 //!
 //! These types are intentionally representation-focused. They do not perform
 //! parsing, type checking, lowering, or verification themselves; instead they
-//! define the shared contracts between [`crate::frontend`], [`crate::backend`],
-//! and [`crate::verifier`]. Keeping them in one module avoids duplicating type
-//! and ownership concepts across compiler stages.
+//! define the shared contracts between [`crate::frontend`], [`crate::middle`],
+//! [`crate::backend`], and [`crate::verifier`]. Keeping them in one module
+//! avoids duplicating type and ownership concepts across compiler stages.
 //!
 //! # Related Modules
 //!

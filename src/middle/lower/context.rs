@@ -3,10 +3,10 @@
 //! This module provides the context that tracks state during lowering,
 //! including variable-to-register mappings and the current block.
 
-use crate::backend::dtal::{Constraint, VirtualReg};
-use crate::backend::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
 use crate::common::ownership::{BorrowKind, ParameterKind};
 use crate::common::types::IType;
+use crate::dtal::{Constraint, VirtualReg};
+use crate::middle::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 

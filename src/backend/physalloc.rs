@@ -38,14 +38,12 @@
 //! - [`crate::backend::direct_encode`] encodes the verified physical DTAL.
 //! - [`crate::verifier`] rechecks the transformed program.
 
-use crate::backend::dtal::instr::{
-    BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
-};
-use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-use crate::backend::dtal::types::DtalType;
 use crate::backend::regalloc::allocator::AllocationResult;
 use crate::backend::regalloc::liveness::LivenessAnalysis;
 use crate::backend::x86_64::regs::{Location, X86Reg};
+use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
+use crate::dtal::regs::{PhysicalReg, Reg, VirtualReg};
+use crate::dtal::types::DtalType;
 use std::collections::HashSet;
 
 /// Map an x86 register to the corresponding DTAL physical register.
@@ -190,10 +188,10 @@ fn build_vreg_name_map(alloc: &AllocationResult) -> std::collections::HashMap<St
 
 /// Remap virtual register names in an index expression.
 fn remap_index_expr(
-    expr: &crate::backend::dtal::constraints::IndexExpr,
+    expr: &crate::dtal::constraints::IndexExpr,
     name_map: &std::collections::HashMap<String, String>,
-) -> crate::backend::dtal::constraints::IndexExpr {
-    use crate::backend::dtal::constraints::IndexExpr;
+) -> crate::dtal::constraints::IndexExpr {
+    use crate::dtal::constraints::IndexExpr;
     match expr {
         IndexExpr::Const(n) => IndexExpr::Const(*n),
         IndexExpr::Var(name) => {
@@ -229,10 +227,10 @@ fn remap_index_expr(
 
 /// Remap virtual register names in a constraint.
 fn remap_constraint(
-    c: &crate::backend::dtal::constraints::Constraint,
+    c: &crate::dtal::constraints::Constraint,
     name_map: &std::collections::HashMap<String, String>,
-) -> crate::backend::dtal::constraints::Constraint {
-    use crate::backend::dtal::constraints::Constraint;
+) -> crate::dtal::constraints::Constraint {
+    use crate::dtal::constraints::Constraint;
     match c {
         Constraint::True => Constraint::True,
         Constraint::False => Constraint::False,
@@ -294,9 +292,9 @@ fn remap_constraint(
 
 /// Remap virtual register names in a constraint assertion.
 fn remap_constraint_vars(
-    constraint: &crate::backend::dtal::constraints::Constraint,
+    constraint: &crate::dtal::constraints::Constraint,
     alloc: &AllocationResult,
-) -> crate::backend::dtal::constraints::Constraint {
+) -> crate::dtal::constraints::Constraint {
     let name_map = build_vreg_name_map(alloc);
     remap_constraint(constraint, &name_map)
 }

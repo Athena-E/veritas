@@ -4,8 +4,8 @@
 //! (first-order DTAL domain). They are used during TIR→DTAL codegen and
 //! during `DtalType::from_itype` conversion.
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
+use crate::dtal::constraints::{Constraint, IndexExpr};
 
 /// Convert an Expr to a Constraint (for boolean expressions)
 pub fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {

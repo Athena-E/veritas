@@ -19,9 +19,9 @@
 //! verification side effects). `TypeAnnotation` and `ConstraintAssert`
 //! are never moved.
 
-use crate::backend::dtal::instr::{DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
 use crate::backend::regalloc::liveness::LivenessAnalysis;
+use crate::dtal::instr::{DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::{HashMap, HashSet};
 
 /// A detected natural loop
@@ -401,9 +401,9 @@ fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{BinaryOp, DtalBlock, TypeState};
-    use crate::backend::dtal::regs::VirtualReg;
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{BinaryOp, DtalBlock, TypeState};
+    use crate::dtal::regs::VirtualReg;
+    use crate::dtal::types::DtalType;
 
     fn vreg(n: u32) -> Reg {
         Reg::Virtual(VirtualReg(n))
@@ -469,7 +469,7 @@ mod tests {
                             imm: 10,
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Lt,
+                            cond: crate::dtal::instr::CmpOp::Lt,
                             target: ".test_loop_bb2".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -608,7 +608,7 @@ mod tests {
                             imm: 10,
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Lt,
+                            cond: crate::dtal::instr::CmpOp::Lt,
                             target: ".test_bb2".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -685,7 +685,7 @@ mod tests {
                             imm: 10,
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Lt,
+                            cond: crate::dtal::instr::CmpOp::Lt,
                             target: ".test_bb2".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -747,7 +747,7 @@ mod tests {
                             imm: 0,
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            cond: crate::dtal::instr::CmpOp::Eq,
                             target: ".test_bb1".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -771,7 +771,7 @@ mod tests {
                             imm: 10,
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Lt,
+                            cond: crate::dtal::instr::CmpOp::Lt,
                             target: ".test_bb2".to_string(),
                         },
                         DtalInstr::Jmp {

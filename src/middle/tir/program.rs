@@ -23,15 +23,15 @@
 //!
 //! # Related Modules
 //!
-//! [`crate::backend::tir::instr`] defines block contents and terminators, while
-//! [`crate::backend::tir::phi`] defines the join nodes attached to block entry.
+//! [`crate::middle::tir::instr`] defines block contents and terminators, while
+//! [`crate::middle::tir::phi`] defines the join nodes attached to block entry.
 
-use crate::backend::dtal::{Constraint, VirtualReg};
-use crate::backend::tir::instr::{Terminator, TirInstr};
-use crate::backend::tir::phi::PhiNode;
-use crate::backend::tir::types::{BlockId, RegisterState};
 use crate::common::ownership::ParameterKind;
 use crate::common::types::IType;
+use crate::dtal::{Constraint, VirtualReg};
+use crate::middle::tir::instr::{Terminator, TirInstr};
+use crate::middle::tir::phi::PhiNode;
+use crate::middle::tir::types::{BlockId, RegisterState};
 use std::collections::HashMap;
 
 /// Collection of TIR functions.

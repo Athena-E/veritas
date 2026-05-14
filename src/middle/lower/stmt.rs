@@ -3,15 +3,15 @@
 //! This module converts typed statements (`TStmt`) into TIR instructions
 //! and control flow structures.
 
-use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
-use crate::backend::lower::context::{LoweringContext, ScalarBorrowBinding};
-use crate::backend::lower::expr::{expr_to_index_expr, lower_expr};
-use crate::backend::lower::widen_itype;
-use crate::backend::tir::{BinaryOp, PhiNode, Terminator, TirInstr};
 use crate::common::ownership::OwnershipMode;
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
+use crate::dtal::{Constraint, IndexExpr, VirtualReg};
+use crate::middle::lower::context::{LoweringContext, ScalarBorrowBinding};
+use crate::middle::lower::expr::{expr_to_index_expr, lower_expr};
+use crate::middle::lower::widen_itype;
+use crate::middle::tir::{BinaryOp, PhiNode, Terminator, TirInstr};
 
 fn is_owned_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Array { .. })
@@ -400,7 +400,7 @@ fn lower_for_loop<'src>(
 
             // Preserve refined ints as phi existentials.
             let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
-                use crate::backend::dtal::convert::expr_to_constraint;
+                use crate::dtal::convert::expr_to_constraint;
                 if let Some(constraint) = expr_to_constraint(&prop.predicate.0) {
                     let phi_witness = format!("_ex_v{}", phi_reg.0);
                     let renamed = crate::backend::codegen::generator::substitute_constraint_vars(
@@ -571,7 +571,7 @@ fn lower_while_loop<'src>(
 
         // Preserve refined types as phi existentials.
         let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
-            use crate::backend::dtal::convert::expr_to_constraint;
+            use crate::dtal::convert::expr_to_constraint;
             if let Some(constraint) = expr_to_constraint(&prop.predicate.0) {
                 let phi_witness = format!("_ex_v{}", phi_reg.0);
                 let renamed = crate::backend::codegen::generator::substitute_constraint_vars(

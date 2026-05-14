@@ -1,9 +1,8 @@
 //! Veritas compiler backend.
 //!
-//! The backend owns every representation after frontend type checking. It
-//! lowers typed AST into [`tir`], emits DTAL through [`codegen`], and can
-//! continue through physical allocation and x86-64 encoding for native
-//! execution.
+//! The backend owns the target-facing stages after the typed middle end. It
+//! emits DTAL through [`codegen`] and can continue through physical allocation
+//! and x86-64 encoding for native execution.
 //!
 //! # Pipeline
 //!
@@ -30,31 +29,21 @@
 //!
 //! # Related Modules
 //!
-//! - [`tir`] defines the typed SSA IR used by frontend lowering.
+//! - [`crate::middle::tir`] defines the typed SSA IR used by frontend lowering.
+//! - [`crate::dtal`] defines the verifier-visible assembly language.
 //! - [`physalloc`] maps virtual-register DTAL to physical-register DTAL.
 //! - [`x86_64`] contains the target instruction IR and encoder.
 //! - [`crate::verifier`] validates DTAL before native execution.
 
 pub mod codegen;
 pub mod direct_encode;
-pub mod dtal;
 pub mod elf;
 pub mod emit;
-pub mod lower;
 pub mod optimise;
 pub mod physalloc;
 pub mod regalloc;
 pub mod runtime;
-pub mod tir;
 pub mod x86_64;
-
-pub use dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
-
-pub use tir::{
-    BasicBlock, BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr, TirProgram,
-};
-
-pub use lower::lower_program;
 
 pub use codegen::codegen_program;
 

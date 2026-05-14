@@ -12,9 +12,9 @@
 //! 4. If no free register, spill the register with furthest next use
 
 use super::liveness::{InterferenceGraph, LivenessAnalysis, LivenessInfo};
-use crate::backend::dtal::instr::{DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
 use crate::backend::x86_64::regs::{Location, X86Reg};
+use crate::dtal::instr::{DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::{BTreeMap, HashSet};
 
 /// A live interval for a virtual register
@@ -503,8 +503,8 @@ impl Default for GraphColoringAllocator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{BinaryOp, DtalBlock, TypeState};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{BinaryOp, DtalBlock, TypeState};
+    use crate::dtal::types::DtalType;
 
     fn make_test_function() -> DtalFunction {
         let v0 = Reg::Virtual(VirtualReg(0));

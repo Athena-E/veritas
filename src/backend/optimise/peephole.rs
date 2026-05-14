@@ -15,7 +15,7 @@
 //! - `BinOp And dst, x, x` → `MovReg dst, x` (idempotent)
 //! - `BinOp Or dst, x, x` → `MovReg dst, x` (idempotent)
 
-use crate::backend::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
+use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
 
 /// Apply peephole optimisations to a function
 ///
@@ -174,9 +174,9 @@ fn try_peephole(instr: &mut DtalInstr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{DtalBlock, DtalFunction, TypeState};
-    use crate::backend::dtal::regs::{Reg, VirtualReg};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{DtalBlock, DtalFunction, TypeState};
+    use crate::dtal::regs::{Reg, VirtualReg};
+    use crate::dtal::types::DtalType;
 
     fn vreg(n: u32) -> Reg {
         Reg::Virtual(VirtualReg(n))
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn test_constraint_assert_untouched() {
-        use crate::backend::dtal::constraints::{Constraint, IndexExpr};
+        use crate::dtal::constraints::{Constraint, IndexExpr};
 
         let mut func = make_func(vec![
             DtalInstr::ConstraintAssert {

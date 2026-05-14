@@ -9,7 +9,7 @@
 //! `SingletonInt(IndexExpr::Var("n"))` for symbolic values,
 //! `SingletonInt(IndexExpr::Add(..))` for derived values.
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
+use crate::dtal::constraints::{Constraint, IndexExpr};
 use std::fmt;
 use std::sync::Arc;
 
@@ -198,7 +198,7 @@ impl DtalType {
             IType::RefMut(inner) => DtalType::RefMut(Arc::new(DtalType::from_itype(inner))),
             IType::SingletonInt(val) => DtalType::SingletonInt(Self::ivalue_to_index_expr(val)),
             IType::RefinedInt { base, prop } => {
-                use crate::backend::dtal::convert::expr_to_constraint;
+                use crate::dtal::convert::expr_to_constraint;
                 match expr_to_constraint(&prop.predicate.0) {
                     Some(constraint) => DtalType::RefinedInt {
                         base: Arc::new(DtalType::from_itype(base)),
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_display_refined() {
-        use crate::backend::dtal::constraints::{Constraint, IndexExpr};
+        use crate::dtal::constraints::{Constraint, IndexExpr};
         let ty = DtalType::RefinedInt {
             base: Arc::new(DtalType::Int),
             var: "x".to_string(),

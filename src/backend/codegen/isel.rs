@@ -4,13 +4,13 @@
 //! At this stage, we use virtual registers (physical register allocation
 //! happens in a later phase).
 
-use crate::backend::dtal::constraints::IndexExpr;
-use crate::backend::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
-use crate::backend::dtal::regs::{PhysicalReg, Reg};
-use crate::backend::dtal::types::DtalType;
-use crate::backend::tir::instr::TirInstr;
-use crate::backend::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
 use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::dtal::constraints::IndexExpr;
+use crate::dtal::instr::{BinaryOp as DtalBinaryOp, DtalInstr};
+use crate::dtal::regs::{PhysicalReg, Reg};
+use crate::dtal::types::DtalType;
+use crate::middle::tir::instr::TirInstr;
+use crate::middle::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
 
 /// Lower a TIR instruction to DTAL instructions
 ///
@@ -159,7 +159,7 @@ pub fn lower_instruction<'src>(
             size,
             region,
         } => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             use std::sync::Arc;
 
             let element_size = 8u32;
@@ -259,10 +259,10 @@ pub fn lower_instruction<'src>(
 /// Lower a binary operation
 fn lower_binop<'src>(
     instrs: &mut Vec<DtalInstr>,
-    dst: crate::backend::dtal::VirtualReg,
+    dst: crate::dtal::VirtualReg,
     op: TirBinaryOp,
-    lhs: crate::backend::dtal::VirtualReg,
-    rhs: crate::backend::dtal::VirtualReg,
+    lhs: crate::dtal::VirtualReg,
+    rhs: crate::dtal::VirtualReg,
     ty: &crate::common::types::IType<'src>,
 ) {
     let dtal_ty = DtalType::from_itype(ty);
@@ -390,12 +390,12 @@ fn lower_binop<'src>(
 /// Lower a comparison operation
 fn lower_comparison(
     instrs: &mut Vec<DtalInstr>,
-    dst: crate::backend::dtal::VirtualReg,
-    lhs: crate::backend::dtal::VirtualReg,
-    rhs: crate::backend::dtal::VirtualReg,
+    dst: crate::dtal::VirtualReg,
+    lhs: crate::dtal::VirtualReg,
+    rhs: crate::dtal::VirtualReg,
     cmp_kind: &str,
 ) {
-    use crate::backend::dtal::instr::CmpOp;
+    use crate::dtal::instr::CmpOp;
 
     instrs.push(DtalInstr::Cmp {
         lhs: Reg::Virtual(lhs),
@@ -426,9 +426,9 @@ fn lower_comparison(
 /// Lower a unary operation
 fn lower_unaryop<'src>(
     instrs: &mut Vec<DtalInstr>,
-    dst: crate::backend::dtal::VirtualReg,
+    dst: crate::dtal::VirtualReg,
     op: TirUnaryOp,
-    operand: crate::backend::dtal::VirtualReg,
+    operand: crate::dtal::VirtualReg,
     ty: &crate::common::types::IType<'src>,
 ) {
     let dtal_ty = DtalType::from_itype(ty);
@@ -458,9 +458,9 @@ fn lower_unaryop<'src>(
 }
 
 struct LowerCall<'a, 'src> {
-    dst: Option<crate::backend::dtal::VirtualReg>,
+    dst: Option<crate::dtal::VirtualReg>,
     func: &'a str,
-    args: &'a [crate::backend::dtal::VirtualReg],
+    args: &'a [crate::dtal::VirtualReg],
     arg_types: &'a [crate::common::types::IType<'src>],
     arg_kinds: &'a [ParameterKind],
     ownership: OwnershipMode,
@@ -469,7 +469,7 @@ struct LowerCall<'a, 'src> {
 
 /// Lower a function call
 fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
-    use crate::backend::dtal::regs::PhysicalReg;
+    use crate::dtal::regs::PhysicalReg;
 
     let LowerCall {
         dst,

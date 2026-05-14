@@ -965,7 +965,7 @@ pub fn check_stmt<'src>(
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
                 // Convert invariant to Constraint for lowering
-                crate::backend::dtal::convert::expr_to_constraint(&inv_expr.0)
+                crate::dtal::convert::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };
@@ -1115,7 +1115,7 @@ pub fn check_stmt<'src>(
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
                 // Convert invariant to Constraint for lowering
-                crate::backend::dtal::convert::expr_to_constraint(&inv_expr.0)
+                crate::dtal::convert::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };

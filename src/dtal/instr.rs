@@ -2,10 +2,10 @@
 //!
 //! This module defines the DTAL instruction set and program representation.
 
-use crate::backend::dtal::constraints::Constraint;
-use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::DtalType;
 use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::dtal::constraints::Constraint;
+use crate::dtal::regs::Reg;
+use crate::dtal::types::DtalType;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 

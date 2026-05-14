@@ -26,13 +26,13 @@
 //! [`TirBuilder::start_block`] panics if another block is already open, and
 //! [`TirBuilder::finish_block`] panics if no block is open.
 
-use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
-use crate::backend::tir::instr::{Terminator, TirInstr};
-use crate::backend::tir::phi::PhiNode;
-use crate::backend::tir::program::{BasicBlock, TirFunction};
-use crate::backend::tir::types::{BinaryOp, BlockId, BlockIdAllocator, RegisterState};
 use crate::common::ownership::ParameterKind;
 use crate::common::types::IType;
+use crate::dtal::{Constraint, IndexExpr, VirtualReg, VirtualRegAllocator};
+use crate::middle::tir::instr::{Terminator, TirInstr};
+use crate::middle::tir::phi::PhiNode;
+use crate::middle::tir::program::{BasicBlock, TirFunction};
+use crate::middle::tir::types::{BinaryOp, BlockId, BlockIdAllocator, RegisterState};
 use std::collections::HashMap;
 
 /// Stateful builder for TIR functions.

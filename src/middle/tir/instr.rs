@@ -26,10 +26,10 @@
 //! type, ownership, or constraint combinations are rejected downstream by DTAL
 //! generation and [`crate::verifier`].
 
-use crate::backend::dtal::{Constraint, VirtualReg};
-use crate::backend::tir::types::{BinaryOp, BlockId, UnaryOp};
 use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::types::IType;
+use crate::dtal::{Constraint, VirtualReg};
+use crate::middle::tir::types::{BinaryOp, BlockId, UnaryOp};
 
 /// Typed SSA instruction.
 ///

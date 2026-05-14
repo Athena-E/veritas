@@ -3,18 +3,18 @@
 //! This module converts typed expressions (`TExpr`) into sequences of
 //! TIR instructions, returning the register holding the result.
 
-use crate::backend::dtal::{Constraint, IndexExpr, VirtualReg};
-use crate::backend::lower::context::LoweringContext;
-use crate::backend::lower::widen_itype;
-use crate::backend::tir::builder::{and_constraints, negate_constraint, or_constraints};
-use crate::backend::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 use crate::common::ast::{BinOp as AstBinOp, Literal, UnaryOp as AstUnaryOp};
 use crate::common::ownership::{OwnershipMode, ParameterKind};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr, TStmt};
 use crate::common::types::IType;
 use crate::common::types::IValue;
+use crate::dtal::{Constraint, IndexExpr, VirtualReg};
 use crate::frontend::typechecker::context::join_types as join_branch_types;
+use crate::middle::lower::context::LoweringContext;
+use crate::middle::lower::widen_itype;
+use crate::middle::tir::builder::{and_constraints, negate_constraint, or_constraints};
+use crate::middle::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 
 /// Convert a typed expression to an IndexExpr for constraints.
 /// Returns None if the expression cannot be represented in the constraint domain.
@@ -844,7 +844,7 @@ fn lower_block_with_result<'src>(
     block: &TBlock<'src>,
     ty: &IType<'src>,
 ) -> VirtualReg {
-    use crate::backend::lower::stmt::lower_stmt;
+    use crate::middle::lower::stmt::lower_stmt;
 
     ctx.enter_scope();
 

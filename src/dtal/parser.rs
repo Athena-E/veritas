@@ -3,13 +3,13 @@
 //! Parses the text format emitted by the DTAL emitter back into
 //! `DtalProgram`, enabling standalone verification from DTAL files.
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-use crate::backend::dtal::instr::{
+use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::dtal::constraints::{Constraint, IndexExpr};
+use crate::dtal::instr::{
     BinaryOp, CmpOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,
 };
-use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-use crate::backend::dtal::types::DtalType;
-use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::dtal::regs::{PhysicalReg, Reg, VirtualReg};
+use crate::dtal::types::DtalType;
 use std::sync::Arc;
 
 /// Parse error for DTAL text

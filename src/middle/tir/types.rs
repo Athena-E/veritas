@@ -16,8 +16,8 @@
 //! lowering TIR. It records facts that should become DTAL annotations; it is
 //! not a substitute for verifier state in [`crate::verifier`].
 
-use crate::backend::dtal::{Constraint, VirtualReg};
 use crate::common::types::IType;
+use crate::dtal::{Constraint, VirtualReg};
 use std::collections::HashMap;
 use std::fmt;
 

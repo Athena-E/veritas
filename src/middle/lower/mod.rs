@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```no_run
-//! use veritas::backend::lower_program;
+//! use veritas::middle::lower_program;
 //! use veritas::frontend::typechecker::check_program;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Given a typed program from the frontend
@@ -35,9 +35,9 @@ mod tests;
 pub use context::LoweringContext;
 pub use function::lower_function;
 
-use crate::backend::tir::TirProgram;
 use crate::common::tast::TProgram;
 use crate::common::types::IType;
+use crate::middle::tir::TirProgram;
 
 /// Lower a typed program to TIR
 pub fn lower_program<'src>(program: &TProgram<'src>) -> TirProgram<'src> {

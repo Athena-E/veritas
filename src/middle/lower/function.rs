@@ -3,16 +3,16 @@
 //! This module converts typed functions (`TFunction`) into TIR functions
 //! with CFG in SSA form.
 
-use crate::backend::dtal::VirtualReg;
-use crate::backend::dtal::constraints::Constraint;
-use crate::backend::dtal::convert::expr_to_constraint;
-use crate::backend::lower::context::LoweringContext;
-use crate::backend::lower::expr::lower_expr;
-use crate::backend::lower::stmt::lower_stmts;
-use crate::backend::tir::{Terminator, TirFunction, TirInstr};
 use crate::common::ownership::OwnershipMode;
 use crate::common::tast::{TExpr, TFunction};
 use crate::common::types::{IProposition, IType};
+use crate::dtal::VirtualReg;
+use crate::dtal::constraints::Constraint;
+use crate::dtal::convert::expr_to_constraint;
+use crate::middle::lower::context::LoweringContext;
+use crate::middle::lower::expr::lower_expr;
+use crate::middle::lower::stmt::lower_stmts;
+use crate::middle::tir::{Terminator, TirFunction, TirInstr};
 
 /// Lower a typed function to TIR
 pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {

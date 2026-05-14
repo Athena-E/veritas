@@ -45,8 +45,8 @@ pub mod smt;
 
 pub use error::VerifyError;
 
-use crate::backend::dtal::constraints::Constraint;
-use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
+use crate::dtal::constraints::Constraint;
+use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use checker::verify_instruction;
 use std::collections::HashMap;
 
@@ -57,7 +57,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub enum VerifyTextError {
     /// Parsing failed before verification.
-    ParseErrors(Vec<crate::backend::dtal::parser::DtalParseError>),
+    ParseErrors(Vec<crate::dtal::parser::DtalParseError>),
     /// Parsed DTAL failed verification.
     VerifyError(Box<VerifyError>),
 }
@@ -86,8 +86,7 @@ impl std::error::Error for VerifyTextError {}
 /// Returns [`VerifyTextError::ParseErrors`] when DTAL parsing fails, or
 /// [`VerifyTextError::VerifyError`] when parsed DTAL violates verifier rules.
 pub fn verify_dtal_text(input: &str) -> Result<(), VerifyTextError> {
-    let program =
-        crate::backend::dtal::parser::parse_dtal(input).map_err(VerifyTextError::ParseErrors)?;
+    let program = crate::dtal::parser::parse_dtal(input).map_err(VerifyTextError::ParseErrors)?;
     verify_dtal(&program).map_err(|e| VerifyTextError::VerifyError(Box::new(e)))
 }
 
@@ -251,8 +250,8 @@ fn verify_function_dataflow(func: &DtalFunction, program: &DtalProgram) -> Resul
 
 /// Check return type and postcondition.
 fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyError> {
-    use crate::backend::dtal::regs::{PhysicalReg, Reg};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::regs::{PhysicalReg, Reg};
+    use crate::dtal::types::DtalType;
 
     // Physical DTAL returns through LR; virtual DTAL returns through R0.
     if func.return_type == DtalType::Unit {
@@ -352,12 +351,12 @@ fn verify_state_coercion(
                     .register_types
                     .get(reg)
                     .cloned()
-                    .unwrap_or(crate::backend::dtal::types::DtalType::Int),
+                    .unwrap_or(crate::dtal::types::DtalType::Int),
                 actual: target
                     .register_types
                     .get(reg)
                     .cloned()
-                    .unwrap_or(crate::backend::dtal::types::DtalType::Int),
+                    .unwrap_or(crate::dtal::types::DtalType::Int),
                 from_block: source_block.to_string(),
             });
         }
@@ -398,8 +397,8 @@ fn verify_state_coercion(
 
 /// Seed register/index equalities implied by the type state.
 fn seed_register_constraints(state: &mut TypeState) {
-    use crate::backend::dtal::constraints::Constraint;
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::constraints::Constraint;
+    use crate::dtal::types::DtalType;
 
     let new_constraints: Vec<Constraint> = state
         .register_types
@@ -443,9 +442,9 @@ fn seed_register_constraints(state: &mut TypeState) {
 /// Check if actual type is a subtype of (or equal to) expected type,
 /// using the constraint context for coercion proofs.
 fn types_compatible_with_constraints(
-    actual: &crate::backend::dtal::types::DtalType,
-    expected: &crate::backend::dtal::types::DtalType,
-    constraints: &[crate::backend::dtal::constraints::Constraint],
+    actual: &crate::dtal::types::DtalType,
+    expected: &crate::dtal::types::DtalType,
+    constraints: &[crate::dtal::constraints::Constraint],
 ) -> bool {
     checker::types_compatible_with_constraints(actual, expected, constraints)
 }
@@ -453,10 +452,10 @@ fn types_compatible_with_constraints(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-    use crate::backend::dtal::instr::{BinaryOp, CmpOp, DtalBlock, DtalInstr, TypeState};
-    use crate::backend::dtal::regs::{PhysicalReg, Reg, VirtualReg};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::constraints::{Constraint, IndexExpr};
+    use crate::dtal::instr::{BinaryOp, CmpOp, DtalBlock, DtalInstr, TypeState};
+    use crate::dtal::regs::{PhysicalReg, Reg, VirtualReg};
+    use crate::dtal::types::DtalType;
     use std::sync::Arc;
 
     fn v(n: u32) -> Reg {
@@ -608,7 +607,7 @@ mod tests {
         }]);
 
         let text = emit_program(&program);
-        let parsed = crate::backend::dtal::parser::parse_dtal(&text).unwrap();
+        let parsed = crate::dtal::parser::parse_dtal(&text).unwrap();
         let block = &parsed.functions[0].blocks[0];
 
         assert!(block.entry_state.owned_registers.contains(&v(0)));
@@ -1195,7 +1194,7 @@ mod tests {
                             rhs: v(9),
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            cond: crate::dtal::instr::CmpOp::Eq,
                             target: ".then".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -1257,7 +1256,7 @@ mod tests {
                             rhs: v(9),
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            cond: crate::dtal::instr::CmpOp::Eq,
                             target: ".then".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -1331,7 +1330,7 @@ mod tests {
                             rhs: v(9),
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            cond: crate::dtal::instr::CmpOp::Eq,
                             target: ".then".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -1405,7 +1404,7 @@ mod tests {
                             rhs: v(9),
                         },
                         DtalInstr::Branch {
-                            cond: crate::backend::dtal::instr::CmpOp::Eq,
+                            cond: crate::dtal::instr::CmpOp::Eq,
                             target: ".exit".to_string(),
                         },
                         DtalInstr::Jmp {
@@ -2398,7 +2397,7 @@ mod tests {
                         ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
-                        op: crate::backend::dtal::instr::BinaryOp::Add,
+                        op: crate::dtal::instr::BinaryOp::Add,
                         dst: v(2),
                         lhs: v(0),
                         rhs: v(1),
@@ -2486,7 +2485,7 @@ mod tests {
 
     #[test]
     fn test_declared_entry_state_verified() {
-        use crate::backend::dtal::instr::TypeState;
+        use crate::dtal::instr::TypeState;
 
         let mut entry_state = TypeState::new();
         entry_state.register_types.insert(v(0), DtalType::Int);
@@ -2516,7 +2515,7 @@ mod tests {
 
     #[test]
     fn test_state_coercion_at_jump() {
-        use crate::backend::dtal::instr::TypeState;
+        use crate::dtal::instr::TypeState;
 
         let mut entry_state = TypeState::new();
         entry_state
@@ -2560,7 +2559,7 @@ mod tests {
 
     #[test]
     fn test_reject_wrong_entry_state() {
-        use crate::backend::dtal::instr::TypeState;
+        use crate::dtal::instr::TypeState;
 
         let mut entry_state = TypeState::new();
         entry_state
@@ -2712,14 +2711,14 @@ mod tests {
                         ty: DtalType::SingletonInt(IndexExpr::Const(32)),
                     },
                     DtalInstr::BinOp {
-                        op: crate::backend::dtal::instr::BinaryOp::Mul,
+                        op: crate::dtal::instr::BinaryOp::Mul,
                         dst: v(5),
                         lhs: v(1),
                         rhs: v(4),
                         ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
-                        op: crate::backend::dtal::instr::BinaryOp::Add,
+                        op: crate::dtal::instr::BinaryOp::Add,
                         dst: v(6),
                         lhs: v(0),
                         rhs: v(5),
@@ -3363,7 +3362,7 @@ mod tests {
                         ty: DtalType::Int,
                     },
                     DtalInstr::BinOp {
-                        op: crate::backend::dtal::instr::BinaryOp::Add,
+                        op: crate::dtal::instr::BinaryOp::Add,
                         dst: lr(),
                         lhs: lr(),
                         rhs: r7(),

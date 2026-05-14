@@ -37,10 +37,10 @@
 
 #![allow(clippy::result_large_err)]
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-use crate::backend::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
-use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::DtalType;
+use crate::dtal::constraints::{Constraint, IndexExpr};
+use crate::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
+use crate::dtal::regs::Reg;
+use crate::dtal::types::DtalType;
 use crate::verifier::error::VerifyError;
 
 /// Verify one instruction and update the current type state.
@@ -54,7 +54,7 @@ pub fn verify_instruction(
     instr: &DtalInstr,
     state: &mut TypeState,
     block_label: &str,
-    program: &crate::backend::dtal::instr::DtalProgram,
+    program: &crate::dtal::instr::DtalProgram,
 ) -> Result<(), VerifyError> {
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
@@ -278,7 +278,7 @@ pub fn verify_instruction(
             ownership,
             ..
         } => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
 
             let derived_return_ty = if let Some(callee) =
                 program.functions.iter().find(|f| &f.name == target)
@@ -406,7 +406,7 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Cqo => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             let rax = Reg::Physical(PhysicalReg::LR);
             check_register_defined(rax, state, block_label)?;
             let rax_ty = get_register_type(rax, state, block_label)?;
@@ -430,7 +430,7 @@ pub fn verify_instruction(
         }
 
         DtalInstr::Idiv { src } => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             let rax = Reg::Physical(PhysicalReg::LR);
             let rdx = Reg::Physical(PhysicalReg::R2);
             check_register_defined(rax, state, block_label)?;
@@ -503,7 +503,7 @@ pub fn verify_instruction(
 
         DtalInstr::Prologue { .. } => {
             // Prologue seeds physical registers; later annotations refine them.
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             for preg in &[
                 PhysicalReg::LR,
                 PhysicalReg::R0,
@@ -579,11 +579,11 @@ fn verify_borrow_available(
 
 fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
     match reg {
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => {
-            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
+        Reg::Physical(crate::dtal::regs::PhysicalReg::R0) => {
+            Some(Reg::Physical(crate::dtal::regs::PhysicalReg::LR))
         }
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => {
-            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
+        Reg::Physical(crate::dtal::regs::PhysicalReg::LR) => {
+            Some(Reg::Physical(crate::dtal::regs::PhysicalReg::R0))
         }
         _ => None,
     }
@@ -641,11 +641,11 @@ fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState)
     let is_abi_return_alias = matches!(
         (src, dst),
         (
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+            Reg::Physical(crate::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::dtal::regs::PhysicalReg::R0)
         ) | (
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+            Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::dtal::regs::PhysicalReg::LR)
         )
     );
     if is_abi_return_alias && let Some(object_id) = state.owned_object_ids.get(&src).copied() {
@@ -751,11 +751,11 @@ fn verify_plain_mov_does_not_duplicate_owned(
         let same_alias_pair = matches!(
             (src, dst),
             (
-                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
-                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+                Reg::Physical(crate::dtal::regs::PhysicalReg::LR),
+                Reg::Physical(crate::dtal::regs::PhysicalReg::R0)
             ) | (
-                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
-                Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+                Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
+                Reg::Physical(crate::dtal::regs::PhysicalReg::LR)
             )
         ) && state.owned_object_ids.get(&dst).copied() == Some(object_id);
         let same_register = src == dst;
@@ -883,11 +883,11 @@ pub(crate) fn is_allowed_owned_alias_pair(lhs: Reg, rhs: Reg) -> bool {
     matches!(
         (lhs, rhs),
         (
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+            Reg::Physical(crate::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::dtal::regs::PhysicalReg::R0)
         ) | (
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+            Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::dtal::regs::PhysicalReg::LR)
         )
     )
 }

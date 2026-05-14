@@ -23,9 +23,9 @@
 //! The verifier checker and dataflow modules produce these errors.
 //! [`crate::verifier::smt`] is the source of most proof-failure context.
 
-use crate::backend::dtal::constraints::Constraint;
-use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::DtalType;
+use crate::dtal::constraints::Constraint;
+use crate::dtal::regs::Reg;
+use crate::dtal::types::DtalType;
 use std::fmt;
 
 /// Error emitted while verifying a DTAL program.

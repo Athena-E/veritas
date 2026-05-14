@@ -39,10 +39,10 @@
 
 #![allow(clippy::result_large_err)]
 
-use crate::backend::dtal::constraints::{Constraint, IndexExpr};
-use crate::backend::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
-use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::DtalType;
+use crate::dtal::constraints::{Constraint, IndexExpr};
+use crate::dtal::instr::{CmpOperands, DtalBlock, DtalFunction, DtalInstr, TypeState};
+use crate::dtal::regs::Reg;
+use crate::dtal::types::DtalType;
 use crate::verifier::checker::{self, constraint_from_cmp_op, extract_index, negate_cmp_op};
 use crate::verifier::error::VerifyError;
 use std::collections::{HashMap, HashSet};
@@ -340,7 +340,7 @@ fn join_states(
     // Keep only constraints entailed by every predecessor.
     let mut kept: HashSet<usize> = HashSet::new();
 
-    let mut all_constraints: Vec<crate::backend::dtal::constraints::Constraint> = Vec::new();
+    let mut all_constraints: Vec<crate::dtal::constraints::Constraint> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for state in &pred_states {
         for c in &state.constraints {
@@ -850,7 +850,7 @@ fn compute_exit_state(
 
 /// Apply verifier-like type derivation without operand validation.
 fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
-    use crate::backend::dtal::instr::BinaryOp;
+    use crate::dtal::instr::BinaryOp;
 
     match instr {
         DtalInstr::MovImm { dst, imm, .. } => {
@@ -1155,9 +1155,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             ownership,
             ..
         } => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             for (index, arg_kind) in arg_kinds.iter().enumerate() {
-                if let Some(param_reg) = crate::backend::dtal::regs::PhysicalReg::param_regs()
+                if let Some(param_reg) = crate::dtal::regs::PhysicalReg::param_regs()
                     .get(index)
                     .copied()
                 {
@@ -1270,7 +1270,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         DtalInstr::Jmp { .. } | DtalInstr::Branch { .. } | DtalInstr::Ret => {}
 
         DtalInstr::Cqo => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             let rax = Reg::Physical(PhysicalReg::LR);
             let rdx = Reg::Physical(PhysicalReg::R2);
             let rax_ty = state
@@ -1291,7 +1291,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(&rdx);
         }
         DtalInstr::Idiv { src: _ } => {
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             state
                 .register_types
                 .insert(Reg::Physical(PhysicalReg::LR), DtalType::Int);
@@ -1391,7 +1391,7 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         }
         DtalInstr::Prologue { .. } => {
             // Match verifier prologue handling for successor blocks.
-            use crate::backend::dtal::regs::PhysicalReg;
+            use crate::dtal::regs::PhysicalReg;
             for preg in &[
                 PhysicalReg::LR,
                 PhysicalReg::R0,
@@ -1445,11 +1445,11 @@ fn transfer_owned(src: Reg, dst: Reg, state: &mut TypeState) {
 
 fn abi_owned_alias_counterpart(reg: Reg) -> Option<Reg> {
     match reg {
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0) => {
-            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR))
+        Reg::Physical(crate::dtal::regs::PhysicalReg::R0) => {
+            Some(Reg::Physical(crate::dtal::regs::PhysicalReg::LR))
         }
-        Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR) => {
-            Some(Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0))
+        Reg::Physical(crate::dtal::regs::PhysicalReg::LR) => {
+            Some(Reg::Physical(crate::dtal::regs::PhysicalReg::R0))
         }
         _ => None,
     }
@@ -1483,11 +1483,11 @@ fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState)
     let is_abi_return_alias = matches!(
         (src, dst),
         (
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR),
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0)
+            Reg::Physical(crate::dtal::regs::PhysicalReg::LR),
+            Reg::Physical(crate::dtal::regs::PhysicalReg::R0)
         ) | (
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
-            Reg::Physical(crate::backend::dtal::regs::PhysicalReg::LR)
+            Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
+            Reg::Physical(crate::dtal::regs::PhysicalReg::LR)
         )
     );
     if is_abi_return_alias && let Some(object_id) = state.owned_object_ids.get(&src).copied() {

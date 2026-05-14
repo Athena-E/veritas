@@ -10,8 +10,8 @@
 //! - `live_in[B] = USE[B] ∪ (live_out[B] - DEF[B])`
 //! - `live_out[B] = ∪ live_in[S]` for all successors `S` of `B`
 
-use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
-use crate::backend::dtal::regs::{Reg, VirtualReg};
+use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
+use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::{HashMap, HashSet};
 
 /// Liveness information for a single basic block
@@ -391,8 +391,8 @@ impl InterferenceGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::dtal::instr::{BinaryOp, TypeState};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::instr::{BinaryOp, TypeState};
+    use crate::dtal::types::DtalType;
 
     fn make_test_function() -> DtalFunction {
         // Simple function: result = a + b
@@ -515,7 +515,7 @@ mod tests {
         // exit:
         //   v2 = v0 + v1
         //   ret
-        use crate::backend::dtal::instr::CmpOp;
+        use crate::dtal::instr::CmpOp;
 
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));

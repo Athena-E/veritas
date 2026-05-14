@@ -13,12 +13,12 @@
 //! At this stage, we still use virtual registers. Physical register
 //! allocation is a separate phase (Phase 5).
 
-use crate::backend::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
-use crate::backend::dtal::regs::Reg;
-use crate::backend::dtal::types::DtalType;
-use crate::backend::tir::instr::TirInstr;
-use crate::backend::tir::{BasicBlock, BlockId, PhiNode, Terminator, TirFunction, TirProgram};
 use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
+use crate::dtal::regs::Reg;
+use crate::dtal::types::DtalType;
+use crate::middle::tir::instr::TirInstr;
+use crate::middle::tir::{BasicBlock, BlockId, PhiNode, Terminator, TirFunction, TirProgram};
 use std::collections::HashMap;
 
 use super::isel;
@@ -109,8 +109,8 @@ pub fn codegen_program_with_target<'src>(
 /// uses them to check preconditions and derive return types at call
 /// sites, but never attempts to verify their bodies (no blocks to verify).
 fn runtime_function_stubs() -> Vec<DtalFunction> {
-    use crate::backend::dtal::regs::{PhysicalReg, Reg};
-    use crate::backend::dtal::types::DtalType;
+    use crate::dtal::regs::{PhysicalReg, Reg};
+    use crate::dtal::types::DtalType;
 
     vec![
         DtalFunction {
@@ -304,7 +304,7 @@ fn codegen_block<'src>(
         emit_region_enter(&mut instructions);
     } else if ctx.returns_owned_array && block.id == func.entry_block {
         instructions.push(DtalInstr::TypeAnnotation {
-            reg: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R12),
+            reg: Reg::Physical(crate::dtal::regs::PhysicalReg::R12),
             ty: DtalType::Int,
         });
     }
@@ -350,7 +350,7 @@ fn function_needs_hosted_region<'src>(func: &TirFunction<'src>) -> bool {
 }
 
 fn emit_region_enter(instrs: &mut Vec<DtalInstr>) {
-    use crate::backend::dtal::regs::PhysicalReg;
+    use crate::dtal::regs::PhysicalReg;
 
     instrs.push(DtalInstr::Call {
         target: crate::backend::runtime::RT_REGION_ENTER.to_string(),
@@ -366,7 +366,7 @@ fn emit_region_enter(instrs: &mut Vec<DtalInstr>) {
 }
 
 fn emit_region_leave(instrs: &mut Vec<DtalInstr>) {
-    use crate::backend::dtal::regs::PhysicalReg;
+    use crate::dtal::regs::PhysicalReg;
 
     instrs.push(DtalInstr::MovReg {
         dst: Reg::Physical(PhysicalReg::R0),
@@ -410,7 +410,7 @@ fn lower_terminator<'src>(
     ctx: &mut CodegenContext,
     func: &TirFunction<'src>,
 ) {
-    use crate::backend::dtal::instr::CmpOp;
+    use crate::dtal::instr::CmpOp;
 
     match terminator {
         Terminator::Jump { target } => {
@@ -466,18 +466,18 @@ fn lower_terminator<'src>(
                     });
                     emit_region_leave(instrs);
                     instrs.push(DtalInstr::Pop {
-                        dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        dst: Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
                         ty: ret_ty,
                     });
                 } else if ownership.produces_owned_output() {
                     instrs.push(DtalInstr::MoveOwned {
-                        dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        dst: Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
                         src: Reg::Virtual(*val_reg),
                         ty: ret_ty,
                     });
                 } else {
                     instrs.push(DtalInstr::MovReg {
-                        dst: Reg::Physical(crate::backend::dtal::regs::PhysicalReg::R0),
+                        dst: Reg::Physical(crate::dtal::regs::PhysicalReg::R0),
                         src: Reg::Virtual(*val_reg),
                         ty: ret_ty,
                     });
@@ -507,9 +507,9 @@ fn lower_terminator<'src>(
 /// If not found, returns `(Ne, true)` — caller should emit `CmpImm cond, 0`.
 fn find_original_comparison(
     instrs: &[DtalInstr],
-    cond_reg: crate::backend::dtal::VirtualReg,
-) -> (crate::backend::dtal::instr::CmpOp, bool) {
-    use crate::backend::dtal::instr::CmpOp;
+    cond_reg: crate::dtal::VirtualReg,
+) -> (crate::dtal::instr::CmpOp, bool) {
+    use crate::dtal::instr::CmpOp;
 
     let target = Reg::Virtual(cond_reg);
 
@@ -582,10 +582,10 @@ fn emit_phi_moves<'src>(
 ///
 /// Replaces `IndexExpr::Var("param_name")` with `IndexExpr::Var("v0")` etc.
 pub(crate) fn substitute_constraint_vars(
-    constraint: &crate::backend::dtal::Constraint,
+    constraint: &crate::dtal::Constraint,
     subs: &[(String, String)],
-) -> crate::backend::dtal::Constraint {
-    use crate::backend::dtal::Constraint;
+) -> crate::dtal::Constraint {
+    use crate::dtal::Constraint;
 
     match constraint {
         Constraint::True => Constraint::True,
@@ -661,10 +661,10 @@ pub(crate) fn substitute_constraint_vars(
 
 /// Substitute variable names in an index expression with register names.
 pub(crate) fn substitute_index_vars(
-    expr: &crate::backend::dtal::IndexExpr,
+    expr: &crate::dtal::IndexExpr,
     subs: &[(String, String)],
-) -> crate::backend::dtal::IndexExpr {
-    use crate::backend::dtal::IndexExpr;
+) -> crate::dtal::IndexExpr {
+    use crate::dtal::IndexExpr;
 
     match expr {
         IndexExpr::Const(n) => IndexExpr::Const(*n),
