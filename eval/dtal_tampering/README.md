@@ -45,11 +45,17 @@ somewhere else, use `--tampering-out-dir <dir>`.
 
 Current coverage:
 
-- 14 mutation cases
+- 18 rejected mutation cases
 - arithmetic overflow rejection
 - precondition and assertion failures
 - positive and negative out-of-bounds memory accesses
+- branch-edge assumption failure
+- false singleton annotation rejection
+- division non-zero side-condition rejection
+- postcondition proof failure
 - use-after-drop / consumed-register rejection
 - ownership duplication and live-borrow violations
 - mutable aliasing violations
 - entry-state and signature structural mismatches
+- a separate accepted semantic-corruption test documenting that type-preserving
+  wrong-answer changes can still pass the scoped safety verifier

@@ -20,6 +20,11 @@ struct TamperCase {
 }
 
 fn replace_once(haystack: &str, needle: &str, replacement: &str) -> String {
+    assert!(
+        haystack.contains(needle),
+        "tamper needle not found: {:?}",
+        needle
+    );
     haystack.replacen(needle, replacement, 1)
 }
 
@@ -29,7 +34,7 @@ fn compile_to_dtal(source: &str) -> String {
         .dtal
 }
 
-fn dtal_tamper_cases() -> [TamperCase; 14] {
+fn dtal_tamper_cases() -> [TamperCase; 18] {
     [
         TamperCase {
             id: "T01",
@@ -199,6 +204,57 @@ fn dtal_tamper_cases() -> [TamperCase; 14] {
                 )
             },
             expected_error: "Cannot prove constraint",
+        },
+        TamperCase {
+            id: "T15",
+            name: "branch_target_swap_breaks_edge_assumption",
+            source: include_str!("../eval/feature_suite/programs/02_conditionals.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "    bgt .max_of_bb1\n    jmp .max_of_bb2",
+                    "    bgt .max_of_bb2\n    jmp .max_of_bb1",
+                )
+            },
+            expected_error: "Cannot prove constraint",
+        },
+        TamperCase {
+            id: "T16",
+            name: "false_singleton_annotation_after_mov",
+            source: include_str!("../eval/feature_suite/programs/01_simple.veri"),
+            mutate: |dtal| replace_once(dtal, "mov v0, 42    : int(42)", "mov v0, 42    : int(41)"),
+            expected_error: "Singleton type mismatch",
+        },
+        TamperCase {
+            id: "T17",
+            name: "division_nonzero_evidence_removed",
+            source: include_str!("../eval/feature_suite/programs/21_safe_division.veri"),
+            mutate: |dtal| {
+                let dtal = replace_once(
+                    dtal,
+                    ".params {v0: int, v1: {v: int | v != 0 }}",
+                    ".params {v0: int, v1: int}",
+                );
+                replace_once(
+                    &dtal,
+                    ".entry {v0: int, v1: {v: int | v != 0 }}",
+                    ".entry {v0: int, v1: int}",
+                )
+            },
+            expected_error: "Cannot prove constraint",
+        },
+        TamperCase {
+            id: "T18",
+            name: "postcondition_corrupted_to_unprovable_fact",
+            source: include_str!("../eval/feature_suite/programs/38_sortedness.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    ".postcondition (forall i in 0..2 { v7[i] <= v7[(i + 1)] })",
+                    ".postcondition v7[0] > v7[1]",
+                )
+            },
+            expected_error: "Postcondition not provable",
         },
     ]
 }

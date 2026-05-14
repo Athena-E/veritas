@@ -13,3 +13,7 @@ T11	eval/feature_suite/programs/33_mutable_borrow.veri	mutable_store_out_of_boun
 T12	eval/feature_suite/programs/33_mutable_borrow.veri	mutable_parameter_weakened_to_shared	TypeMismatch	tamper a mutable-borrow callee signature into a shared-borrow signature
 T13	eval/feature_suite/programs/17_preconditions.veri	entry_state_type_mismatch	TypeMismatch	tamper the block entry state so it no longer matches the function parameter type
 T14	eval/feature_suite/programs/17_preconditions.veri	impossible_assertion	UnprovableConstraint	insert an assertion that contradicts the available proof context
+T15	eval/feature_suite/programs/02_conditionals.veri	branch_target_swap	UnprovableConstraint	swap conditional and fall-through branch targets so the successor assumption contradicts the edge condition
+T16	eval/feature_suite/programs/01_simple.veri	false_singleton_annotation	SingletonMismatch	tamper an instruction annotation to claim a singleton value different from the value actually moved
+T17	eval/feature_suite/programs/21_safe_division.veri	division_nonzero_evidence_removed	UnprovableConstraint	remove the divisor's non-zero refinement evidence so the verifier cannot prove the division side condition
+T18	eval/feature_suite/programs/38_sortedness.veri	unprovable_postcondition	PostconditionFailed	tamper a function postcondition into a fact not implied by the verified body

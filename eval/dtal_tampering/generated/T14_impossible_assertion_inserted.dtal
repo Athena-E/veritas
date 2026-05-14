@@ -38,7 +38,7 @@ read_offset:
     add v9, v0, v8    : {_synth_0: int | _synth_0 == (i + 1) }
     .assert true
     load v10, [v1 + v9]    : int(7)
-    drop_owned v1    : [int(7); 5]
+    drop_owned v1    : [int; 5]
     push v10    : int
     mov r0, r12    : int
     call __rt_region_leave    : unit

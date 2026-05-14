@@ -114,3 +114,34 @@ corpus under `eval/dtal_tampering/generated/`.
 - Inserted location: line 13 in block `.read_offset_bb0`
 - Inserted instruction: `.assert (v0 < 0)`
 - Effect: inserted immediately after `.assume (v0 >= 0 && v0 < 4)`
+
+## T15 `branch_target_swap_breaks_edge_assumption`
+
+- File: `T15_branch_target_swap_breaks_edge_assumption.dtal`
+- Expected verifier error: `Cannot prove constraint`
+- Modified location: block `.max_of_bb0`
+- Change: swap `bgt .max_of_bb1` / `jmp .max_of_bb2` to `bgt .max_of_bb2` / `jmp .max_of_bb1`
+- Effect: the taken edge reaches a successor whose first assumption contradicts the comparison fact.
+
+## T16 `false_singleton_annotation_after_mov`
+
+- File: `T16_false_singleton_annotation_after_mov.dtal`
+- Expected verifier error: `Singleton type mismatch`
+- Modified location: block `.main_bb0`
+- Change: `mov v0, 42    : int(42)` -> `mov v0, 42    : int(41)`
+
+## T17 `division_nonzero_evidence_removed`
+
+- File: `T17_division_nonzero_evidence_removed.dtal`
+- Expected verifier error: `Cannot prove constraint`
+- Modified location: function `safe_divide`
+- Change: `.params {v0: int, v1: {v: int | v != 0 }}` -> `.params {v0: int, v1: int}`
+- Modified location: block `.safe_divide_bb0`
+- Change: `.entry {v0: int, v1: {v: int | v != 0 }}` -> `.entry {v0: int, v1: int}`
+
+## T18 `postcondition_corrupted_to_unprovable_fact`
+
+- File: `T18_postcondition_corrupted_to_unprovable_fact.dtal`
+- Expected verifier error: `Postcondition not provable`
+- Modified location: function `make_sorted`
+- Change: `.postcondition (forall i in 0..2 { v7[i] <= v7[(i + 1)] })` -> `.postcondition v7[0] > v7[1]`

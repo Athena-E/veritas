@@ -1232,6 +1232,30 @@ fn verify_binop(
             let lhs_idx = extract_index(&lhs_ty, &lhs);
             let rhs_idx = extract_index(&rhs_ty, &rhs);
 
+            if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+                let divisor_idx = match &rhs_ty {
+                    DtalType::SingletonInt(idx) => idx.clone(),
+                    _ => reg_to_index_expr(&rhs),
+                };
+                let divisor_nonzero = Constraint::Ne(divisor_idx.clone(), IndexExpr::Const(0));
+                let mut divisor_context = state.constraints.clone();
+                if let DtalType::RefinedInt {
+                    var, constraint, ..
+                } = &rhs_ty
+                {
+                    let reg_name = format!("{}", rhs);
+                    let subs = std::collections::HashMap::from([(var.clone(), reg_name)]);
+                    divisor_context.push(substitute_var_names_in_constraint(constraint, &subs));
+                }
+                if !is_constraint_provable(&divisor_nonzero, &divisor_context) {
+                    return Err(VerifyError::UnprovableConstraint {
+                        constraint: divisor_nonzero,
+                        context: divisor_context,
+                        block: block_label.to_string(),
+                    });
+                }
+            }
+
             match op {
                 BinaryOp::BitAnd
                 | BinaryOp::BitOr

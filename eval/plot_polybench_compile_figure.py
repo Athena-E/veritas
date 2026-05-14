@@ -41,18 +41,46 @@ def main() -> None:
     compile_ms = [float(row["compile_ms"]) for row in rows]
     smt_ms = [float(row["frontend_smt_ms"]) for row in rows]
     nonsmt_ms = [max(total - smt, 0.0) for total, smt in zip(compile_ms, smt_ms)]
+    smt_shares = [(smt / total * 100.0) if total > 0.0 else 0.0 for total, smt in zip(compile_ms, smt_ms)]
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(8.0, 4.6), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(9.2, 4.6), constrained_layout=True)
 
-    y = range(len(labels))
-    ax.barh(y, nonsmt_ms, color="#B8C5D6", label="non-SMT compile time")
-    ax.barh(y, smt_ms, left=nonsmt_ms, color="#184E77", label="frontend SMT time")
+    y = list(range(len(labels)))
+    bar_height = 0.34
+    ax.barh(
+        [yi - bar_height / 2 for yi in y],
+        nonsmt_ms,
+        height=bar_height,
+        color="#B8C5D6",
+        label="non-SMT compile time",
+    )
+    ax.barh(
+        [yi + bar_height / 2 for yi in y],
+        smt_ms,
+        height=bar_height,
+        color="#184E77",
+        label="frontend SMT time",
+    )
 
-    ax.set_yticks(list(y))
+    for yi, share in zip(y, smt_shares):
+        other_share = max(100.0 - share, 0.0)
+        ax.text(
+            1.01,
+            yi,
+            f"SMT {share:.0f}% / other {other_share:.0f}%",
+            transform=ax.get_yaxis_transform(),
+            va="center",
+            ha="left",
+            fontsize=8,
+            color="#243447",
+        )
+
+    ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=9)
     ax.invert_yaxis()
+    ax.set_xscale("log")
     ax.set_xlabel("compile time (ms)", fontsize=10)
     ax.set_title("PolyBench Kernel Compile Cost Structure", fontsize=12, pad=10)
     ax.grid(axis="x", alpha=0.2)

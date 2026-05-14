@@ -15,6 +15,11 @@ struct TamperCase {
 }
 
 fn replace_once(haystack: &str, needle: &str, replacement: &str) -> String {
+    assert!(
+        haystack.contains(needle),
+        "tamper needle not found: {:?}",
+        needle
+    );
     haystack.replacen(needle, replacement, 1)
 }
 
@@ -53,6 +58,16 @@ fn assert_tamper_rejected(case: &TamperCase) {
             );
         }
     }
+}
+
+fn assert_tamper_accepted(name: &str, source: &str, mutate: fn(&str) -> String) {
+    let dtal = compile_to_dtal(source);
+    verify_dtal_text(&dtal)
+        .unwrap_or_else(|err| panic!("{}: baseline DTAL should verify: {}", name, err));
+
+    let tampered = mutate(&dtal);
+    verify_dtal_text(&tampered)
+        .unwrap_or_else(|err| panic!("{}: safety-preserving tamper should verify: {}", name, err));
 }
 
 #[test]
@@ -214,9 +229,78 @@ fn tampered_dtal_corpus_is_rejected() {
             },
             expected_error: "Cannot prove constraint",
         },
+        TamperCase {
+            name: "branch_target_swap_breaks_edge_assumption",
+            source: include_str!("../eval/feature_suite/programs/02_conditionals.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    "    bgt .max_of_bb1\n    jmp .max_of_bb2",
+                    "    bgt .max_of_bb2\n    jmp .max_of_bb1",
+                )
+            },
+            expected_error: "Cannot prove constraint",
+        },
+        TamperCase {
+            name: "false_singleton_annotation_after_mov",
+            source: include_str!("../eval/feature_suite/programs/01_simple.veri"),
+            mutate: |dtal| replace_once(dtal, "mov v0, 42    : int(42)", "mov v0, 42    : int(41)"),
+            expected_error: "Singleton type mismatch",
+        },
+        TamperCase {
+            name: "division_nonzero_evidence_removed",
+            source: include_str!("../eval/feature_suite/programs/21_safe_division.veri"),
+            mutate: |dtal| {
+                let dtal = replace_once(
+                    dtal,
+                    ".params {v0: int, v1: {v: int | v != 0 }}",
+                    ".params {v0: int, v1: int}",
+                );
+                replace_once(
+                    &dtal,
+                    ".entry {v0: int, v1: {v: int | v != 0 }}",
+                    ".entry {v0: int, v1: int}",
+                )
+            },
+            expected_error: "Cannot prove constraint",
+        },
+        TamperCase {
+            name: "postcondition_corrupted_to_unprovable_fact",
+            source: include_str!("../eval/feature_suite/programs/38_sortedness.veri"),
+            mutate: |dtal| {
+                replace_once(
+                    dtal,
+                    ".postcondition (forall i in 0..2 { v7[i] <= v7[(i + 1)] })",
+                    ".postcondition v7[0] > v7[1]",
+                )
+            },
+            expected_error: "Postcondition not provable",
+        },
     ];
 
     for case in &cases {
         assert_tamper_rejected(case);
     }
+}
+
+#[test]
+#[ignore = "documents the safety-only boundary of DTAL verification"]
+fn type_preserving_semantic_tamper_can_still_verify() {
+    assert_tamper_accepted(
+        "wrong_search_constant_preserves_safety",
+        include_str!("../eval/feature_suite/programs/20_binary_search.veri"),
+        |dtal| replace_once(dtal, "mov v22, 34    : int(34)", "mov v22, 35    : int(35)"),
+    );
+
+    assert_tamper_accepted(
+        "call_return_annotation_ignored_in_favour_of_signature",
+        include_str!("../eval/feature_suite/programs/07_function_calls.veri"),
+        |dtal| {
+            replace_once(
+                dtal,
+                "call add [value,value]    : int",
+                "call add [value,value]    : bool",
+            )
+        },
+    );
 }
