@@ -1,0 +1,62 @@
+// Verified UART-facing unikernel demo.
+//
+// This program runs without Linux intrinsics under --target-bare-metal.  The
+// device-facing boundary is uart_write_byte: every value sent to the 16550 UART
+// must be statically proved to be an 8-bit byte.
+
+const COM1: int = 0x3F8;
+const COM1_IER: int = 0x3F9;
+const COM1_FCR: int = 0x3FA;
+const COM1_LCR: int = 0x3FB;
+const COM1_LSR: int = 0x3FD;
+
+const PACKET_MAGIC: int = 0xA5;
+const PACKET_LEN: int = 4;
+
+fn uart_init() {
+    port_out(COM1_IER, 0);
+    port_out(COM1_LCR, 0x80);
+    port_out(COM1, 3);
+    port_out(COM1_IER, 0);
+    port_out(COM1_LCR, 3);
+    port_out(COM1_FCR, 0xC7);
+}
+
+fn uart_write_byte(byte: int)
+    requires byte >= 0 && byte < 256
+{
+    while (port_in(COM1_LSR) & 0x20) == 0 {
+    }
+    port_out(COM1, byte);
+}
+
+fn uart_write_newline() {
+    uart_write_byte('\n');
+}
+
+fn uart_send_packet(payload: [{byte: int | byte >= 0 && byte < 256}; 4])
+    requires payload[0] + payload[1] + payload[2] + payload[3] < 256
+{
+    let checksum: {byte: int | byte >= 0 && byte < 256} =
+        payload[0] + payload[1] + payload[2] + payload[3];
+
+    uart_write_byte(PACKET_MAGIC);
+    uart_write_byte(PACKET_LEN);
+    uart_write_byte(payload[0]);
+    uart_write_byte(payload[1]);
+    uart_write_byte(payload[2]);
+    uart_write_byte(payload[3]);
+    uart_write_byte(checksum);
+    uart_write_newline();
+}
+
+fn main() -> int {
+    uart_init();
+    let mut payload: [{byte: int | byte >= 0 && byte < 256}; 4] = [0; 4];
+    payload[0] = 'O';
+    payload[1] = 'K';
+    payload[2] = 1;
+    payload[3] = 42;
+    uart_send_packet(payload);
+    0
+}
