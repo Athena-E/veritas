@@ -1,9 +1,14 @@
 /target
 /docs
 /src/examples/executables
+/src/examples/*.o
+/src/examples/test.dtal
 .codex
 /eval/polybench-c-3.2
 /eval/runs/
+*.log
+*.o
+*.class
 /.ghc.environment.*
 /01_safe_division
 /02_bounded_read_offset
@@ -14,3 +19,7 @@
 /eval/comparison_suite/liquid_haskell/.liquid/
 /eval/comparison_suite/liquid_haskell/*.hi
 /eval/comparison_suite/liquid_haskell/*.o
+/eval/benchmarks/floyd-warshall/fw_c
+/eval/benchmarks/floyd-warshall/fw_c_o3
+/eval/benchmarks/floyd-warshall/fw_go
+/eval/benchmarks/floyd-warshall/fw_rs
