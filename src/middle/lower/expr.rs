@@ -209,9 +209,10 @@ pub fn lower_expr<'src>(
 
         TExpr::Borrow {
             kind,
+            lifetime,
             expr: place,
             ty,
-        } => lower_borrow_expr(ctx, *kind, place, ty),
+        } => lower_borrow_expr(ctx, *kind, *lifetime, place, ty),
 
         TExpr::Call {
             func_name,
@@ -402,6 +403,7 @@ fn lower_call<'src>(
                 let arg_reg = lower_expr(ctx, arg);
                 let borrowed_reg = ctx.fresh_reg();
                 ctx.emit(TirInstr::BorrowShared {
+                    lifetime: None,
                     dst: borrowed_reg,
                     src: arg_reg,
                     ty: arg.0.get_type().clone(),
@@ -440,6 +442,7 @@ fn lower_call<'src>(
                 let arg_reg = lower_expr(ctx, arg);
                 let borrowed_reg = ctx.fresh_reg();
                 ctx.emit(TirInstr::BorrowMut {
+                    lifetime: None,
                     dst: borrowed_reg,
                     src: arg_reg,
                     ty: arg.0.get_type().clone(),
@@ -468,6 +471,7 @@ fn lower_call<'src>(
             }
             if emit_end {
                 ctx.emit(TirInstr::BorrowEnd {
+                    lifetime: None,
                     src: borrow_reg,
                     ty: borrow_ty,
                 });
@@ -498,6 +502,7 @@ fn lower_call<'src>(
             }
             if emit_end {
                 ctx.emit(TirInstr::BorrowEnd {
+                    lifetime: None,
                     src: borrow_reg,
                     ty: borrow_ty,
                 });
@@ -510,6 +515,7 @@ fn lower_call<'src>(
 fn lower_borrow_expr<'src>(
     ctx: &mut LoweringContext<'src>,
     kind: crate::common::ownership::BorrowKind,
+    lifetime: Option<crate::common::ownership::LifetimeId>,
     place: &Spanned<TExpr<'src>>,
     ty: &IType<'src>,
 ) -> VirtualReg {
@@ -520,7 +526,7 @@ fn lower_borrow_expr<'src>(
             .lookup_var(name)
             .unwrap_or_else(|| panic!("Undefined scalar borrow owner during lowering: {}", name));
         let (borrow_reg, _, _) =
-            ctx.create_scalar_borrow_value(owner_reg, place.0.get_type().clone(), kind);
+            ctx.create_scalar_borrow_value(owner_reg, place.0.get_type().clone(), kind, lifetime);
         return borrow_reg;
     }
     let place_reg = lower_expr(ctx, place);
@@ -528,6 +534,7 @@ fn lower_borrow_expr<'src>(
     match kind {
         crate::common::ownership::BorrowKind::Shared => {
             ctx.emit(TirInstr::BorrowShared {
+                lifetime,
                 dst,
                 src: place_reg,
                 ty: ty.clone(),
@@ -535,6 +542,7 @@ fn lower_borrow_expr<'src>(
         }
         crate::common::ownership::BorrowKind::Mutable => {
             ctx.emit(TirInstr::BorrowMut {
+                lifetime,
                 dst,
                 src: place_reg,
                 ty: ty.clone(),

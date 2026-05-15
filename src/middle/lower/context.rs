@@ -3,7 +3,7 @@
 //! This module provides the context that tracks state during lowering,
 //! including variable-to-register mappings and the current block.
 
-use crate::common::ownership::{BorrowKind, ParameterKind};
+use crate::common::ownership::{BorrowKind, LifetimeId, ParameterKind};
 use crate::common::types::IType;
 use crate::dtal::{Constraint, VirtualReg};
 use crate::middle::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, TirInstr};
@@ -63,6 +63,7 @@ pub struct ScalarBorrowBinding<'src> {
     pub owner_name: String,
     pub cell_reg: VirtualReg,
     pub kind: BorrowKind,
+    pub lifetime: Option<LifetimeId>,
     pub pointee_ty: IType<'src>,
 }
 
@@ -324,6 +325,7 @@ impl<'src> LoweringContext<'src> {
         owner_reg: VirtualReg,
         pointee_ty: IType<'src>,
         kind: BorrowKind,
+        lifetime: Option<LifetimeId>,
     ) -> (VirtualReg, VirtualReg, IType<'src>) {
         let (cell_reg, cell_ty) = self.create_scalar_borrow_cell(owner_reg, pointee_ty.clone());
         let lowered_ref_ty = match kind {
@@ -334,11 +336,13 @@ impl<'src> LoweringContext<'src> {
         let borrow_reg = self.fresh_reg();
         match kind {
             BorrowKind::Shared => self.emit(TirInstr::BorrowShared {
+                lifetime,
                 dst: borrow_reg,
                 src: cell_reg,
                 ty: lowered_ref_ty.clone(),
             }),
             BorrowKind::Mutable => self.emit(TirInstr::BorrowMut {
+                lifetime,
                 dst: borrow_reg,
                 src: cell_reg,
                 ty: lowered_ref_ty.clone(),
@@ -406,6 +410,14 @@ impl<'src> LoweringContext<'src> {
     }
 
     pub fn emit_borrow_end_for_binding(&mut self, name: &str) {
+        self.emit_borrow_end_for_binding_with_lifetime(name, None);
+    }
+
+    pub fn emit_borrow_end_for_binding_with_lifetime(
+        &mut self,
+        name: &str,
+        lifetime: Option<crate::common::ownership::LifetimeId>,
+    ) {
         let Some(reg) = self.lookup_var(name) else {
             return;
         };
@@ -420,7 +432,11 @@ impl<'src> LoweringContext<'src> {
                 binding.pointee_ty,
             );
         }
-        self.emit(TirInstr::BorrowEnd { src: reg, ty });
+        self.emit(TirInstr::BorrowEnd {
+            lifetime,
+            src: reg,
+            ty,
+        });
         self.borrow_live_map.insert(name.to_string(), false);
         self.scalar_borrow_map.remove(name);
     }

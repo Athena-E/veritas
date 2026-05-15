@@ -511,6 +511,7 @@ fn test_pipeline_shared_borrow_survives_to_dtal_and_verifies() {
                             func_name: "inspect".to_string(),
                             args: vec![spanned(TExpr::Borrow {
                                 kind: BorrowKind::Shared,
+                                lifetime: None,
                                 expr: Box::new(spanned(TExpr::Variable {
                                     name: "x".to_string(),
                                     ty: array_ty.clone(),
@@ -596,6 +597,7 @@ fn test_pipeline_mutable_borrow_survives_to_dtal_and_verifies() {
                             func_name: "touch".to_string(),
                             args: vec![spanned(TExpr::Borrow {
                                 kind: BorrowKind::Mutable,
+                                lifetime: None,
                                 expr: Box::new(spanned(TExpr::Variable {
                                     name: "x".to_string(),
                                     ty: array_ty.clone(),

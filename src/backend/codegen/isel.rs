@@ -54,24 +54,37 @@ pub fn lower_instruction<'src>(
             });
         }
 
-        TirInstr::BorrowShared { dst, src, ty } => {
+        TirInstr::BorrowShared {
+            lifetime,
+            dst,
+            src,
+            ty,
+        } => {
             instrs.push(DtalInstr::AliasBorrow {
+                lifetime: *lifetime,
                 dst: Reg::Virtual(*dst),
                 src: Reg::Virtual(*src),
                 ty: DtalType::from_itype(ty),
             });
         }
 
-        TirInstr::BorrowMut { dst, src, ty } => {
+        TirInstr::BorrowMut {
+            lifetime,
+            dst,
+            src,
+            ty,
+        } => {
             instrs.push(DtalInstr::BorrowMut {
+                lifetime: *lifetime,
                 dst: Reg::Virtual(*dst),
                 src: Reg::Virtual(*src),
                 ty: DtalType::from_itype(ty),
             });
         }
 
-        TirInstr::BorrowEnd { src, ty } => {
+        TirInstr::BorrowEnd { lifetime, src, ty } => {
             instrs.push(DtalInstr::BorrowEnd {
+                lifetime: *lifetime,
                 src: Reg::Virtual(*src),
                 ty: DtalType::from_itype(ty),
             });
@@ -523,6 +536,7 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
                     continue;
                 }
                 instrs.push(DtalInstr::AliasBorrow {
+                    lifetime: None,
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),
                     ty: DtalType::Int,
@@ -537,6 +551,7 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
                     continue;
                 }
                 instrs.push(DtalInstr::BorrowMut {
+                    lifetime: None,
                     dst: Reg::Physical(param_reg),
                     src: Reg::Virtual(*arg),
                     ty: DtalType::Int,

@@ -122,10 +122,19 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
-        DtalInstr::AliasBorrow { dst, src, ty } => {
+        DtalInstr::AliasBorrow {
+            lifetime,
+            dst,
+            src,
+            ty,
+        } => {
+            let lifetime = lifetime
+                .map(|id| format!("'l{}, ", id.0))
+                .unwrap_or_default();
             writeln!(
                 output,
-                "    alias_borrow {}, {}    : {}",
+                "    alias_borrow {}{}, {}    : {}",
+                lifetime,
                 emit_reg(dst),
                 emit_reg(src),
                 emit_type(ty)
@@ -133,10 +142,19 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
-        DtalInstr::BorrowMut { dst, src, ty } => {
+        DtalInstr::BorrowMut {
+            lifetime,
+            dst,
+            src,
+            ty,
+        } => {
+            let lifetime = lifetime
+                .map(|id| format!("'l{}, ", id.0))
+                .unwrap_or_default();
             writeln!(
                 output,
-                "    borrow_mut {}, {}    : {}",
+                "    borrow_mut {}{}, {}    : {}",
+                lifetime,
                 emit_reg(dst),
                 emit_reg(src),
                 emit_type(ty)
@@ -144,10 +162,14 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
             .unwrap();
         }
 
-        DtalInstr::BorrowEnd { src, ty } => {
+        DtalInstr::BorrowEnd { lifetime, src, ty } => {
+            let lifetime = lifetime
+                .map(|id| format!("'l{}, ", id.0))
+                .unwrap_or_default();
             writeln!(
                 output,
-                "    borrow_end {}    : {}",
+                "    borrow_end {}{}    : {}",
+                lifetime,
                 emit_reg(src),
                 emit_type(ty)
             )

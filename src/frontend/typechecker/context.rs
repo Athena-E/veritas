@@ -1,5 +1,5 @@
 use crate::common::ast::{BinOp, Expr, Literal};
-use crate::common::ownership::BorrowKind;
+use crate::common::ownership::{BorrowKind, LifetimeId};
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
 use crate::frontend::typechecker::helpers::rename_prop_var;
 use chumsky::prelude::SimpleSpan;
@@ -36,6 +36,7 @@ struct BorrowState {
 struct BorrowBinding {
     owner: String,
     kind: BorrowKind,
+    lifetime: LifetimeId,
 }
 
 // Typing context
@@ -108,6 +109,9 @@ pub struct TypingContext<'src> {
 
     // Lexical scope stack for borrow bindings created in each block scope.
     borrow_scopes: Vec<Vec<String>>,
+
+    // Fresh local lifetime supply for inferred reference bindings.
+    next_lifetime_id: u32,
 }
 
 impl<'src> TypingContext<'src> {
@@ -130,6 +134,7 @@ impl<'src> TypingContext<'src> {
             active_borrows: HashMap::new(),
             borrow_bindings: HashMap::new(),
             borrow_scopes: Vec::new(),
+            next_lifetime_id: 0,
         }
     }
 
@@ -153,6 +158,7 @@ impl<'src> TypingContext<'src> {
             active_borrows: HashMap::new(),
             borrow_bindings: HashMap::new(),
             borrow_scopes: Vec::new(),
+            next_lifetime_id: 0,
         }
     }
 
@@ -423,6 +429,8 @@ impl<'src> TypingContext<'src> {
         kind: BorrowKind,
     ) -> Self {
         let mut new_ctx = self.release_borrow_binding(binding_name);
+        let lifetime = LifetimeId(new_ctx.next_lifetime_id);
+        new_ctx.next_lifetime_id += 1;
         let mut state = new_ctx
             .active_borrows
             .get(owner_name)
@@ -438,6 +446,7 @@ impl<'src> TypingContext<'src> {
             BorrowBinding {
                 owner: owner_name.to_string(),
                 kind,
+                lifetime,
             },
         );
         if let Some(scope) = new_ctx.borrow_scopes.last_mut() {
@@ -474,6 +483,18 @@ impl<'src> TypingContext<'src> {
         self.borrow_bindings
             .get(name)
             .map(|binding| (binding.owner.as_str(), binding.kind))
+    }
+
+    pub fn lookup_borrow_lifetime(&self, name: &str) -> Option<LifetimeId> {
+        self.borrow_bindings
+            .get(name)
+            .map(|binding| binding.lifetime)
+    }
+
+    pub fn live_borrow_binding_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.borrow_bindings.keys().cloned().collect();
+        names.sort();
+        names
     }
 
     pub fn has_shared_borrows(&self, owner: &str) -> bool {

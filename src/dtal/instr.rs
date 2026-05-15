@@ -2,7 +2,7 @@
 //!
 //! This module defines the DTAL instruction set and program representation.
 
-use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::common::ownership::{LifetimeId, OwnershipMode, ParameterKind};
 use crate::dtal::constraints::Constraint;
 use crate::dtal::regs::Reg;
 use crate::dtal::types::DtalType;
@@ -47,24 +47,36 @@ pub struct TypeState {
     pub owned_object_ids: HashMap<Reg, u32>,
     /// Registers currently holding shared borrows.
     pub shared_borrow_object_ids: HashMap<Reg, u32>,
+    /// Lifetime IDs for registers currently holding shared borrows.
+    pub shared_borrow_lifetimes: HashMap<Reg, Option<LifetimeId>>,
     /// Registers currently holding mutable borrows.
     pub mutable_borrow_object_ids: HashMap<Reg, u32>,
+    /// Lifetime IDs for registers currently holding mutable borrows.
+    pub mutable_borrow_lifetimes: HashMap<Reg, Option<LifetimeId>>,
     /// Ownership state for stack values tracked by `Push`/`Pop`.
     pub owned_stack: Vec<bool>,
     /// Object identities for stack values tracked by `Push`/`Pop`.
     pub owned_stack_object_ids: Vec<Option<u32>>,
     /// Shared-borrow object identities for stack values tracked by `Push`/`Pop`.
     pub shared_borrow_stack_object_ids: Vec<Option<u32>>,
+    /// Shared-borrow lifetimes for stack values tracked by `Push`/`Pop`.
+    pub shared_borrow_stack_lifetimes: Vec<Option<Option<LifetimeId>>>,
     /// Mutable-borrow object identities for stack values tracked by `Push`/`Pop`.
     pub mutable_borrow_stack_object_ids: Vec<Option<u32>>,
+    /// Mutable-borrow lifetimes for stack values tracked by `Push`/`Pop`.
+    pub mutable_borrow_stack_lifetimes: Vec<Option<Option<LifetimeId>>>,
     /// Stack spill slots currently holding owned values.
     pub owned_spills: HashSet<i32>,
     /// Object identities for owned spill slots.
     pub owned_spill_object_ids: HashMap<i32, u32>,
     /// Object identities for spill slots currently holding shared borrows.
     pub shared_borrow_spill_object_ids: HashMap<i32, u32>,
+    /// Lifetime IDs for spill slots currently holding shared borrows.
+    pub shared_borrow_spill_lifetimes: HashMap<i32, Option<LifetimeId>>,
     /// Object identities for spill slots currently holding mutable borrows.
     pub mutable_borrow_spill_object_ids: HashMap<i32, u32>,
+    /// Lifetime IDs for spill slots currently holding mutable borrows.
+    pub mutable_borrow_spill_lifetimes: HashMap<i32, Option<LifetimeId>>,
     /// Registers whose previously-owned value has been consumed by move/drop.
     pub consumed_registers: HashSet<Reg>,
     /// Fresh object id supply for ownership-capability tracking.
@@ -84,15 +96,21 @@ impl TypeState {
             owned_registers: HashSet::new(),
             owned_object_ids: HashMap::new(),
             shared_borrow_object_ids: HashMap::new(),
+            shared_borrow_lifetimes: HashMap::new(),
             mutable_borrow_object_ids: HashMap::new(),
+            mutable_borrow_lifetimes: HashMap::new(),
             owned_stack: Vec::new(),
             owned_stack_object_ids: Vec::new(),
             shared_borrow_stack_object_ids: Vec::new(),
+            shared_borrow_stack_lifetimes: Vec::new(),
             mutable_borrow_stack_object_ids: Vec::new(),
+            mutable_borrow_stack_lifetimes: Vec::new(),
             owned_spills: HashSet::new(),
             owned_spill_object_ids: HashMap::new(),
             shared_borrow_spill_object_ids: HashMap::new(),
+            shared_borrow_spill_lifetimes: HashMap::new(),
             mutable_borrow_spill_object_ids: HashMap::new(),
+            mutable_borrow_spill_lifetimes: HashMap::new(),
             consumed_registers: HashSet::new(),
             next_object_id: 0,
         }
@@ -209,11 +227,25 @@ pub enum DtalInstr {
     /// mov rd, rs
     MovReg { dst: Reg, src: Reg, ty: DtalType },
     /// alias_borrow rd, rs (shared borrow)
-    AliasBorrow { dst: Reg, src: Reg, ty: DtalType },
+    AliasBorrow {
+        lifetime: Option<LifetimeId>,
+        dst: Reg,
+        src: Reg,
+        ty: DtalType,
+    },
     /// borrow_mut rd, rs (mutable borrow)
-    BorrowMut { dst: Reg, src: Reg, ty: DtalType },
+    BorrowMut {
+        lifetime: Option<LifetimeId>,
+        dst: Reg,
+        src: Reg,
+        ty: DtalType,
+    },
     /// borrow_end rs
-    BorrowEnd { src: Reg, ty: DtalType },
+    BorrowEnd {
+        lifetime: Option<LifetimeId>,
+        src: Reg,
+        ty: DtalType,
+    },
     /// move_owned rd, rs
     MoveOwned { dst: Reg, src: Reg, ty: DtalType },
     /// load rd, [base + offset]

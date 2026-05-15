@@ -212,7 +212,12 @@ fn emit_store_from_param_kind(
         ParameterKind::SharedBorrow => match loc {
             PhysLoc::Reg(r) if *r == src => {}
             PhysLoc::Reg(r) => {
-                instrs.push(DtalInstr::AliasBorrow { dst: *r, src, ty });
+                instrs.push(DtalInstr::AliasBorrow {
+                    lifetime: None,
+                    dst: *r,
+                    src,
+                    ty,
+                });
             }
             PhysLoc::Spill(offset) => {
                 instrs.push(DtalInstr::SpillStore {
@@ -389,6 +394,7 @@ fn allocate_function(func: &DtalFunction, alloc: &AllocationResult) -> DtalFunct
                             }
                             crate::common::ownership::ParameterKind::SharedBorrow => {
                                 instrs.push(DtalInstr::AliasBorrow {
+                                    lifetime: None,
                                     dst: R11,
                                     src: *src,
                                     ty: ty.clone(),
@@ -581,8 +587,8 @@ fn allocate_instruction(
         }
 
         DtalInstr::MovReg { dst, src, ty }
-        | DtalInstr::AliasBorrow { dst, src, ty }
-        | DtalInstr::BorrowMut { dst, src, ty }
+        | DtalInstr::AliasBorrow { dst, src, ty, .. }
+        | DtalInstr::BorrowMut { dst, src, ty, .. }
         | DtalInstr::MoveOwned { dst, src, ty } => {
             let src_loc = resolve_reg(*src, alloc);
             let dst_loc = resolve_reg(*dst, alloc);
@@ -597,11 +603,19 @@ fn allocate_instruction(
                             ty: ty.clone(),
                         },
                         DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                            lifetime: match instr {
+                                DtalInstr::AliasBorrow { lifetime, .. } => *lifetime,
+                                _ => None,
+                            },
                             dst: *d,
                             src: *s,
                             ty: ty.clone(),
                         },
                         DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                            lifetime: match instr {
+                                DtalInstr::BorrowMut { lifetime, .. } => *lifetime,
+                                _ => None,
+                            },
                             dst: *d,
                             src: *s,
                             ty: ty.clone(),
@@ -638,11 +652,19 @@ fn allocate_instruction(
                                 ty: ty.clone(),
                             },
                             DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                                lifetime: match instr {
+                                    DtalInstr::AliasBorrow { lifetime, .. } => *lifetime,
+                                    _ => None,
+                                },
                                 dst: *d,
                                 src: scratch,
                                 ty: ty.clone(),
                             },
                             DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                                lifetime: match instr {
+                                    DtalInstr::BorrowMut { lifetime, .. } => *lifetime,
+                                    _ => None,
+                                },
                                 dst: *d,
                                 src: scratch,
                                 ty: ty.clone(),
@@ -676,11 +698,19 @@ fn allocate_instruction(
                                 ty: ty.clone(),
                             },
                             DtalInstr::AliasBorrow { .. } => DtalInstr::AliasBorrow {
+                                lifetime: match instr {
+                                    DtalInstr::AliasBorrow { lifetime, .. } => *lifetime,
+                                    _ => None,
+                                },
                                 dst: scratch,
                                 src: RAX,
                                 ty: ty.clone(),
                             },
                             DtalInstr::BorrowMut { .. } => DtalInstr::BorrowMut {
+                                lifetime: match instr {
+                                    DtalInstr::BorrowMut { lifetime, .. } => *lifetime,
+                                    _ => None,
+                                },
                                 dst: scratch,
                                 src: RAX,
                                 ty: ty.clone(),
@@ -731,10 +761,11 @@ fn allocate_instruction(
             }
         }
 
-        DtalInstr::BorrowEnd { src, ty } => {
+        DtalInstr::BorrowEnd { lifetime, src, ty } => {
             let src_loc = resolve_reg(*src, alloc);
             match src_loc {
                 PhysLoc::Reg(r) => instrs.push(DtalInstr::BorrowEnd {
+                    lifetime: *lifetime,
                     src: r,
                     ty: ty.clone(),
                 }),
@@ -745,6 +776,7 @@ fn allocate_instruction(
                         ty: ty.clone(),
                     });
                     instrs.push(DtalInstr::BorrowEnd {
+                        lifetime: *lifetime,
                         src: R11,
                         ty: ty.clone(),
                     });

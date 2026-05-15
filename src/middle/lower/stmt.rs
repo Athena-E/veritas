@@ -53,6 +53,10 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
             lower_expr(ctx, expr);
         }
 
+        TStmt::BorrowEnd { name, lifetime, .. } => {
+            ctx.emit_borrow_end_for_binding_with_lifetime(name, Some(*lifetime));
+        }
+
         TStmt::For {
             var,
             var_ty,
@@ -103,7 +107,7 @@ fn lower_let<'src>(
         .filter(|(_, prior_ty)| is_borrow_type(prior_ty));
 
     if matches!(ty, IType::Ref(inner) | IType::RefMut(inner) if !matches!(inner.as_ref(), IType::Array { .. }))
-        && let TExpr::Borrow { expr, .. } = &value.0
+        && let TExpr::Borrow { expr, lifetime, .. } = &value.0
         && let TExpr::Variable { name: owner, .. } = &expr.0
     {
         if let Some((prior_reg, prior_ty)) = prior_binding {
@@ -125,7 +129,7 @@ fn lower_let<'src>(
             crate::common::ownership::BorrowKind::Mutable
         };
         let (borrow_reg, cell_reg, lowered_ref_ty) =
-            ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind);
+            ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind, *lifetime);
         ctx.declare_scalar_borrow(
             name,
             borrow_reg,
@@ -134,6 +138,7 @@ fn lower_let<'src>(
                 owner_name: owner.clone(),
                 cell_reg,
                 kind,
+                lifetime: *lifetime,
                 pointee_ty,
             },
         );
@@ -191,7 +196,7 @@ fn lower_assignment<'src>(
             let self_assignment =
                 matches!(&rhs.0, TExpr::Variable { name: rhs_name, .. } if rhs_name == name);
             if matches!(ctx.lookup_var_type(name), IType::Ref(_) | IType::RefMut(_))
-                && let TExpr::Borrow { expr, .. } = &rhs.0
+                && let TExpr::Borrow { expr, lifetime, .. } = &rhs.0
                 && let TExpr::Variable { name: owner, .. } = &expr.0
             {
                 let owner_reg = ctx.lookup_var(owner).unwrap_or_else(|| {
@@ -204,7 +209,7 @@ fn lower_assignment<'src>(
                     crate::common::ownership::BorrowKind::Mutable
                 };
                 let (borrow_reg, cell_reg, lowered_ref_ty) =
-                    ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind);
+                    ctx.create_scalar_borrow_value(owner_reg, pointee_ty.clone(), kind, *lifetime);
                 if prior_reg.is_some() && is_borrow_type(&prior_ty) && !self_assignment {
                     ctx.emit_borrow_end_for_binding(name);
                 }
@@ -216,6 +221,7 @@ fn lower_assignment<'src>(
                         owner_name: owner.clone(),
                         cell_reg,
                         kind,
+                        lifetime: *lifetime,
                         pointee_ty,
                     },
                 );

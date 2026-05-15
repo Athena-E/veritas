@@ -884,7 +884,9 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             preserve_plain_mov_mutable_borrow(*src, *dst, state);
             state.consumed_registers.remove(dst);
         }
-        DtalInstr::AliasBorrow { dst, src, .. } => {
+        DtalInstr::AliasBorrow {
+            lifetime, dst, src, ..
+        } => {
             let ty = state
                 .register_types
                 .get(src)
@@ -893,10 +895,12 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.register_types.insert(*dst, ty);
             state.owned_registers.remove(dst);
             state.owned_object_ids.remove(dst);
-            assign_shared_borrow_from(*src, *dst, state);
+            assign_shared_borrow_from(*src, *dst, *lifetime, state);
             state.consumed_registers.remove(dst);
         }
-        DtalInstr::BorrowMut { dst, src, .. } => {
+        DtalInstr::BorrowMut {
+            lifetime, dst, src, ..
+        } => {
             let ty = state
                 .register_types
                 .get(src)
@@ -906,12 +910,15 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.owned_registers.remove(dst);
             state.owned_object_ids.remove(dst);
             state.shared_borrow_object_ids.remove(dst);
-            assign_mutable_borrow_from(*src, *dst, state);
+            state.shared_borrow_lifetimes.remove(dst);
+            assign_mutable_borrow_from(*src, *dst, *lifetime, state);
             state.consumed_registers.remove(dst);
         }
         DtalInstr::BorrowEnd { src, .. } => {
             state.shared_borrow_object_ids.remove(src);
+            state.shared_borrow_lifetimes.remove(src);
             state.mutable_borrow_object_ids.remove(src);
+            state.mutable_borrow_lifetimes.remove(src);
         }
         DtalInstr::MoveOwned { dst, src, .. } => {
             let ty = state
@@ -1130,13 +1137,23 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             }
             if let Some(object_id) = state.shared_borrow_stack_object_ids.pop().unwrap_or(None) {
                 state.shared_borrow_object_ids.insert(*dst, object_id);
+                if let Some(lifetime) = state.shared_borrow_stack_lifetimes.pop().unwrap_or(None) {
+                    state.shared_borrow_lifetimes.insert(*dst, lifetime);
+                }
             } else {
                 state.shared_borrow_object_ids.remove(dst);
+                state.shared_borrow_lifetimes.remove(dst);
+                let _ = state.shared_borrow_stack_lifetimes.pop();
             }
             if let Some(object_id) = state.mutable_borrow_stack_object_ids.pop().unwrap_or(None) {
                 state.mutable_borrow_object_ids.insert(*dst, object_id);
+                if let Some(lifetime) = state.mutable_borrow_stack_lifetimes.pop().unwrap_or(None) {
+                    state.mutable_borrow_lifetimes.insert(*dst, lifetime);
+                }
             } else {
                 state.mutable_borrow_object_ids.remove(dst);
+                state.mutable_borrow_lifetimes.remove(dst);
+                let _ = state.mutable_borrow_stack_lifetimes.pop();
             }
             state.consumed_registers.remove(dst);
         }
@@ -1263,8 +1280,14 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 .shared_borrow_stack_object_ids
                 .push(state.shared_borrow_object_ids.get(src).copied());
             state
+                .shared_borrow_stack_lifetimes
+                .push(state.shared_borrow_lifetimes.get(src).copied());
+            state
                 .mutable_borrow_stack_object_ids
                 .push(state.mutable_borrow_object_ids.get(src).copied());
+            state
+                .mutable_borrow_stack_lifetimes
+                .push(state.mutable_borrow_lifetimes.get(src).copied());
         }
         DtalInstr::Store { .. } => {}
         DtalInstr::ConstraintAssert { constraint, .. } => {
@@ -1357,15 +1380,25 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
                 state
                     .shared_borrow_spill_object_ids
                     .insert(*offset, object_id);
+                state.shared_borrow_spill_lifetimes.insert(
+                    *offset,
+                    state.shared_borrow_lifetimes.get(src).copied().flatten(),
+                );
             } else {
                 state.shared_borrow_spill_object_ids.remove(offset);
+                state.shared_borrow_spill_lifetimes.remove(offset);
             }
             if let Some(object_id) = state.mutable_borrow_object_ids.get(src).copied() {
                 state
                     .mutable_borrow_spill_object_ids
                     .insert(*offset, object_id);
+                state.mutable_borrow_spill_lifetimes.insert(
+                    *offset,
+                    state.mutable_borrow_lifetimes.get(src).copied().flatten(),
+                );
             } else {
                 state.mutable_borrow_spill_object_ids.remove(offset);
+                state.mutable_borrow_spill_lifetimes.remove(offset);
             }
         }
         DtalInstr::SpillLoad { dst, ty, offset } => {
@@ -1384,13 +1417,31 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             }
             if let Some(object_id) = state.shared_borrow_spill_object_ids.get(offset).copied() {
                 state.shared_borrow_object_ids.insert(*dst, object_id);
+                state.shared_borrow_lifetimes.insert(
+                    *dst,
+                    state
+                        .shared_borrow_spill_lifetimes
+                        .get(offset)
+                        .copied()
+                        .flatten(),
+                );
             } else {
                 state.shared_borrow_object_ids.remove(dst);
+                state.shared_borrow_lifetimes.remove(dst);
             }
             if let Some(object_id) = state.mutable_borrow_spill_object_ids.get(offset).copied() {
                 state.mutable_borrow_object_ids.insert(*dst, object_id);
+                state.mutable_borrow_lifetimes.insert(
+                    *dst,
+                    state
+                        .mutable_borrow_spill_lifetimes
+                        .get(offset)
+                        .copied()
+                        .flatten(),
+                );
             } else {
                 state.mutable_borrow_object_ids.remove(dst);
+                state.mutable_borrow_lifetimes.remove(dst);
             }
             state.consumed_registers.remove(dst);
         }
@@ -1456,15 +1507,21 @@ fn states_equal(a: &TypeState, b: &TypeState) -> bool {
         && a.owned_registers == b.owned_registers
         && a.owned_object_ids == b.owned_object_ids
         && a.shared_borrow_object_ids == b.shared_borrow_object_ids
+        && a.shared_borrow_lifetimes == b.shared_borrow_lifetimes
         && a.mutable_borrow_object_ids == b.mutable_borrow_object_ids
+        && a.mutable_borrow_lifetimes == b.mutable_borrow_lifetimes
         && a.owned_stack == b.owned_stack
         && a.owned_stack_object_ids == b.owned_stack_object_ids
         && a.shared_borrow_stack_object_ids == b.shared_borrow_stack_object_ids
+        && a.shared_borrow_stack_lifetimes == b.shared_borrow_stack_lifetimes
         && a.mutable_borrow_stack_object_ids == b.mutable_borrow_stack_object_ids
+        && a.mutable_borrow_stack_lifetimes == b.mutable_borrow_stack_lifetimes
         && a.owned_spills == b.owned_spills
         && a.owned_spill_object_ids == b.owned_spill_object_ids
         && a.shared_borrow_spill_object_ids == b.shared_borrow_spill_object_ids
+        && a.shared_borrow_spill_lifetimes == b.shared_borrow_spill_lifetimes
         && a.mutable_borrow_spill_object_ids == b.mutable_borrow_spill_object_ids
+        && a.mutable_borrow_spill_lifetimes == b.mutable_borrow_spill_lifetimes
         && a.consumed_registers == b.consumed_registers
         && a.proven_assertions.len() == b.proven_assertions.len()
         && a.proven_assertions

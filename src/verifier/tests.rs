@@ -1,4 +1,5 @@
 use super::*;
+use crate::common::ownership::LifetimeId;
 use crate::dtal::constraints::{Constraint, IndexExpr};
 use crate::dtal::instr::{BinaryOp, CmpOp, DtalBlock, DtalInstr, TypeState};
 use crate::dtal::regs::{PhysicalReg, Reg, VirtualReg};
@@ -388,6 +389,7 @@ fn alias_borrow_allows_non_owning_alias_of_owned_value() {
 
     verify_instruction(
         &DtalInstr::AliasBorrow {
+            lifetime: None,
             dst: v(1),
             src: v(0),
             ty: array_ty,
@@ -474,6 +476,7 @@ fn alias_borrow_outside_call_setup_is_allowed() {
             ".entry",
             vec![
                 DtalInstr::AliasBorrow {
+                    lifetime: None,
                     dst: v(1),
                     src: v(0),
                     ty: array_ty,
@@ -500,6 +503,7 @@ fn alias_borrow_can_chain_from_existing_shared_borrow() {
 
     verify_instruction(
         &DtalInstr::AliasBorrow {
+            lifetime: None,
             dst: v(1),
             src: v(0),
             ty: array_ty.clone(),
@@ -512,6 +516,7 @@ fn alias_borrow_can_chain_from_existing_shared_borrow() {
 
     verify_instruction(
         &DtalInstr::AliasBorrow {
+            lifetime: None,
             dst: v(2),
             src: v(1),
             ty: array_ty,
@@ -541,6 +546,7 @@ fn borrow_end_releases_shared_borrow_so_owner_can_move() {
 
     verify_instruction(
         &DtalInstr::AliasBorrow {
+            lifetime: None,
             dst: v(1),
             src: v(0),
             ty: array_ty.clone(),
@@ -553,6 +559,7 @@ fn borrow_end_releases_shared_borrow_so_owner_can_move() {
 
     verify_instruction(
         &DtalInstr::BorrowEnd {
+            lifetime: None,
             src: v(1),
             ty: array_ty.clone(),
         },
@@ -585,8 +592,49 @@ fn borrow_end_without_live_shared_borrow_is_rejected() {
 
     let err = verify_instruction(
         &DtalInstr::BorrowEnd {
+            lifetime: None,
             src: v(0),
             ty: DtalType::Int,
+        },
+        &mut state,
+        ".entry",
+        &program,
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
+}
+
+#[test]
+fn borrow_end_with_wrong_lifetime_is_rejected() {
+    let array_ty = DtalType::Array {
+        element_type: Arc::new(DtalType::Int),
+        size: IndexExpr::Const(4),
+    };
+    let mut state = TypeState::new();
+    state.register_types.insert(v(0), array_ty.clone());
+    state.owned_registers.insert(v(0));
+    state.owned_object_ids.insert(v(0), 52);
+    let program = make_program(vec![]);
+
+    verify_instruction(
+        &DtalInstr::AliasBorrow {
+            lifetime: Some(LifetimeId(1)),
+            dst: v(1),
+            src: v(0),
+            ty: array_ty.clone(),
+        },
+        &mut state,
+        ".entry",
+        &program,
+    )
+    .unwrap();
+
+    let err = verify_instruction(
+        &DtalInstr::BorrowEnd {
+            lifetime: Some(LifetimeId(2)),
+            src: v(1),
+            ty: array_ty,
         },
         &mut state,
         ".entry",
@@ -611,6 +659,7 @@ fn borrow_mut_of_owned_value_is_allowed() {
 
     verify_instruction(
         &DtalInstr::BorrowMut {
+            lifetime: None,
             dst: v(1),
             src: v(0),
             ty: array_ty,
@@ -644,6 +693,7 @@ fn borrow_mut_while_shared_borrow_live_is_rejected() {
 
     let err = verify_instruction(
         &DtalInstr::BorrowMut {
+            lifetime: None,
             dst: v(2),
             src: v(0),
             ty: array_ty,
@@ -673,6 +723,7 @@ fn alias_borrow_while_mutable_borrow_live_is_rejected() {
 
     let err = verify_instruction(
         &DtalInstr::AliasBorrow {
+            lifetime: None,
             dst: v(2),
             src: v(0),
             ty: array_ty,
@@ -751,6 +802,7 @@ fn branch_local_shared_borrow_is_rejected_at_join() {
                 ".then",
                 vec![
                     DtalInstr::AliasBorrow {
+                        lifetime: None,
                         dst: v(1),
                         src: v(0),
                         ty: array_ty.clone(),
@@ -813,6 +865,7 @@ fn mixed_shared_and_mutable_borrow_is_rejected_at_join() {
                 ".then",
                 vec![
                     DtalInstr::AliasBorrow {
+                        lifetime: None,
                         dst: v(1),
                         src: v(0),
                         ty: array_ty.clone(),
@@ -826,6 +879,7 @@ fn mixed_shared_and_mutable_borrow_is_rejected_at_join() {
                 ".else",
                 vec![
                     DtalInstr::BorrowMut {
+                        lifetime: None,
                         dst: v(2),
                         src: v(0),
                         ty: array_ty.clone(),
@@ -861,6 +915,7 @@ fn borrow_end_on_one_path_only_is_rejected_at_join() {
                 ".entry",
                 vec![
                     DtalInstr::AliasBorrow {
+                        lifetime: None,
                         dst: v(1),
                         src: v(0),
                         ty: array_ty.clone(),
@@ -887,6 +942,7 @@ fn borrow_end_on_one_path_only_is_rejected_at_join() {
                 ".then",
                 vec![
                     DtalInstr::BorrowEnd {
+                        lifetime: None,
                         src: v(1),
                         ty: array_ty.clone(),
                     },
@@ -927,6 +983,7 @@ fn loop_carried_shared_borrow_is_preserved() {
                 ".entry",
                 vec![
                     DtalInstr::AliasBorrow {
+                        lifetime: None,
                         dst: v(1),
                         src: v(0),
                         ty: array_ty.clone(),
@@ -967,6 +1024,7 @@ fn loop_carried_shared_borrow_is_preserved() {
                 ".exit",
                 vec![
                     DtalInstr::BorrowEnd {
+                        lifetime: None,
                         src: v(1),
                         ty: array_ty,
                     },
@@ -990,6 +1048,7 @@ fn alias_borrow_for_consuming_call_argument_is_rejected() {
                 ".entry",
                 vec![
                     DtalInstr::AliasBorrow {
+                        lifetime: None,
                         dst: r0(),
                         src: v(0),
                         ty: DtalType::Int,
@@ -2672,6 +2731,7 @@ fn test_physical_shared_borrow_spill_store_load() {
                     callee_saved: vec![],
                 },
                 DtalInstr::AliasBorrow {
+                    lifetime: None,
                     dst: Reg::Physical(PhysicalReg::R1),
                     src: r0(),
                     ty: ref_ty.clone(),
@@ -2687,6 +2747,7 @@ fn test_physical_shared_borrow_spill_store_load() {
                     ty: ref_ty.clone(),
                 },
                 DtalInstr::BorrowEnd {
+                    lifetime: None,
                     src: Reg::Physical(PhysicalReg::R3),
                     ty: ref_ty,
                 },
@@ -2730,6 +2791,7 @@ fn test_physical_mutable_borrow_spill_store_load() {
                     callee_saved: vec![],
                 },
                 DtalInstr::BorrowMut {
+                    lifetime: None,
                     dst: Reg::Physical(PhysicalReg::R1),
                     src: r0(),
                     ty: ref_mut_ty.clone(),
@@ -2745,6 +2807,7 @@ fn test_physical_mutable_borrow_spill_store_load() {
                     ty: ref_mut_ty.clone(),
                 },
                 DtalInstr::BorrowEnd {
+                    lifetime: None,
                     src: Reg::Physical(PhysicalReg::R3),
                     ty: ref_mut_ty,
                 },

@@ -19,6 +19,9 @@ pub enum BorrowKind {
     Mutable,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LifetimeId(pub u32);
+
 impl OwnershipMode {
     pub fn consumes_input(self) -> bool {
         matches!(self, Self::Consume)

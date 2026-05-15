@@ -171,6 +171,116 @@ fn returning_references_is_rejected() {
 }
 
 #[test]
+fn returning_reference_parameter_typechecks() {
+    let func = Function {
+        name: "id_ref",
+        parameters: vec![spanned(Parameter {
+            name: "r",
+            ty: ref_int_type(),
+        })],
+        return_type: ref_int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![],
+            trailing_expr: Some(Box::new(spanned(Expr::Variable("r")))),
+        },
+    };
+
+    check_program(&make_program(vec![func]))
+        .expect("returning a reference parameter should typecheck");
+}
+
+#[test]
+fn shared_borrow_ends_after_last_use_before_owner_mutation() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rx",
+                    ty: ref_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "y",
+                    ty: int_type(),
+                    value: spanned(Expr::UnaryOp {
+                        op: crate::common::ast::UnaryOp::Deref,
+                        cond: Box::new(spanned(Expr::Variable("rx"))),
+                    }),
+                }),
+                spanned(Stmt::Assignment {
+                    lhs: spanned(Expr::Variable("x")),
+                    rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(2))),
+                }),
+            ],
+            trailing_expr: Some(Box::new(spanned(Expr::Variable("x")))),
+        },
+    };
+
+    check_program(&make_program(vec![func]))
+        .expect("non-lexical borrow should end after final reference use");
+}
+
+#[test]
+fn shared_borrow_remains_live_until_later_use() {
+    let func = Function {
+        name: "main",
+        parameters: vec![],
+        return_type: int_type(),
+        precondition: None,
+        postcondition: None,
+        body: FunctionBody {
+            statements: vec![
+                spanned(Stmt::Let {
+                    is_mut: true,
+                    name: "x",
+                    ty: int_type(),
+                    value: spanned(Expr::Literal(crate::common::ast::Literal::Int(1))),
+                }),
+                spanned(Stmt::Let {
+                    is_mut: false,
+                    name: "rx",
+                    ty: ref_int_type(),
+                    value: spanned(Expr::Borrow {
+                        kind: BorrowKind::Shared,
+                        expr: Box::new(spanned(Expr::Variable("x"))),
+                    }),
+                }),
+                spanned(Stmt::Assignment {
+                    lhs: spanned(Expr::Variable("x")),
+                    rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(2))),
+                }),
+            ],
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("rx"))),
+            }))),
+        },
+    };
+
+    let err = check_program(&make_program(vec![func]))
+        .expect_err("borrow should remain live until its trailing-expression use");
+    assert!(matches!(err, TypeError::BorrowConflict { .. }));
+}
+
+#[test]
 fn storing_references_inside_arrays_is_rejected() {
     let array_of_refs = spanned(Type::Array {
         element_type: Box::new(ref_int_type()),
@@ -348,7 +458,10 @@ fn shared_borrow_blocks_owner_mutation() {
                     rhs: spanned(Expr::Literal(crate::common::ast::Literal::Int(2))),
                 }),
             ],
-            trailing_expr: None,
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("rx"))),
+            }))),
         },
     };
 
@@ -392,7 +505,10 @@ fn mutable_borrow_blocks_shared_borrow() {
                     }),
                 }),
             ],
-            trailing_expr: None,
+            trailing_expr: Some(Box::new(spanned(Expr::UnaryOp {
+                op: crate::common::ast::UnaryOp::Deref,
+                cond: Box::new(spanned(Expr::Variable("mx"))),
+            }))),
         },
     };
 
@@ -440,7 +556,10 @@ fn moving_borrowed_array_is_rejected() {
                     value: spanned(Expr::Variable("arr")),
                 }),
             ],
-            trailing_expr: None,
+            trailing_expr: Some(Box::new(spanned(Expr::Index {
+                base: Box::new(spanned(Expr::Variable("rarr"))),
+                index: Box::new(spanned(Expr::Literal(crate::common::ast::Literal::Int(0)))),
+            }))),
         },
     };
 

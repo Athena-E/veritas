@@ -1,5 +1,5 @@
 use crate::common::ast::{BinOp, Literal, UnaryOp};
-use crate::common::ownership::{BorrowKind, OwnershipMode, ParameterKind};
+use crate::common::ownership::{BorrowKind, LifetimeId, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::types::{IProposition, IType};
 
@@ -51,6 +51,7 @@ pub enum TExpr<'src> {
 
     Borrow {
         kind: BorrowKind,
+        lifetime: Option<LifetimeId>,
         expr: Box<Spanned<Self>>,
         ty: IType<'src>,
     },
@@ -124,6 +125,12 @@ pub enum TStmt<'src> {
     },
 
     Expr(Spanned<TExpr<'src>>),
+
+    BorrowEnd {
+        name: String,
+        lifetime: LifetimeId,
+        ty: IType<'src>,
+    },
 
     For {
         var: String,

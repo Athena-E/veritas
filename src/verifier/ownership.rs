@@ -1,3 +1,4 @@
+use crate::common::ownership::LifetimeId;
 use crate::dtal::instr::TypeState;
 use crate::dtal::regs::{PhysicalReg, Reg};
 use crate::verifier::error::VerifyError;
@@ -55,7 +56,8 @@ pub(crate) fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut
 
 pub(crate) fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
     if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
-        assign_shared_borrow_object(dst, object_id, state);
+        let lifetime = state.shared_borrow_lifetimes.get(&src).copied().flatten();
+        assign_shared_borrow_object(dst, object_id, lifetime, state);
     } else {
         clear_shared_borrow(dst, state);
     }
@@ -64,7 +66,8 @@ pub(crate) fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut T
 pub(crate) fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
     if src == dst {
         if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied() {
-            assign_mutable_borrow_object(dst, object_id, state);
+            let lifetime = state.mutable_borrow_lifetimes.get(&src).copied().flatten();
+            assign_mutable_borrow_object(dst, object_id, lifetime, state);
         } else {
             clear_mutable_borrow(dst, state);
         }
@@ -73,19 +76,31 @@ pub(crate) fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut 
     }
 }
 
-pub(crate) fn assign_shared_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+pub(crate) fn assign_shared_borrow_from(
+    src: Reg,
+    dst: Reg,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        assign_shared_borrow_object(dst, object_id, state);
+        assign_shared_borrow_object(dst, object_id, lifetime, state);
     } else if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
-        assign_shared_borrow_object(dst, object_id, state);
+        let inherited_lifetime =
+            lifetime.or_else(|| state.shared_borrow_lifetimes.get(&src).copied().flatten());
+        assign_shared_borrow_object(dst, object_id, inherited_lifetime, state);
     } else {
         clear_shared_borrow(dst, state);
     }
 }
 
-pub(crate) fn assign_mutable_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+pub(crate) fn assign_mutable_borrow_from(
+    src: Reg,
+    dst: Reg,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        assign_mutable_borrow_object(dst, object_id, state);
+        assign_mutable_borrow_object(dst, object_id, lifetime, state);
     } else {
         clear_mutable_borrow(dst, state);
     }
@@ -104,10 +119,12 @@ fn clear_owned(reg: Reg, state: &mut TypeState) {
 
 fn clear_shared_borrow(reg: Reg, state: &mut TypeState) {
     state.shared_borrow_object_ids.remove(&reg);
+    state.shared_borrow_lifetimes.remove(&reg);
 }
 
 fn clear_mutable_borrow(reg: Reg, state: &mut TypeState) {
     state.mutable_borrow_object_ids.remove(&reg);
+    state.mutable_borrow_lifetimes.remove(&reg);
 }
 
 fn assign_owned_object(reg: Reg, object_id: u32, state: &mut TypeState) {
@@ -117,16 +134,28 @@ fn assign_owned_object(reg: Reg, object_id: u32, state: &mut TypeState) {
     state.owned_object_ids.insert(reg, object_id);
 }
 
-fn assign_shared_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+fn assign_shared_borrow_object(
+    reg: Reg,
+    object_id: u32,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     clear_owned(reg, state);
     clear_mutable_borrow(reg, state);
     state.shared_borrow_object_ids.insert(reg, object_id);
+    state.shared_borrow_lifetimes.insert(reg, lifetime);
 }
 
-fn assign_mutable_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+fn assign_mutable_borrow_object(
+    reg: Reg,
+    object_id: u32,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     clear_owned(reg, state);
     clear_shared_borrow(reg, state);
     state.mutable_borrow_object_ids.insert(reg, object_id);
+    state.mutable_borrow_lifetimes.insert(reg, lifetime);
 }
 
 pub(crate) fn is_allowed_owned_alias_pair(lhs: Reg, rhs: Reg) -> bool {

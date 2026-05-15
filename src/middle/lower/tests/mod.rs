@@ -339,6 +339,7 @@ fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
                 declared_ty: IType::Ref(std::sync::Arc::new(array_ty.clone())),
                 value: spanned(TExpr::Borrow {
                     kind: BorrowKind::Shared,
+                    lifetime: None,
                     expr: Box::new(spanned(TExpr::Variable {
                         name: "x".to_string(),
                         ty: array_ty.clone(),
@@ -405,6 +406,7 @@ fn test_lower_direct_scalar_borrow_call_materializes_hidden_cell() {
                 func_name: "inspect".to_string(),
                 args: vec![spanned(TExpr::Borrow {
                     kind: BorrowKind::Shared,
+                    lifetime: None,
                     expr: Box::new(spanned(TExpr::Variable {
                         name: "x".to_string(),
                         ty: IType::Int,

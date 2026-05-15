@@ -37,6 +37,7 @@
 
 #![allow(clippy::result_large_err)]
 
+use crate::common::ownership::LifetimeId;
 use crate::dtal::constraints::{Constraint, IndexExpr};
 use crate::dtal::instr::{BinaryOp, CmpOp, CmpOperands, DtalInstr, TypeState};
 use crate::dtal::regs::Reg;
@@ -74,27 +75,38 @@ pub fn verify_instruction(
             clear_consumed(*dst, state);
         }
 
-        DtalInstr::AliasBorrow { dst, src, ty } => {
+        DtalInstr::AliasBorrow {
+            lifetime,
+            dst,
+            src,
+            ty,
+        } => {
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
             verify_object_not_mutably_borrowed(*src, state, block_label, "alias_borrow")?;
             clear_owned(*dst, state);
-            assign_shared_borrow_from(*src, *dst, state);
+            assign_shared_borrow_from(*src, *dst, *lifetime, state);
             clear_consumed(*dst, state);
         }
 
-        DtalInstr::BorrowMut { dst, src, ty } => {
+        DtalInstr::BorrowMut {
+            lifetime,
+            dst,
+            src,
+            ty,
+        } => {
             verify_owned_available(*src, state, block_label, "borrow_mut")?;
             verify_object_not_shared_borrowed(*src, state, block_label, "borrow_mut")?;
             verify_object_not_mutably_borrowed(*src, state, block_label, "borrow_mut")?;
             verify_mov_reg(*dst, *src, ty, state, block_label)?;
             clear_owned(*dst, state);
             clear_shared_borrow(*dst, state);
-            assign_mutable_borrow_from(*src, *dst, state);
+            assign_mutable_borrow_from(*src, *dst, *lifetime, state);
             clear_consumed(*dst, state);
         }
 
-        DtalInstr::BorrowEnd { src, .. } => {
+        DtalInstr::BorrowEnd { lifetime, src, .. } => {
             verify_borrow_available(*src, state, block_label, "borrow_end")?;
+            verify_borrow_lifetime_matches(*src, *lifetime, state, block_label)?;
             clear_shared_borrow(*src, state);
             clear_mutable_borrow(*src, state);
         }
@@ -222,8 +234,14 @@ pub fn verify_instruction(
                 .shared_borrow_stack_object_ids
                 .push(state.shared_borrow_object_ids.get(src).copied());
             state
+                .shared_borrow_stack_lifetimes
+                .push(state.shared_borrow_lifetimes.get(src).copied());
+            state
                 .mutable_borrow_stack_object_ids
                 .push(state.mutable_borrow_object_ids.get(src).copied());
+            state
+                .mutable_borrow_stack_lifetimes
+                .push(state.mutable_borrow_lifetimes.get(src).copied());
         }
 
         DtalInstr::Pop { dst, ty: _ } => {
@@ -240,14 +258,26 @@ pub fn verify_instruction(
                 let _ = state.owned_stack_object_ids.pop();
             }
             if let Some(object_id) = state.shared_borrow_stack_object_ids.pop().unwrap_or(None) {
-                assign_shared_borrow_object(*dst, object_id, state);
+                let lifetime = state
+                    .shared_borrow_stack_lifetimes
+                    .pop()
+                    .unwrap_or(None)
+                    .flatten();
+                assign_shared_borrow_object(*dst, object_id, lifetime, state);
             } else {
                 clear_shared_borrow(*dst, state);
+                let _ = state.shared_borrow_stack_lifetimes.pop();
             }
             if let Some(object_id) = state.mutable_borrow_stack_object_ids.pop().unwrap_or(None) {
-                assign_mutable_borrow_object(*dst, object_id, state);
+                let lifetime = state
+                    .mutable_borrow_stack_lifetimes
+                    .pop()
+                    .unwrap_or(None)
+                    .flatten();
+                assign_mutable_borrow_object(*dst, object_id, lifetime, state);
             } else {
                 clear_mutable_borrow(*dst, state);
+                let _ = state.mutable_borrow_stack_lifetimes.pop();
             }
             clear_consumed(*dst, state);
         }
@@ -464,15 +494,25 @@ pub fn verify_instruction(
                 state
                     .shared_borrow_spill_object_ids
                     .insert(*offset, object_id);
+                state.shared_borrow_spill_lifetimes.insert(
+                    *offset,
+                    state.shared_borrow_lifetimes.get(src).copied().flatten(),
+                );
             } else {
                 state.shared_borrow_spill_object_ids.remove(offset);
+                state.shared_borrow_spill_lifetimes.remove(offset);
             }
             if let Some(object_id) = state.mutable_borrow_object_ids.get(src).copied() {
                 state
                     .mutable_borrow_spill_object_ids
                     .insert(*offset, object_id);
+                state.mutable_borrow_spill_lifetimes.insert(
+                    *offset,
+                    state.mutable_borrow_lifetimes.get(src).copied().flatten(),
+                );
             } else {
                 state.mutable_borrow_spill_object_ids.remove(offset);
+                state.mutable_borrow_spill_lifetimes.remove(offset);
             }
         }
 
@@ -489,12 +529,22 @@ pub fn verify_instruction(
                 clear_owned(*dst, state);
             }
             if let Some(object_id) = state.shared_borrow_spill_object_ids.get(offset).copied() {
-                assign_shared_borrow_object(*dst, object_id, state);
+                let lifetime = state
+                    .shared_borrow_spill_lifetimes
+                    .get(offset)
+                    .copied()
+                    .flatten();
+                assign_shared_borrow_object(*dst, object_id, lifetime, state);
             } else {
                 clear_shared_borrow(*dst, state);
             }
             if let Some(object_id) = state.mutable_borrow_spill_object_ids.get(offset).copied() {
-                assign_mutable_borrow_object(*dst, object_id, state);
+                let lifetime = state
+                    .mutable_borrow_spill_lifetimes
+                    .get(offset)
+                    .copied()
+                    .flatten();
+                assign_mutable_borrow_object(*dst, object_id, lifetime, state);
             } else {
                 clear_mutable_borrow(*dst, state);
             }
@@ -553,10 +603,12 @@ fn clear_owned(reg: Reg, state: &mut TypeState) {
 
 fn clear_shared_borrow(reg: Reg, state: &mut TypeState) {
     state.shared_borrow_object_ids.remove(&reg);
+    state.shared_borrow_lifetimes.remove(&reg);
 }
 
 fn clear_mutable_borrow(reg: Reg, state: &mut TypeState) {
     state.mutable_borrow_object_ids.remove(&reg);
+    state.mutable_borrow_lifetimes.remove(&reg);
 }
 
 fn verify_borrow_available(
@@ -574,6 +626,34 @@ fn verify_borrow_available(
         block: block_label.to_string(),
         instr_desc: instr_desc.to_string(),
         msg: format!("register {:?} does not currently hold a live borrow", reg),
+    })
+}
+
+fn verify_borrow_lifetime_matches(
+    reg: Reg,
+    expected: Option<LifetimeId>,
+    state: &TypeState,
+    block_label: &str,
+) -> Result<(), VerifyError> {
+    if expected.is_none() {
+        return Ok(());
+    }
+    let actual = state
+        .shared_borrow_lifetimes
+        .get(&reg)
+        .or_else(|| state.mutable_borrow_lifetimes.get(&reg))
+        .copied()
+        .flatten();
+    if actual == expected {
+        return Ok(());
+    }
+    Err(VerifyError::OwnershipViolation {
+        block: block_label.to_string(),
+        instr_desc: "borrow_end".to_string(),
+        msg: format!(
+            "borrow lifetime mismatch for {:?}: expected {:?}, found {:?}",
+            reg, expected, actual
+        ),
     })
 }
 
@@ -657,7 +737,8 @@ fn preserve_plain_mov_alias_ownership(src: Reg, dst: Reg, state: &mut TypeState)
 
 fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
     if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
-        assign_shared_borrow_object(dst, object_id, state);
+        let lifetime = state.shared_borrow_lifetimes.get(&src).copied().flatten();
+        assign_shared_borrow_object(dst, object_id, lifetime, state);
     } else {
         clear_shared_borrow(dst, state);
     }
@@ -666,7 +747,8 @@ fn preserve_plain_mov_shared_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
 fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut TypeState) {
     if src == dst {
         if let Some(object_id) = state.mutable_borrow_object_ids.get(&src).copied() {
-            assign_mutable_borrow_object(dst, object_id, state);
+            let lifetime = state.mutable_borrow_lifetimes.get(&src).copied().flatten();
+            assign_mutable_borrow_object(dst, object_id, lifetime, state);
         } else {
             clear_mutable_borrow(dst, state);
         }
@@ -675,34 +757,58 @@ fn preserve_plain_mov_mutable_borrow(src: Reg, dst: Reg, state: &mut TypeState) 
     }
 }
 
-fn assign_shared_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+fn assign_shared_borrow_from(
+    src: Reg,
+    dst: Reg,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        assign_shared_borrow_object(dst, object_id, state);
+        assign_shared_borrow_object(dst, object_id, lifetime, state);
     } else if let Some(object_id) = state.shared_borrow_object_ids.get(&src).copied() {
-        assign_shared_borrow_object(dst, object_id, state);
+        let inherited_lifetime =
+            lifetime.or_else(|| state.shared_borrow_lifetimes.get(&src).copied().flatten());
+        assign_shared_borrow_object(dst, object_id, inherited_lifetime, state);
     } else {
         clear_shared_borrow(dst, state);
     }
 }
 
-fn assign_shared_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+fn assign_shared_borrow_object(
+    reg: Reg,
+    object_id: u32,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     clear_owned(reg, state);
     clear_mutable_borrow(reg, state);
     state.shared_borrow_object_ids.insert(reg, object_id);
+    state.shared_borrow_lifetimes.insert(reg, lifetime);
 }
 
-fn assign_mutable_borrow_from(src: Reg, dst: Reg, state: &mut TypeState) {
+fn assign_mutable_borrow_from(
+    src: Reg,
+    dst: Reg,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     if let Some(object_id) = state.owned_object_ids.get(&src).copied() {
-        assign_mutable_borrow_object(dst, object_id, state);
+        assign_mutable_borrow_object(dst, object_id, lifetime, state);
     } else {
         clear_mutable_borrow(dst, state);
     }
 }
 
-fn assign_mutable_borrow_object(reg: Reg, object_id: u32, state: &mut TypeState) {
+fn assign_mutable_borrow_object(
+    reg: Reg,
+    object_id: u32,
+    lifetime: Option<LifetimeId>,
+    state: &mut TypeState,
+) {
     clear_owned(reg, state);
     clear_shared_borrow(reg, state);
     state.mutable_borrow_object_ids.insert(reg, object_id);
+    state.mutable_borrow_lifetimes.insert(reg, lifetime);
 }
 
 fn set_owned_from_type(reg: Reg, ty: &DtalType, state: &mut TypeState, fresh: bool) {

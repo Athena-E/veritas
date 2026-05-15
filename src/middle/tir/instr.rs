@@ -26,7 +26,7 @@
 //! type, ownership, or constraint combinations are rejected downstream by DTAL
 //! generation and [`crate::verifier`].
 
-use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::common::ownership::{LifetimeId, OwnershipMode, ParameterKind};
 use crate::common::types::IType;
 use crate::dtal::{Constraint, VirtualReg};
 use crate::middle::tir::types::{BinaryOp, BlockId, UnaryOp};
@@ -64,6 +64,7 @@ pub enum TirInstr<'src> {
 
     /// `dst = &src`
     BorrowShared {
+        lifetime: Option<LifetimeId>,
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
@@ -71,13 +72,18 @@ pub enum TirInstr<'src> {
 
     /// `dst = &mut src`
     BorrowMut {
+        lifetime: Option<LifetimeId>,
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
     /// End the borrow held in `src`.
-    BorrowEnd { src: VirtualReg, ty: IType<'src> },
+    BorrowEnd {
+        lifetime: Option<LifetimeId>,
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
 
     /// `dst = lhs op rhs`
     BinOp {

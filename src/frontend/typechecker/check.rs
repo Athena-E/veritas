@@ -1,7 +1,7 @@
 // Statement and program type checking
 
 use crate::common::ast::{Block, Expr, Function, Program, Stmt};
-use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::common::ownership::{LifetimeId, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
 use crate::common::tast::{TBlock, TExpr, TFunction, TFunctionBody, TParameter, TProgram, TStmt};
 use crate::common::types::{FunctionSignature, IProposition, IType, IValue};
@@ -22,7 +22,7 @@ use crate::frontend::typechecker::type_utils::{
     array_contains_reference_type, ast_type_to_itype, contains_array_type, has_symbolic_inner_dim,
     substitute_result_in_postcond,
 };
-use crate::frontend::typechecker::{TypeError, TypingContext, is_subtype, synth_expr};
+use crate::frontend::typechecker::{TypeError, TypingContext, VarBinding, is_subtype, synth_expr};
 use im::HashMap;
 use std::sync::Arc;
 
@@ -211,6 +211,236 @@ fn resolve_array_reads_in_expr<'src>(
     }
 }
 
+fn expr_mentions_binding<'src>(expr: &Expr<'src>, name: &str) -> bool {
+    match expr {
+        Expr::Variable(var) => *var == name,
+        Expr::Literal(_) | Expr::Error => false,
+        Expr::BinOp { lhs, rhs, .. } => {
+            expr_mentions_binding(&lhs.0, name) || expr_mentions_binding(&rhs.0, name)
+        }
+        Expr::UnaryOp { cond, .. } => expr_mentions_binding(&cond.0, name),
+        Expr::Borrow { expr, .. } => expr_mentions_binding(&expr.0, name),
+        Expr::Index { base, index } => {
+            expr_mentions_binding(&base.0, name) || expr_mentions_binding(&index.0, name)
+        }
+        Expr::Call { args, .. } => args.0.iter().any(|arg| expr_mentions_binding(&arg.0, name)),
+        Expr::ArrayInit { value, length } => {
+            expr_mentions_binding(&value.0, name) || expr_mentions_binding(&length.0, name)
+        }
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            expr_mentions_binding(&cond.0, name)
+                || block_mentions_binding(then_block, name)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_mentions_binding(block, name))
+        }
+        Expr::Forall {
+            var,
+            start,
+            end,
+            body,
+        }
+        | Expr::Exists {
+            var,
+            start,
+            end,
+            body,
+        } => {
+            expr_mentions_binding(&start.0, name)
+                || expr_mentions_binding(&end.0, name)
+                || (*var != name && expr_mentions_binding(&body.0, name))
+        }
+    }
+}
+
+fn stmt_mentions_binding<'src>(stmt: &Stmt<'src>, name: &str) -> bool {
+    match stmt {
+        Stmt::Let { value, .. } => expr_mentions_binding(&value.0, name),
+        Stmt::Assignment { lhs, rhs } => {
+            expr_mentions_binding(&lhs.0, name) || expr_mentions_binding(&rhs.0, name)
+        }
+        Stmt::Return { expr } => expr_mentions_binding(&expr.0, name),
+        Stmt::Expr(expr) => expr_mentions_binding(&expr.0, name),
+        Stmt::For {
+            var,
+            start,
+            end,
+            body,
+            ..
+        } => {
+            expr_mentions_binding(&start.0, name)
+                || expr_mentions_binding(&end.0, name)
+                || (*var != name && block_mentions_binding(body, name))
+        }
+        Stmt::While {
+            condition, body, ..
+        } => expr_mentions_binding(&condition.0, name) || block_mentions_binding(body, name),
+        Stmt::Region { body } => block_mentions_binding(body, name),
+    }
+}
+
+fn block_mentions_binding<'src>(block: &Block<'src>, name: &str) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|stmt| stmt_mentions_binding(&stmt.0, name))
+        || block
+            .trailing_expr
+            .as_ref()
+            .is_some_and(|expr| expr_mentions_binding(&expr.0, name))
+}
+
+fn remaining_mentions_binding<'src>(
+    remaining_stmts: &[Spanned<Stmt<'src>>],
+    trailing_expr: Option<&Spanned<Expr<'src>>>,
+    name: &str,
+) -> bool {
+    remaining_stmts
+        .iter()
+        .any(|stmt| stmt_mentions_binding(&stmt.0, name))
+        || trailing_expr.is_some_and(|expr| expr_mentions_binding(&expr.0, name))
+}
+
+fn release_dead_borrow_bindings<'src>(
+    ctx: TypingContext<'src>,
+    remaining_stmts: &[Spanned<Stmt<'src>>],
+    trailing_expr: Option<&Spanned<Expr<'src>>>,
+    typed_stmts: &mut Vec<Spanned<TStmt<'src>>>,
+    span: Span,
+) -> TypingContext<'src> {
+    let mut current_ctx = ctx;
+    for name in current_ctx.live_borrow_binding_names() {
+        if remaining_mentions_binding(remaining_stmts, trailing_expr, &name) {
+            continue;
+        }
+        let Some(binding) = current_ctx.lookup_var(&name) else {
+            current_ctx = current_ctx.release_borrow_binding(&name);
+            continue;
+        };
+        let Some(lifetime) = current_ctx.lookup_borrow_lifetime(&name) else {
+            current_ctx = current_ctx.release_borrow_binding(&name);
+            continue;
+        };
+        let ty = match binding {
+            VarBinding::Immutable(ty) => ty,
+            VarBinding::Mutable(binding) => binding.current_type,
+        };
+        typed_stmts.push((
+            TStmt::BorrowEnd {
+                name: name.clone(),
+                lifetime,
+                ty,
+            },
+            span,
+        ));
+        current_ctx = current_ctx.release_borrow_binding(&name);
+    }
+    current_ctx
+}
+
+fn with_borrow_lifetime<'src>(
+    mut expr: Spanned<TExpr<'src>>,
+    lifetime: LifetimeId,
+) -> Spanned<TExpr<'src>> {
+    if let TExpr::Borrow {
+        lifetime: borrow_lifetime,
+        ..
+    } = &mut expr.0
+    {
+        *borrow_lifetime = Some(lifetime);
+    }
+    expr
+}
+
+fn ast_block_has_return<'src>(block: &Block<'src>) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|stmt| ast_stmt_has_return(&stmt.0))
+}
+
+fn ast_stmt_has_return<'src>(stmt: &Stmt<'src>) -> bool {
+    match stmt {
+        Stmt::Return { .. } => true,
+        Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::Region { body } => {
+            ast_block_has_return(body)
+        }
+        Stmt::Expr(expr) => match &expr.0 {
+            Expr::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                ast_block_has_return(then_block)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|block| ast_block_has_return(block))
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn validate_reference_return<'src>(
+    func: &Function<'src>,
+    param_types: &[IType<'src>],
+    return_type: &IType<'src>,
+) -> Result<(), TypeError<'src>> {
+    if !is_reference_type(return_type) {
+        return Ok(());
+    }
+
+    if ast_block_has_return(&func.body) {
+        return Err(TypeError::UnsupportedFeature {
+            feature: "return statements with reference return types are not yet supported"
+                .to_string(),
+            span: func.return_type.1,
+        });
+    }
+
+    let Some(trailing) = &func.body.trailing_expr else {
+        return Err(TypeError::UnsupportedFeature {
+            feature: "reference-returning functions must return a reference parameter".to_string(),
+            span: func.return_type.1,
+        });
+    };
+
+    let Expr::Variable(returned_name) = &trailing.0 else {
+        return Err(TypeError::UnsupportedFeature {
+            feature: "returning references is limited to returning a reference parameter"
+                .to_string(),
+            span: trailing.1,
+        });
+    };
+
+    let Some((_, param_ty)) = func
+        .parameters
+        .iter()
+        .zip(param_types.iter())
+        .find(|(param, _)| param.0.name == *returned_name)
+    else {
+        return Err(TypeError::UnsupportedFeature {
+            feature: "cannot return references derived from local bindings".to_string(),
+            span: trailing.1,
+        });
+    };
+
+    if !is_subtype(&TypingContext::new(), param_ty, return_type) {
+        return Err(TypeError::TypeMismatch {
+            expected: return_type.clone(),
+            found: param_ty.clone(),
+            span: trailing.1,
+        });
+    }
+
+    Ok(())
+}
+
 /// Check a statement and produce a typed statement with updated context
 /// Returns (typed_stmt, new_context)
 pub fn check_stmt<'src>(
@@ -230,7 +460,7 @@ pub fn check_stmt<'src>(
             reject_shadowing_borrowed_owner(ctx, name, span)?;
 
             // Synthesize type of initializer
-            let (tvalue, value_ty) = synth_expr(ctx, value)?;
+            let (mut tvalue, value_ty) = synth_expr(ctx, value)?;
 
             // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
@@ -265,6 +495,9 @@ pub fn check_stmt<'src>(
             }
             if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
                 new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
+                if let Some(lifetime) = new_ctx.lookup_borrow_lifetime(name) {
+                    tvalue = with_borrow_lifetime(tvalue, lifetime);
+                }
             }
             if !ctx.bare_metal && ctx.in_region_scope() && is_reference_type(&ann_ty) {
                 new_ctx = new_ctx.mark_region_scoped_borrow(name);
@@ -326,7 +559,7 @@ pub fn check_stmt<'src>(
             reject_shadowing_borrowed_owner(ctx, name, span)?;
 
             // Synthesize type of initializer
-            let (tvalue, value_ty) = synth_expr(ctx, value)?;
+            let (mut tvalue, value_ty) = synth_expr(ctx, value)?;
 
             // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
@@ -369,6 +602,9 @@ pub fn check_stmt<'src>(
             }
             if let Some((owner_name, kind)) = borrow_binding_target_name(&value.0) {
                 new_ctx = new_ctx.add_borrow_binding(name, owner_name, kind);
+                if let Some(lifetime) = new_ctx.lookup_borrow_lifetime(name) {
+                    tvalue = with_borrow_lifetime(tvalue, lifetime);
+                }
             }
             if !ctx.bare_metal && ctx.in_region_scope() && is_reference_type(&ann_ty) {
                 new_ctx = new_ctx.mark_region_scoped_borrow(name);
@@ -464,7 +700,7 @@ pub fn check_stmt<'src>(
         // Handles both variable assignment and array indexing assignment
         Stmt::Assignment { lhs, rhs } => {
             // Synthesize type of RHS value
-            let (trhs, rhs_ty) = synth_expr(ctx, rhs)?;
+            let (mut trhs, rhs_ty) = synth_expr(ctx, rhs)?;
 
             // Check what kind of LHS we have
             match &lhs.0 {
@@ -557,6 +793,9 @@ pub fn check_stmt<'src>(
                     }
                     if let Some((owner_name, kind)) = borrow_binding_target_name(&rhs.0) {
                         new_ctx = new_ctx.add_borrow_binding(var_name, owner_name, kind);
+                        if let Some(lifetime) = new_ctx.lookup_borrow_lifetime(var_name) {
+                            trhs = with_borrow_lifetime(trhs, lifetime);
+                        }
                     }
 
                     if !ctx.bare_metal && ctx.in_region_scope() && contains_array_type(&rhs_ty) {
@@ -1301,7 +1540,11 @@ fn check_block_as_stmt<'src>(
     block: &Block<'src>,
 ) -> Result<(TBlock<'src>, TypingContext<'src>), TypeError<'src>> {
     let scoped_ctx = ctx.enter_borrow_scope();
-    let (typed_stmts, stmts_ctx) = check_stmts(&scoped_ctx, &block.statements)?;
+    let (typed_stmts, stmts_ctx) = check_stmts_with_trailing(
+        &scoped_ctx,
+        &block.statements,
+        block.trailing_expr.as_deref(),
+    )?;
 
     // If there's a trailing expression, check it and thread context
     if let Some(trailing) = &block.trailing_expr {
@@ -1359,13 +1602,27 @@ pub fn check_stmts<'src>(
     ctx: &TypingContext<'src>,
     stmts: &[Spanned<Stmt<'src>>],
 ) -> Result<(Vec<Spanned<TStmt<'src>>>, TypingContext<'src>), TypeError<'src>> {
+    check_stmts_with_trailing(ctx, stmts, None)
+}
+
+fn check_stmts_with_trailing<'src>(
+    ctx: &TypingContext<'src>,
+    stmts: &[Spanned<Stmt<'src>>],
+    trailing_expr: Option<&Spanned<Expr<'src>>>,
+) -> Result<(Vec<Spanned<TStmt<'src>>>, TypingContext<'src>), TypeError<'src>> {
     let mut current_ctx = ctx.clone();
     let mut typed_stmts = Vec::new();
 
-    for stmt in stmts {
+    for (idx, stmt) in stmts.iter().enumerate() {
         let (tstmt, new_ctx) = check_stmt(&current_ctx, stmt)?;
         typed_stmts.push(tstmt);
-        current_ctx = new_ctx;
+        current_ctx = release_dead_borrow_bindings(
+            new_ctx,
+            &stmts[idx + 1..],
+            trailing_expr,
+            &mut typed_stmts,
+            stmt.1,
+        );
     }
 
     Ok((typed_stmts, current_ctx))
@@ -1388,12 +1645,7 @@ pub fn check_function<'src>(
 
     let return_type = ast_type_to_itype(&func_inner.return_type)?;
 
-    if matches!(return_type, IType::Ref(_) | IType::RefMut(_)) {
-        return Err(TypeError::UnsupportedFeature {
-            feature: "returning references is not yet supported".to_string(),
-            span: func_inner.return_type.1,
-        });
-    }
+    validate_reference_return(func_inner, &param_types, &return_type)?;
 
     // Create context with parameters and expected return type
     let mut func_ctx = global_ctx.clone();
@@ -1475,7 +1727,11 @@ pub fn check_function<'src>(
     func_ctx = func_ctx.with_current_function(func_inner.name.to_string());
 
     let scoped_func_ctx = func_ctx.enter_borrow_scope();
-    let (tbody, final_ctx) = check_stmts(&scoped_func_ctx, &func_inner.body.statements)?;
+    let (tbody, final_ctx) = check_stmts_with_trailing(
+        &scoped_func_ctx,
+        &func_inner.body.statements,
+        func_inner.body.trailing_expr.as_deref(),
+    )?;
 
     // Check if body contains any return statements
     fn has_return_stmt(stmts: &[Spanned<TStmt>]) -> bool {
@@ -1604,12 +1860,6 @@ fn check_program_with_options<'src>(
 
         // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
-        if matches!(return_type, IType::Ref(_) | IType::RefMut(_)) {
-            return Err(TypeError::UnsupportedFeature {
-                feature: "returning references is not yet supported".to_string(),
-                span: func.return_type.1,
-            });
-        }
         if array_contains_reference_type(&return_type) {
             return Err(TypeError::UnsupportedFeature {
                 feature: "storing references inside arrays is not yet supported".to_string(),

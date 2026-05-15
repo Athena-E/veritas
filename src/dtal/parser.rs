@@ -3,7 +3,7 @@
 //! Parses the text format emitted by the DTAL emitter back into
 //! `DtalProgram`, enabling standalone verification from DTAL files.
 
-use crate::common::ownership::{OwnershipMode, ParameterKind};
+use crate::common::ownership::{LifetimeId, OwnershipMode, ParameterKind};
 use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState};
 use crate::dtal::regs::Reg;
 use crate::dtal::types::DtalType;
@@ -22,6 +22,16 @@ impl std::fmt::Display for DtalParseError {
 }
 
 impl std::error::Error for DtalParseError {}
+
+fn parse_optional_lifetime_token(token: &str) -> (Option<LifetimeId>, usize) {
+    let trimmed = token.trim_end_matches(',');
+    if let Some(rest) = trimmed.strip_prefix("'l")
+        && let Ok(id) = rest.parse::<u32>()
+    {
+        return (Some(LifetimeId(id)), 2);
+    }
+    (None, 1)
+}
 
 /// Parse DTAL text into a program
 pub fn parse_dtal(input: &str) -> Result<DtalProgram, Vec<DtalParseError>> {
@@ -562,8 +572,9 @@ impl<'a> DtalParser<'a> {
         if tokens.len() < 3 {
             return Err(self.err("alias_borrow requires 2 operands"));
         }
-        let dst_str = tokens[1].trim_end_matches(',');
-        let src_str = tokens[2];
+        let (lifetime, dst_idx) = parse_optional_lifetime_token(tokens[1]);
+        let dst_str = tokens[dst_idx].trim_end_matches(',');
+        let src_str = tokens[dst_idx + 1];
         let dst =
             parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
         let src =
@@ -572,7 +583,12 @@ impl<'a> DtalParser<'a> {
             .map(parse_type_str)
             .transpose()?
             .unwrap_or(DtalType::Int);
-        Ok(Some(DtalInstr::AliasBorrow { dst, src, ty }))
+        Ok(Some(DtalInstr::AliasBorrow {
+            lifetime,
+            dst,
+            src,
+            ty,
+        }))
     }
 
     fn parse_borrow_mut(
@@ -583,8 +599,9 @@ impl<'a> DtalParser<'a> {
         if tokens.len() < 3 {
             return Err(self.err("borrow_mut requires 2 operands"));
         }
-        let dst_str = tokens[1].trim_end_matches(',');
-        let src_str = tokens[2];
+        let (lifetime, dst_idx) = parse_optional_lifetime_token(tokens[1]);
+        let dst_str = tokens[dst_idx].trim_end_matches(',');
+        let src_str = tokens[dst_idx + 1];
         let dst =
             parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
         let src =
@@ -593,7 +610,12 @@ impl<'a> DtalParser<'a> {
             .map(parse_type_str)
             .transpose()?
             .unwrap_or(DtalType::Int);
-        Ok(Some(DtalInstr::BorrowMut { dst, src, ty }))
+        Ok(Some(DtalInstr::BorrowMut {
+            lifetime,
+            dst,
+            src,
+            ty,
+        }))
     }
 
     fn parse_borrow_end(
@@ -601,16 +623,17 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        if tokens.len() != 2 {
+        if tokens.len() < 2 || tokens.len() > 3 {
             return Err(self.err("borrow_end requires exactly 1 operand"));
         }
-        let src = parse_reg(tokens[1].trim_end_matches(','))
+        let (lifetime, src_idx) = parse_optional_lifetime_token(tokens[1]);
+        let src = parse_reg(tokens[src_idx].trim_end_matches(','))
             .ok_or_else(|| self.err("invalid source register"))?;
         let ty = ty_comment
             .map(parse_type_str)
             .transpose()?
             .unwrap_or(DtalType::Int);
-        Ok(Some(DtalInstr::BorrowEnd { src, ty }))
+        Ok(Some(DtalInstr::BorrowEnd { lifetime, src, ty }))
     }
 
     fn parse_store(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {

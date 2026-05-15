@@ -172,6 +172,7 @@ pub fn synth_expr<'src>(
 
             let texpr = TExpr::Borrow {
                 kind: *kind,
+                lifetime: None,
                 expr: Box::new(tplace),
                 ty: borrow_ty.clone(),
             };
