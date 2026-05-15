@@ -1,8 +1,4 @@
-#include <stdio.h>
 
-#ifndef N
-#define N 90
-#endif
 
 static long long a[N][N];
 static long long b[N][N];

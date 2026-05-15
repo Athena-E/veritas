@@ -15,7 +15,6 @@
 
 pub(crate) mod generator;
 pub mod isel;
-
 #[cfg(test)]
 mod tests;
 

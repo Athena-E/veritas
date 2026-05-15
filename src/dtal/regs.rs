@@ -4,7 +4,6 @@
 
 use std::fmt;
 
-/// A virtual register (before physical allocation)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VirtualReg(pub u32);
 
@@ -14,7 +13,6 @@ impl fmt::Display for VirtualReg {
     }
 }
 
-/// Allocator for virtual registers
 #[derive(Debug, Default)]
 pub struct VirtualRegAllocator {
     next_id: u32,
@@ -25,24 +23,20 @@ impl VirtualRegAllocator {
         Self { next_id: 0 }
     }
 
-    /// Allocate a fresh virtual register
     pub fn fresh(&mut self) -> VirtualReg {
         let id = self.next_id;
         self.next_id += 1;
         VirtualReg(id)
     }
 
-    /// Get the number of registers allocated so far
     pub fn count(&self) -> u32 {
         self.next_id
     }
 }
 
-/// Physical registers (for extension phase)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 pub enum PhysicalReg {
-    // General purpose registers
     R0,
     R1,
     R2,
@@ -59,28 +53,24 @@ pub enum PhysicalReg {
     R13,
     R14,
     R15,
-    // Special registers
-    SP, // Stack pointer
-    FP, // Frame pointer
-    LR, // Link register (return address)
+    SP,
+    FP,
+    LR,
 }
 
 impl PhysicalReg {
-    /// Registers available for allocation
     #[allow(dead_code)]
     pub fn allocatable() -> &'static [PhysicalReg] {
         use PhysicalReg::*;
         &[R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11]
     }
 
-    /// Registers used for parameter passing
     #[allow(dead_code)]
     pub fn param_regs() -> &'static [PhysicalReg] {
         use PhysicalReg::*;
         &[R0, R1, R2, R3, R4, R5, R6, R7]
     }
 
-    /// Return value register
     #[allow(dead_code)]
     pub fn return_reg() -> PhysicalReg {
         PhysicalReg::R0
@@ -114,7 +104,6 @@ impl fmt::Display for PhysicalReg {
     }
 }
 
-/// A register that can be either virtual or physical
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Reg {
     Virtual(VirtualReg),

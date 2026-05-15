@@ -5,7 +5,6 @@ use crate::frontend::typechecker::substitution::substitute_var_with_literal;
 use crate::frontend::typechecker::{TypeError, TypingContext};
 use std::sync::Arc;
 
-/// Convert AST type to semantic internal type
 pub(super) fn ast_type_to_itype<'src>(
     ty: &Spanned<AstType<'src>>,
 ) -> Result<IType<'src>, TypeError<'src>> {
@@ -19,7 +18,6 @@ pub(super) fn ast_type_to_itype<'src>(
         AstType::Array { element_type, size } => {
             let elem_ty = ast_type_to_itype(element_type)?;
 
-            // Evaluate size to IValue
             let size_val = eval_array_size(size)?;
 
             Ok(IType::Array {
@@ -39,7 +37,6 @@ pub(super) fn ast_type_to_itype<'src>(
         }
 
         AstType::RefinedInt { var, predicate } => {
-            // RefinedInt has base type of Int implicitly
             let prop = crate::common::types::IProposition {
                 var: var.to_string(),
                 predicate: Arc::new(*predicate.clone()),
@@ -76,19 +73,12 @@ pub(super) fn ast_type_to_itype<'src>(
         }
 
         AstType::SingletonInt(expr) => {
-            // Evaluate the expression to get the singleton value
             let value = eval_array_size(expr)?;
             Ok(IType::SingletonInt(value))
         }
     }
 }
 
-/// Add implicit `[INT_MIN, INT_MAX]` range propositions for an i64 binding.
-///
-/// Z3's Int sort is unbounded. When the user writes `x: i64`, we axiomatise
-/// that the value is representable as a 64-bit signed integer so that
-/// arithmetic overflow obligations like `INT_MIN <= x + y <= INT_MAX` can
-/// be discharged.
 pub(super) fn add_i64_range_props<'src>(
     ctx: TypingContext<'src>,
     var_name: &'src str,
@@ -99,7 +89,6 @@ pub(super) fn add_i64_range_props<'src>(
     let dummy = SimpleSpan::new(0, 0);
     let var = Expr::Variable(var_name);
 
-    // var >= INT_MIN
     let lower = Expr::BinOp {
         op: BinOp::Gte,
         lhs: Box::new((var.clone(), dummy)),
@@ -110,7 +99,6 @@ pub(super) fn add_i64_range_props<'src>(
         predicate: Arc::new((lower, dummy)),
     };
 
-    // var <= INT_MAX
     let upper = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((var, dummy)),
@@ -125,10 +113,6 @@ pub(super) fn add_i64_range_props<'src>(
         .with_proposition(upper_prop)
 }
 
-/// Add implicit `[0, U64_MAX]` range propositions for a u64 binding.
-///
-/// Same idea as `add_i64_range_props` but for unsigned 64-bit integers:
-/// the value is in `[0, 18446744073709551615]`.
 pub(super) fn add_u64_range_props<'src>(
     ctx: TypingContext<'src>,
     var_name: &'src str,
@@ -139,7 +123,6 @@ pub(super) fn add_u64_range_props<'src>(
     let dummy = SimpleSpan::new(0, 0);
     let var = Expr::Variable(var_name);
 
-    // var >= 0
     let lower = Expr::BinOp {
         op: BinOp::Gte,
         lhs: Box::new((var.clone(), dummy)),
@@ -150,7 +133,6 @@ pub(super) fn add_u64_range_props<'src>(
         predicate: Arc::new((lower, dummy)),
     };
 
-    // var <= U64_MAX
     let upper = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((var, dummy)),
@@ -165,11 +147,6 @@ pub(super) fn add_u64_range_props<'src>(
         .with_proposition(upper_prop)
 }
 
-/// Add implicit axioms for symbolic array lengths:
-///   len >= 0       (arrays cannot have negative length)
-///   len <= INT_MAX (array length is representable as a machine integer)
-///
-/// These are load-bearing for proving loop counter arithmetic on i64 indices.
 pub(super) fn add_array_length_axioms<'src>(
     ctx: TypingContext<'src>,
     size_var: &str,
@@ -178,11 +155,9 @@ pub(super) fn add_array_length_axioms<'src>(
     use chumsky::prelude::SimpleSpan;
 
     let dummy = SimpleSpan::new(0, 0);
-    // We leak the string to get a &'src str for use in Expr::Variable.
     let var_name: &'src str = Box::leak(size_var.to_string().into_boxed_str());
     let var = Expr::Variable(var_name);
 
-    // len >= 0
     let nonneg = Expr::BinOp {
         op: BinOp::Gte,
         lhs: Box::new((var.clone(), dummy)),
@@ -193,7 +168,6 @@ pub(super) fn add_array_length_axioms<'src>(
         predicate: Arc::new((nonneg, dummy)),
     };
 
-    // len <= INT_MAX
     let bounded = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((var, dummy)),
@@ -208,7 +182,6 @@ pub(super) fn add_array_length_axioms<'src>(
         .with_proposition(bounded_prop)
 }
 
-/// Evaluate array size expression to IValue
 fn eval_array_size<'src>(
     expr: &Spanned<crate::common::ast::Expr<'src>>,
 ) -> Result<IValue, TypeError<'src>> {
@@ -221,10 +194,6 @@ fn eval_array_size<'src>(
     }
 }
 
-/// Substitute "result" in postcondition with the return value.
-/// When the return expression is a bare variable, rename "result" to that variable
-/// so existing propositions in the context (e.g. pointwise array facts) are visible.
-/// When the return type is a singleton int, substitute the literal value directly.
 pub(super) fn substitute_result_in_postcond<'src>(
     postcond: &IProposition<'src>,
     return_ty: &IType<'src>,
@@ -253,9 +222,6 @@ pub(super) fn substitute_result_in_postcond<'src>(
     }
 }
 
-/// Check whether an array type has a symbolic size in any inner (non-outermost)
-/// dimension. Symbolic sizes are only supported in the outermost dimension
-/// because the backend needs a concrete stride to flatten nested access.
 pub(super) fn has_symbolic_inner_dim<'src>(ty: &IType<'src>) -> bool {
     match ty {
         IType::Array { element_type, .. } => inner_has_symbolic(element_type),

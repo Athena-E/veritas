@@ -10,17 +10,14 @@ use std::time::Instant;
 use z3::ast::{Array as Z3Array, Bool, Int};
 use z3::{SatResult, Solver, Sort};
 
-// Global counters for SMT query instrumentation
 static FRONTEND_SMT_QUERIES: AtomicU64 = AtomicU64::new(0);
 static FRONTEND_SMT_TIME_NS: AtomicU64 = AtomicU64::new(0);
 
-/// Reset frontend SMT counters (call before compilation)
 pub fn reset_frontend_smt_stats() {
     FRONTEND_SMT_QUERIES.store(0, Ordering::Relaxed);
     FRONTEND_SMT_TIME_NS.store(0, Ordering::Relaxed);
 }
 
-/// Get (query_count, total_time_ns) for frontend SMT queries
 pub fn get_frontend_smt_stats() -> (u64, u64) {
     (
         FRONTEND_SMT_QUERIES.load(Ordering::Relaxed),
@@ -35,9 +32,6 @@ impl SmtOracle {
         Self
     }
 
-    /// Translate an integer-valued expression to Z3.
-    /// Returns None if the expression contains forms not yet supported in SMT
-    /// (function calls, if-expressions, etc.). Callers treat None as "unprovable".
     fn translate_expr(expr: &Expr) -> Option<Int> {
         match expr {
             Expr::Literal(Literal::Int(n)) => {
@@ -60,10 +54,7 @@ impl SmtOracle {
                     BinOp::Mul => Some(left * right),
                     BinOp::Div => Some(left / right),
                     BinOp::Mod => Some(left % right),
-                    // Bitwise ops: Z3 integer theory doesn't support them.
-                    // Return None (unprovable) — conservative but sound.
                     BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => None,
-                    // Comparison operators produce booleans, not integers
                     _ => None,
                 }
             }
@@ -78,10 +69,6 @@ impl SmtOracle {
             Expr::Borrow { .. } => None,
 
             Expr::Index { .. } => {
-                // Encode (possibly nested) array indexing using Z3 array theory.
-                // For a chain `m[i0][i1]...[ik]` rooted in variable `m`, encode
-                // as `select(... select(select(m, i0), i1) ..., ik)` against an
-                // array sort of matching nesting depth: `Array(int, Array(int, ... int))`.
                 let mut indices_outer_to_inner: Vec<&Spanned<Expr>> = Vec::new();
                 let mut cur = expr;
                 let name = loop {
@@ -97,14 +84,12 @@ impl SmtOracle {
                 indices_outer_to_inner.reverse();
 
                 let int_sort = Sort::int();
-                // Range sort for the array constant: nested for depth > 1.
                 let mut inner_sort = int_sort.clone();
                 for _ in 0..indices_outer_to_inner.len().saturating_sub(1) {
                     inner_sort = Sort::array(&int_sort, &inner_sort);
                 }
                 let arr = Z3Array::new_const(name.to_string(), &int_sort, &inner_sort);
 
-                // Apply selects outer-to-inner.
                 let mut current_arr = arr;
                 let last_idx = indices_outer_to_inner.len() - 1;
                 for (i, idx_expr) in indices_outer_to_inner.iter().enumerate() {
@@ -128,8 +113,6 @@ impl SmtOracle {
         }
     }
 
-    /// Translate a boolean-valued expression to Z3.
-    /// Returns None if the expression contains unsupported forms.
     fn translate_bool_expr(expr: &Expr) -> Option<Bool> {
         match expr {
             Expr::Literal(Literal::Bool(b)) => Some(Bool::from_bool(*b)),
@@ -249,7 +232,6 @@ impl SmtOracle {
         }
     }
 
-    /// Translate a proposition to Z3. Returns None if untranslatable.
     fn translate_proposition(prop: &IProposition) -> Option<Bool> {
         let predicate_expr = &prop.predicate.0;
         Self::translate_bool_expr(predicate_expr)
@@ -260,17 +242,12 @@ impl SmtOracle {
 
         let solver = Solver::new();
 
-        // Add all context propositions as assumptions.
-        // Skip any that can't be translated (conservative: less context
-        // means fewer things provable, which is sound).
         for prop in typing_ctx.get_propositions() {
             if let Some(constraint) = Self::translate_proposition(prop) {
                 solver.assert(&constraint);
             }
         }
 
-        // Add refinements from variable types
-        // For a variable `n: {v: int | v > 0}`, we add the constraint `n > 0`
         for (var_name, ty) in typing_ctx.get_all_variable_types() {
             if let Some(prop) = Self::extract_refinement_as_proposition(var_name, ty)
                 && let Some(constraint) = Self::translate_proposition(&prop)
@@ -279,8 +256,6 @@ impl SmtOracle {
             }
         }
 
-        // Negate the goal - if unsatisfiable, the goal is provable.
-        // If the goal can't be translated, conservatively return false.
         let goal_formula = match Self::translate_proposition(goal) {
             Some(f) => f,
             None => {
@@ -294,9 +269,9 @@ impl SmtOracle {
         solver.assert(&negated_goal);
 
         let result = match solver.check() {
-            SatResult::Unsat => true,    // Goal is provable
-            SatResult::Sat => false,     // Counterexample exists
-            SatResult::Unknown => false, // Solver couldn't determine
+            SatResult::Unsat => true,
+            SatResult::Sat => false,
+            SatResult::Unknown => false,
         };
 
         let elapsed = start.elapsed().as_nanos() as u64;
@@ -306,15 +281,12 @@ impl SmtOracle {
         result
     }
 
-    /// Extract a proposition from a refined type by substituting the variable name
-    /// For `n: {v: int | v > 0}`, produces the proposition `n > 0`
     pub fn extract_refinement_as_proposition<'src>(
         var_name: &str,
         ty: &IType<'src>,
     ) -> Option<IProposition<'src>> {
         match ty {
             IType::RefinedInt { prop, .. } => {
-                // Substitute the actual variable name for the bound variable
                 let renamed_predicate = rename_expr_var(&prop.predicate.0, &prop.var, var_name);
                 Some(IProposition {
                     var: var_name.to_string(),
@@ -322,7 +294,6 @@ impl SmtOracle {
                 })
             }
             IType::SingletonInt(value) => {
-                // For singleton types, add equality constraint: var_name = value
                 let dummy_span = SimpleSpan::new(0, 0);
                 let var_leaked: &'src str = Box::leak(var_name.to_string().into_boxed_str());
                 let value_expr = match value {
@@ -354,19 +325,15 @@ impl SmtOracle {
                 let var_leaked: &'src str = Box::leak(var_name.to_string().into_boxed_str());
                 let idx_var: &'src str = Box::leak("__idx".to_string().into_boxed_str());
 
-                // Build arr[__idx]
                 let arr_index = Expr::Index {
                     base: Box::new((Expr::Variable(var_leaked), dummy_span)),
                     index: Box::new((Expr::Variable(idx_var), dummy_span)),
                 };
 
-                // Build the quantifier body depending on element type
                 let body = match element_type.as_ref() {
-                    // arr: [{v:int|v >= 0}; N] => forall __idx in 0..N { arr[__idx] >= 0 }
                     IType::RefinedInt { prop, .. } => {
                         substitute_expr_for_var(&prop.predicate.0, &prop.var, &arr_index)
                     }
-                    // arr: [int(K); N] => forall __idx in 0..N { arr[__idx] == K }
                     IType::SingletonInt(IValue::Int(n)) => Expr::BinOp {
                         op: BinOp::Eq,
                         lhs: Box::new((arr_index, dummy_span)),

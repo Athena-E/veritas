@@ -29,11 +29,7 @@ use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
 use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashMap;
 
-/// Apply load-op fusion to a function
-///
-/// Returns true if any instructions were fused
 pub fn fuse_loads_function(func: &mut DtalFunction) -> bool {
-    // Count uses of each virtual register across the whole function
     let use_counts = count_uses(func);
 
     let mut changed = false;
@@ -43,7 +39,6 @@ pub fn fuse_loads_function(func: &mut DtalFunction) -> bool {
     changed
 }
 
-/// Count uses of each virtual register across the function
 fn count_uses(func: &DtalFunction) -> HashMap<VirtualReg, u32> {
     let mut counts: HashMap<VirtualReg, u32> = HashMap::new();
     for block in &func.blocks {
@@ -56,7 +51,6 @@ fn count_uses(func: &DtalFunction) -> HashMap<VirtualReg, u32> {
     counts
 }
 
-/// Apply load-op fusion within a single block
 fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>) -> bool {
     let mut changed = false;
     let mut remove = vec![false; block.instructions.len()];
@@ -69,7 +63,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
             continue;
         }
 
-        // Look for Load
         if let DtalInstr::Load {
             dst: load_dst,
             base,
@@ -82,7 +75,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
             let offset = *offset;
             let _ = ty;
 
-            // Single-use check on load_dst
             let load_dst_vreg = match load_dst {
                 Reg::Virtual(v) => v,
                 Reg::Physical(_) => {
@@ -95,7 +87,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                 continue;
             }
 
-            // Scan forward for the matching BinOp, skipping safe intervening instrs
             let mut j = i + 1;
             let mut safe_to_fuse = true;
             let fused_instr = loop {
@@ -106,7 +97,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
 
                 let next = &block.instructions[j];
 
-                // Check for the target BinOp
                 if let DtalInstr::BinOp {
                     op,
                     dst: binop_dst,
@@ -116,9 +106,7 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                 } = next
                 {
                     if *op == BinaryOp::Add && *lhs == load_dst {
-                        // Fusion conditions
                         if *rhs == load_dst {
-                            // self-use: skip
                             safe_to_fuse = false;
                             break None;
                         }
@@ -131,27 +119,20 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                             ty: binop_ty.clone(),
                         });
                     }
-                    // Otherwise not fusable, bail
                     safe_to_fuse = false;
                     break None;
                 }
 
-                // Allow pass-through for safe non-interfering instructions
                 match next {
-                    // TypeAnnotation that targets the load's dst is fine (DCE will clean up)
                     DtalInstr::TypeAnnotation { reg, .. } => {
-                        if *reg != load_dst {
-                            // Annotation for another register — still safe
-                        }
+                        if *reg != load_dst {}
                         j += 1;
                         continue;
                     }
-                    // ConstraintAssert has no register effects
                     DtalInstr::ConstraintAssert { .. } => {
                         j += 1;
                         continue;
                     }
-                    // Any memory-effect or control-flow instruction kills the fusion
                     DtalInstr::Store { .. }
                     | DtalInstr::Call { .. }
                     | DtalInstr::Load { .. }
@@ -164,7 +145,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                         safe_to_fuse = false;
                         break None;
                     }
-                    // Any instruction that redefines base/offset kills fusion
                     _ => {
                         if let Some(def) = instruction_def(next) {
                             let def_reg = Reg::Virtual(def);
@@ -180,7 +160,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
             };
 
             if safe_to_fuse && let Some(fused) = fused_instr {
-                // Also check: no intervening instruction redefines `rhs`
                 if let DtalInstr::LoadOp { other, .. } = &fused {
                     let other_reg = *other;
                     let mut other_redefined = false;
@@ -198,12 +177,8 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                     }
                 }
 
-                // Perform fusion: replace Load with LoadOp, mark BinOp and
-                // any TypeAnnotation for load_dst for removal
                 block.instructions[i] = fused;
                 remove[j] = true;
-
-                // Mark any TypeAnnotation for load_dst between i+1 and j for removal
                 #[allow(clippy::needless_range_loop)]
                 for k in (i + 1)..j {
                     if let DtalInstr::TypeAnnotation { reg, .. } = &block.instructions[k]
@@ -218,7 +193,6 @@ fn fuse_loads_block(block: &mut DtalBlock, use_counts: &HashMap<VirtualReg, u32>
                 continue;
             }
 
-            // Ignore the _ = safe_to_fuse to silence warnings
             let _ = safe_to_fuse;
         }
 
@@ -289,8 +263,8 @@ fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         })
         .collect()
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{DtalBlock, DtalFunction, TypeState};
@@ -316,18 +290,9 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_basic_load_add_fusion() {
-        // v3 = *[v1 + v2*8]
-        // v4 = v3 + v5
-        // push v4
-        // ret
-        //
-        // Should become:
-        // v4 = LoadOp(Add, v1, v2, v5)
-        // push v4
-        // ret
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -352,7 +317,6 @@ mod tests {
         let changed = fuse_loads_function(&mut func);
         assert!(changed);
 
-        // Should be: LoadOp, Push, Ret
         assert_eq!(func.blocks[0].instructions.len(), 3);
         if let DtalInstr::LoadOp {
             op,
@@ -372,8 +336,8 @@ mod tests {
             panic!("Expected LoadOp, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
-
     #[test]
+
     fn test_no_fusion_when_sub_load_is_lhs() {
         let mut func = make_func(vec![
             DtalInstr::Load {
@@ -404,10 +368,9 @@ mod tests {
             DtalInstr::Load { .. }
         ));
     }
-
     #[test]
+
     fn test_no_fusion_when_mul() {
-        // Mul doesn't have a memory operand variant — no fusion
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -432,14 +395,9 @@ mod tests {
         let changed = fuse_loads_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_no_fusion_when_load_dst_used_twice() {
-        // v3 = arr[v2]
-        // v4 = v3 + v5        ← fusable IF single-use
-        // push v3              ← another use of v3
-        // push v4
-        // ret
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -468,13 +426,9 @@ mod tests {
         let changed = fuse_loads_function(&mut func);
         assert!(!changed, "Should not fuse when load dst has multiple uses");
     }
-
     #[test]
+
     fn test_no_fusion_when_self_use() {
-        // v3 = arr[v2]
-        // v4 = v3 + v3         ← rhs == load_dst, skip
-        // push v4
-        // ret
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -499,14 +453,9 @@ mod tests {
         let changed = fuse_loads_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_no_fusion_store_between() {
-        // v3 = arr[v2]
-        // store [v10 + v11], v12    ← aliasing possible
-        // v4 = v3 + v5
-        // push v4
-        // ret
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -536,14 +485,9 @@ mod tests {
         let changed = fuse_loads_function(&mut func);
         assert!(!changed, "Should not fuse across a Store");
     }
-
     #[test]
+
     fn test_fusion_skips_type_annotation() {
-        // v3 = arr[v2]
-        // TypeAnnotation v3, Int      ← safe to skip
-        // v4 = v3 + v5
-        // push v4
-        // ret
         let mut func = make_func(vec![
             DtalInstr::Load {
                 dst: vreg(3),
@@ -572,7 +516,6 @@ mod tests {
         let changed = fuse_loads_function(&mut func);
         assert!(changed);
 
-        // TypeAnnotation for v3 should be removed too
         let has_type_anno = func.blocks[0]
             .instructions
             .iter()

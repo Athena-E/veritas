@@ -1,5 +1,3 @@
-// Error: Indexing non-array type
-// Expected error: E007 - Type cannot be indexed
 
 fn main() {
     let x: int = 5;

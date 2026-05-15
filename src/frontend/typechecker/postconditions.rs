@@ -3,9 +3,6 @@ use crate::common::types::{IProposition, IType};
 use crate::frontend::typechecker::{TypingContext, is_subtype, synth_expr};
 use std::sync::Arc;
 
-/// Check if an expression of type `expr_ty` can satisfy a refined target type
-/// by substituting the expression into the refinement predicate and checking provability.
-/// Falls back when `is_subtype` alone cannot prove `int <: {v: int | P}`.
 pub(super) fn check_expr_satisfies_refined<'src>(
     ctx: &TypingContext<'src>,
     expr: &crate::common::ast::Expr<'src>,
@@ -30,9 +27,6 @@ pub(super) fn check_expr_satisfies_refined<'src>(
     false
 }
 
-/// If the value expression is a function call with a postcondition,
-/// produce a proposition with `result` renamed to the binding variable
-/// and parameter names substituted with the actual argument values.
 pub(super) fn postcondition_for_call<'src>(
     ctx: &TypingContext<'src>,
     binding_name: &str,
@@ -45,7 +39,6 @@ pub(super) fn postcondition_for_call<'src>(
         && let Some(sig) = ctx.lookup_function(func_name)
         && let Some(ref postcond) = sig.postcondition
     {
-        // Rename `result` → binding name
         let binding_leaked: &'src str = Box::leak(binding_name.to_string().into_boxed_str());
         let renamed = rename_expr_var(&postcond.predicate.0, "result", binding_leaked);
         let renamed_prop = IProposition {
@@ -53,7 +46,6 @@ pub(super) fn postcondition_for_call<'src>(
             predicate: Arc::new((renamed, postcond.predicate.1)),
         };
 
-        // Substitute parameter names with actual argument values/variables
         let arg_exprs: Vec<&Expr> = args.0.iter().map(|a| &a.0).collect();
         let arg_types: Vec<IType> = args
             .0
@@ -75,9 +67,6 @@ pub(super) fn postcondition_for_call<'src>(
     None
 }
 
-/// Find the first free variable in an expression that is not in the allowed set.
-/// Returns None if all free variables are allowed.
-/// Respects quantifier-bound variables (forall/exists introduce scoped bindings).
 pub(super) fn find_invalid_free_var<'src>(
     expr: &crate::common::ast::Expr<'src>,
     allowed: &std::collections::HashSet<&str>,
@@ -204,11 +193,9 @@ fn find_invalid_free_var_in_stmt<'src>(
     }
 }
 
-/// Check if a postcondition can be proven given the current context
 pub(super) fn check_postcondition_provable<'src>(
     ctx: &TypingContext<'src>,
     postcond: &IProposition<'src>,
 ) -> bool {
-    // Use the existing SMT oracle to check if the postcondition is provable
     crate::frontend::typechecker::smt::check_provable(ctx, postcond)
 }

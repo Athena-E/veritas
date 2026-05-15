@@ -52,25 +52,14 @@ use crate::verifier::ownership::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Entry, exit, edge, and predecessor state computed for a function.
 #[allow(dead_code)]
 pub struct DataflowResult {
-    /// Type state at entry of each block.
     pub entry_states: HashMap<String, TypeState>,
-    /// Type state at exit of each block.
     pub exit_states: HashMap<String, TypeState>,
-    /// Per-edge exit states keyed by `(source_label, target_label)`.
     pub edge_states: HashMap<(String, String), TypeState>,
-    /// Predecessor blocks for each block.
     pub predecessors: HashMap<String, Vec<String>>,
 }
 
-/// Compute block entry and exit states for a function.
-///
-/// # Errors
-///
-/// Returns [`VerifyError`] if transfer or join logic discovers an invalid DTAL
-/// state while computing the fixed point.
 pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyError> {
     let predecessors = compute_predecessors(func);
 
@@ -167,7 +156,6 @@ pub fn analyze_function(func: &DtalFunction) -> Result<DataflowResult, VerifyErr
     })
 }
 
-/// Compute predecessor labels for each block.
 fn compute_predecessors(func: &DtalFunction) -> HashMap<String, Vec<String>> {
     let mut predecessors: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -187,9 +175,6 @@ fn compute_predecessors(func: &DtalFunction) -> HashMap<String, Vec<String>> {
     predecessors
 }
 
-/// Get successor labels for a block.
-///
-/// A conditional branch without `Jmp` or `Ret` falls through to the next block.
 fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> {
     let block = &func.blocks[block_index];
     let mut successors = Vec::new();
@@ -225,7 +210,6 @@ fn get_block_successors(func: &DtalFunction, block_index: usize) -> Vec<String> 
     successors
 }
 
-/// Compute branch-refined exit states for CFG edges.
 fn compute_edge_states(
     func: &DtalFunction,
     block_index: usize,
@@ -245,7 +229,6 @@ fn compute_edge_states(
                     edge_states.insert((block.label.clone(), target.clone()), taken_state);
                 }
 
-                // Avoid overwriting the taken edge when it targets the layout successor.
                 if !has_jmp
                     && !has_ret
                     && let Some(next_block) = func.blocks.get(block_index + 1)
@@ -265,7 +248,6 @@ fn compute_edge_states(
                 }
             }
             DtalInstr::Jmp { target } => {
-                // A `jmp` after a branch is the generated false edge.
                 if !has_jmp && !has_ret {
                     let had_branch = block
                         .instructions
@@ -298,7 +280,6 @@ fn compute_edge_states(
     }
 }
 
-/// Join predecessor states, preferring branch-refined edge states.
 fn join_states(
     pred_labels: &[String],
     target_label: &str,
@@ -342,7 +323,6 @@ fn join_states(
         }
     }
 
-    // Keep only constraints entailed by every predecessor.
     let mut kept: HashSet<usize> = HashSet::new();
 
     let mut all_constraints: Vec<crate::dtal::constraints::Constraint> = Vec::new();
@@ -372,7 +352,6 @@ fn join_states(
         }
     }
 
-    // Keep array names fresh after joins.
     for state in &pred_states {
         for (reg, version) in &state.array_versions {
             let current = result.array_versions.get(reg).copied().unwrap_or(0);
@@ -382,7 +361,6 @@ fn join_states(
         }
     }
 
-    // Frontend-verified assertions can be unioned across predecessors.
     let mut seen_assertions: std::collections::HashSet<String> = std::collections::HashSet::new();
     for state in &pred_states {
         for assertion in &state.proven_assertions {
@@ -646,8 +624,8 @@ fn verify_borrow_join_compatibility(
 
     Ok(())
 }
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+
 enum BorrowLocation {
     Reg(Reg),
     Stack(usize),
@@ -760,7 +738,6 @@ fn borrow_locations<'a>(
     locations
 }
 
-/// Join multiple types into their least upper bound.
 fn join_types(types: &[DtalType]) -> DtalType {
     if types.is_empty() {
         return DtalType::Int;
@@ -775,7 +752,6 @@ fn join_types(types: &[DtalType]) -> DtalType {
         return first.clone();
     }
 
-    // Preserve existentials when every incoming type can inhabit them.
     if let Some(existential) = types
         .iter()
         .find(|t| matches!(t, DtalType::ExistentialInt { .. }))
@@ -834,12 +810,10 @@ fn join_types(types: &[DtalType]) -> DtalType {
     first.clone()
 }
 
-/// Check structural equality of types.
 fn types_structurally_equal(a: &DtalType, b: &DtalType) -> bool {
     a == b
 }
 
-/// Compute a non-verifying exit state from instruction definitions.
 fn compute_exit_state(
     block: &DtalBlock,
     entry_state: &TypeState,
@@ -853,7 +827,6 @@ fn compute_exit_state(
     Ok(state)
 }
 
-/// Apply verifier-like type derivation without operand validation.
 fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
     use crate::dtal::instr::BinaryOp;
 
@@ -1052,7 +1025,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Load { dst, base, ty, .. } => {
-            // Prefer element types derived from typed array bases.
             let derived_ty = if let Some(base_ty) = state.register_types.get(base) {
                 match base_ty {
                     DtalType::Array { element_type, .. } => element_type.as_ref().clone(),
@@ -1291,7 +1263,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
         }
         DtalInstr::Store { .. } => {}
         DtalInstr::ConstraintAssert { constraint, .. } => {
-            // Proven assertions participate in downstream joins.
             state.constraints.push(constraint.clone());
             state.proven_assertions.push(constraint.clone());
         }
@@ -1446,7 +1417,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
             state.consumed_registers.remove(dst);
         }
         DtalInstr::Prologue { .. } => {
-            // Match verifier prologue handling for successor blocks.
             use crate::dtal::regs::PhysicalReg;
             for preg in &[
                 PhysicalReg::LR,
@@ -1483,7 +1453,6 @@ fn update_state_for_instruction(instr: &DtalInstr, state: &mut TypeState) {
     }
 }
 
-/// Check whether two type states are equivalent for dataflow convergence.
 fn states_equal(a: &TypeState, b: &TypeState) -> bool {
     if a.register_types.len() != b.register_types.len() {
         return false;

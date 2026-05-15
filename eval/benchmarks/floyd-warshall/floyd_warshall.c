@@ -1,9 +1,4 @@
-#include <stdio.h>
-#include <time.h>
 
-#ifndef N
-#define N 180
-#endif
 
 static long long path[N][N];
 

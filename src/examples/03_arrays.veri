@@ -1,4 +1,3 @@
-// Function with array types
 fn array_example() {
     let size: int = 10;
     let arr: [int; 10] = [0; 10];

@@ -1,12 +1,3 @@
-// Safe midpoint computation using i64 overflow verification.
-//
-// The classic (lo + hi) / 2 overflows when lo + hi > INT_MAX.
-// The safe alternative lo + (hi - lo) / 2 avoids overflow because:
-//   - hi - lo >= 0 (from lo <= hi)                    : no underflow
-//   - (hi - lo) / 2 <= hi - lo                        : shrinks
-//   - lo + (hi - lo) / 2 <= lo + (hi - lo) = hi       : bounded by hi <= INT_MAX
-//
-// Veritas proves all of this automatically from the precondition.
 
 fn safe_midpoint(lo: {v: i64 | v >= 0}, hi: {v: i64 | v >= 0}) -> i64
     requires lo <= hi

@@ -35,15 +35,10 @@ use crate::middle::tir::program::{BasicBlock, TirFunction};
 use crate::middle::tir::types::{BinaryOp, BlockId, BlockIdAllocator, RegisterState};
 use std::collections::HashMap;
 
-/// Stateful builder for TIR functions.
 pub struct TirBuilder<'src> {
-    /// Virtual register allocator.
     pub reg_alloc: VirtualRegAllocator,
-    /// Block ID allocator.
     pub block_alloc: BlockIdAllocator,
-    /// Completed blocks.
     pub blocks: HashMap<BlockId, BasicBlock<'src>>,
-    /// Current block being built.
     current_block: Option<BlockId>,
     current_instructions: Vec<TirInstr<'src>>,
     current_phi_nodes: Vec<PhiNode<'src>>,
@@ -61,17 +56,14 @@ impl<'src> TirBuilder<'src> {
         }
     }
 
-    /// Allocate a fresh virtual register.
     pub fn fresh_reg(&mut self) -> VirtualReg {
         self.reg_alloc.fresh()
     }
 
-    /// Create a new block ID.
     pub fn new_block(&mut self) -> BlockId {
         self.block_alloc.fresh()
     }
 
-    /// Start building a block.
     pub fn start_block(&mut self, id: BlockId) {
         assert!(
             self.current_block.is_none(),
@@ -82,17 +74,14 @@ impl<'src> TirBuilder<'src> {
         self.current_phi_nodes.clear();
     }
 
-    /// Add a phi node to the current block.
     pub fn add_phi(&mut self, phi: PhiNode<'src>) {
         self.current_phi_nodes.push(phi);
     }
 
-    /// Add an instruction to the current block.
     pub fn add_instr(&mut self, instr: TirInstr<'src>) {
         self.current_instructions.push(instr);
     }
 
-    /// Finish the current block with a terminator.
     pub fn finish_block(&mut self, terminator: Terminator, predecessors: Vec<BlockId>) {
         let id = self.current_block.take().expect("No block to finish");
 
@@ -108,17 +97,14 @@ impl<'src> TirBuilder<'src> {
         self.blocks.insert(id, block);
     }
 
-    /// Return whether a block is currently being built.
     pub fn is_building(&self) -> bool {
         self.current_block.is_some()
     }
 
-    /// Return the current block ID, if any.
     pub fn current_block_id(&self) -> Option<BlockId> {
         self.current_block
     }
 
-    /// Build the function.
     #[allow(clippy::too_many_arguments)]
     pub fn build(
         self,
@@ -153,7 +139,6 @@ impl<'src> Default for TirBuilder<'src> {
     }
 }
 
-/// Create a constraint from a comparison binary operation.
 pub fn constraint_from_binop(op: BinaryOp, lhs: &str, rhs: &str) -> Constraint {
     let lhs_expr = IndexExpr::Var(lhs.to_string());
     let rhs_expr = IndexExpr::Var(rhs.to_string());
@@ -168,7 +153,6 @@ pub fn constraint_from_binop(op: BinaryOp, lhs: &str, rhs: &str) -> Constraint {
     }
 }
 
-/// Negate a constraint, preserving quantifier structure where possible.
 pub fn negate_constraint(c: Constraint) -> Constraint {
     match c {
         Constraint::True => Constraint::False,
@@ -214,7 +198,6 @@ pub fn negate_constraint(c: Constraint) -> Constraint {
     }
 }
 
-/// Combine two constraints with `AND`.
 pub fn and_constraints(c1: Constraint, c2: Constraint) -> Constraint {
     match (&c1, &c2) {
         (Constraint::True, _) => c2,
@@ -224,7 +207,6 @@ pub fn and_constraints(c1: Constraint, c2: Constraint) -> Constraint {
     }
 }
 
-/// Combine two constraints with `OR`.
 pub fn or_constraints(c1: Constraint, c2: Constraint) -> Constraint {
     match (&c1, &c2) {
         (Constraint::False, _) => c2,

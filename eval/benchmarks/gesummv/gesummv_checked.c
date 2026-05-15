@@ -1,10 +1,5 @@
-#include <stdio.h>
 
-#include "../checked_bounds.h"
 
-#ifndef N
-#define N 90
-#endif
 
 static long long a[N][N];
 static long long b[N][N];
@@ -13,10 +8,6 @@ static long long y[N];
 static const long long alpha = 3;
 static const long long beta = 2;
 
-#define A(i, j) a[CHECKED_IDX1("a", (i), N)][CHECKED_IDX1("a", (j), N)]
-#define B(i, j) b[CHECKED_IDX1("b", (i), N)][CHECKED_IDX1("b", (j), N)]
-#define X(i) x[CHECKED_IDX1("x", (i), N)]
-#define Y(i) y[CHECKED_IDX1("y", (i), N)]
 
 static void init_array(void) {
     for (int i = 0; i < N; i++) {

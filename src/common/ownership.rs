@@ -4,22 +4,22 @@ pub enum OwnershipMode {
     Consume,
     FreshOwned,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+
 pub enum ParameterKind {
     PlainValue,
     OwnedValue,
     SharedBorrow,
     MutableBorrow,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+
 pub enum BorrowKind {
     Shared,
     Mutable,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+
 pub struct LifetimeId(pub u32);
 
 impl OwnershipMode {

@@ -1,8 +1,8 @@
 use super::common::parse_tokens;
 use crate::frontend::parser::program_parser;
 use chumsky::prelude::*;
-
 #[test]
+
 fn test_complete_program() {
     let src = r#"
         fn is_positive(n: int) {
@@ -25,8 +25,8 @@ fn test_complete_program() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_array_operations() {
     let src = r#"
         fn array_test() {
@@ -46,8 +46,8 @@ fn test_array_operations() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_refinement_types() {
     let src = r#"
         fn bounded(n: {x: int | x >= 0 && x <= 100}) {
@@ -64,8 +64,8 @@ fn test_refinement_types() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_complex_expressions_in_statements() {
     let src = r#"
         fn complex() {

@@ -27,55 +27,51 @@
 use super::regs::X86Reg;
 use std::fmt;
 
-/// Condition codes for conditional jumps and `setcc`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Condition {
-    E,  // Equal (ZF=1)
-    Ne, // Not Equal (ZF=0)
-    L,  // Less Than (SF!=OF)
-    Le, // Less or Equal (ZF=1 or SF!=OF)
-    G,  // Greater Than (ZF=0 and SF=OF)
-    Ge, // Greater or Equal (SF=OF)
-    B,  // Below (unsigned less than, CF=1)
-    Be, // Below or Equal (unsigned, CF=1 or ZF=1)
-    A,  // Above (unsigned greater than, CF=0 and ZF=0)
-    Ae, // Above or Equal (unsigned, CF=0)
+    E,
+    Ne,
+    L,
+    Le,
+    G,
+    Ge,
+    B,
+    Be,
+    A,
+    Ae,
 }
 
 impl Condition {
-    /// Return the opcode extension byte for a near `Jcc`.
     pub fn cc_byte(self) -> u8 {
         match self {
-            Condition::E => 0x84,  // JE/JZ
-            Condition::Ne => 0x85, // JNE/JNZ
-            Condition::L => 0x8C,  // JL/JNGE
-            Condition::Le => 0x8E, // JLE/JNG
-            Condition::G => 0x8F,  // JG/JNLE
-            Condition::Ge => 0x8D, // JGE/JNL
-            Condition::B => 0x82,  // JB/JNAE/JC
-            Condition::Be => 0x86, // JBE/JNA
-            Condition::A => 0x87,  // JA/JNBE
-            Condition::Ae => 0x83, // JAE/JNB/JNC
+            Condition::E => 0x84,
+            Condition::Ne => 0x85,
+            Condition::L => 0x8C,
+            Condition::Le => 0x8E,
+            Condition::G => 0x8F,
+            Condition::Ge => 0x8D,
+            Condition::B => 0x82,
+            Condition::Be => 0x86,
+            Condition::A => 0x87,
+            Condition::Ae => 0x83,
         }
     }
 
-    /// Return the opcode extension byte for `SETcc`.
     pub fn setcc_byte(self) -> u8 {
         match self {
-            Condition::E => 0x94,  // sete
-            Condition::Ne => 0x95, // setne
-            Condition::L => 0x9C,  // setl
-            Condition::Le => 0x9E, // setle
-            Condition::G => 0x9F,  // setg
-            Condition::Ge => 0x9D, // setge
-            Condition::B => 0x92,  // setb
-            Condition::Be => 0x96, // setbe
-            Condition::A => 0x97,  // seta
-            Condition::Ae => 0x93, // setae
+            Condition::E => 0x94,
+            Condition::Ne => 0x95,
+            Condition::L => 0x9C,
+            Condition::Le => 0x9E,
+            Condition::G => 0x9F,
+            Condition::Ge => 0x9D,
+            Condition::B => 0x92,
+            Condition::Be => 0x96,
+            Condition::A => 0x97,
+            Condition::Ae => 0x93,
         }
     }
 
-    /// Return the logical negation of this condition.
     pub fn negate(self) -> Condition {
         match self {
             Condition::E => Condition::Ne,
@@ -110,17 +106,14 @@ impl fmt::Display for Condition {
     }
 }
 
-/// x86-64 base/index/displacement memory operand.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemOperand {
     pub base: X86Reg,
-    /// Optional `(index register, scale)` pair.
     pub index: Option<(X86Reg, u8)>,
     pub disp: i32,
 }
 
 impl MemOperand {
-    /// Create a `base + displacement` memory operand.
     pub fn base_disp(base: X86Reg, disp: i32) -> Self {
         Self {
             base,
@@ -129,7 +122,6 @@ impl MemOperand {
         }
     }
 
-    /// Create a `base + index * scale + displacement` memory operand.
     pub fn base_index_disp(base: X86Reg, index: X86Reg, scale: u8, disp: i32) -> Self {
         Self {
             base,
@@ -162,221 +154,82 @@ impl fmt::Display for MemOperand {
     }
 }
 
-/// x86-64 instruction subset used by the backend.
 #[derive(Clone, Debug)]
 pub enum X86Instr {
-    // Data Movement
-    MovRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    MovRI {
-        dst: X86Reg,
-        imm: i64,
-    },
-    MovRM {
-        dst: X86Reg,
-        src: MemOperand,
-    },
-    MovMR {
-        dst: MemOperand,
-        src: X86Reg,
-    },
-    MovMI {
-        dst: MemOperand,
-        imm: i32,
-    },
+    MovRR { dst: X86Reg, src: X86Reg },
+    MovRI { dst: X86Reg, imm: i64 },
+    MovRM { dst: X86Reg, src: MemOperand },
+    MovMR { dst: MemOperand, src: X86Reg },
+    MovMI { dst: MemOperand, imm: i32 },
 
-    Lea {
-        dst: X86Reg,
-        src: MemOperand,
-    },
+    Lea { dst: X86Reg, src: MemOperand },
 
-    // Arithmetic
-    AddRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    AddRI {
-        dst: X86Reg,
-        imm: i32,
-    },
-    AddRM {
-        dst: X86Reg,
-        src: MemOperand,
-    },
+    AddRR { dst: X86Reg, src: X86Reg },
+    AddRI { dst: X86Reg, imm: i32 },
+    AddRM { dst: X86Reg, src: MemOperand },
 
-    SubRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    SubRI {
-        dst: X86Reg,
-        imm: i32,
-    },
-    SubRM {
-        dst: X86Reg,
-        src: MemOperand,
-    },
+    SubRR { dst: X86Reg, src: X86Reg },
+    SubRI { dst: X86Reg, imm: i32 },
+    SubRM { dst: X86Reg, src: MemOperand },
 
-    /// Signed multiply.
-    ImulRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    ImulRRI {
-        dst: X86Reg,
-        src: X86Reg,
-        imm: i32,
-    },
+    ImulRR { dst: X86Reg, src: X86Reg },
+    ImulRRI { dst: X86Reg, src: X86Reg, imm: i32 },
 
-    /// Sign-extend RAX into RDX:RAX for `idiv`.
     Cqo,
 
-    /// Signed divide RDX:RAX by `src`; quotient is written to RAX.
-    IdivR {
-        src: X86Reg,
-    },
+    IdivR { src: X86Reg },
 
-    /// Two's-complement negation.
-    Neg {
-        dst: X86Reg,
-    },
+    Neg { dst: X86Reg },
 
-    // Comparison
-    CmpRR {
-        lhs: X86Reg,
-        rhs: X86Reg,
-    },
-    CmpRI {
-        lhs: X86Reg,
-        imm: i32,
-    },
-    CmpRM {
-        lhs: X86Reg,
-        rhs: MemOperand,
-    },
+    CmpRR { lhs: X86Reg, rhs: X86Reg },
+    CmpRI { lhs: X86Reg, imm: i32 },
+    CmpRM { lhs: X86Reg, rhs: MemOperand },
 
-    TestRR {
-        lhs: X86Reg,
-        rhs: X86Reg,
-    },
-    TestRI {
-        lhs: X86Reg,
-        imm: i32,
-    },
+    TestRR { lhs: X86Reg, rhs: X86Reg },
+    TestRI { lhs: X86Reg, imm: i32 },
 
-    /// Set a byte from a condition and zero-extend to 64 bits.
-    SetCC {
-        dst: X86Reg,
-        cond: Condition,
-    },
+    SetCC { dst: X86Reg, cond: Condition },
 
-    // Logical
-    AndRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    AndRI {
-        dst: X86Reg,
-        imm: i32,
-    },
+    AndRR { dst: X86Reg, src: X86Reg },
+    AndRI { dst: X86Reg, imm: i32 },
 
-    OrRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    OrRI {
-        dst: X86Reg,
-        imm: i32,
-    },
+    OrRR { dst: X86Reg, src: X86Reg },
+    OrRI { dst: X86Reg, imm: i32 },
 
-    XorRR {
-        dst: X86Reg,
-        src: X86Reg,
-    },
-    XorRI {
-        dst: X86Reg,
-        imm: i32,
-    },
+    XorRR { dst: X86Reg, src: X86Reg },
+    XorRI { dst: X86Reg, imm: i32 },
 
-    /// Bitwise not.
-    Not {
-        dst: X86Reg,
-    },
+    Not { dst: X86Reg },
 
-    /// Shift left by the count in CL.
-    ShlCl {
-        dst: X86Reg,
-    },
-    /// Shift right by the count in CL.
-    ShrCl {
-        dst: X86Reg,
-    },
-    ShlRI {
-        dst: X86Reg,
-        imm: u8,
-    },
-    ShrRI {
-        dst: X86Reg,
-        imm: u8,
-    },
+    ShlCl { dst: X86Reg },
+    ShrCl { dst: X86Reg },
+    ShlRI { dst: X86Reg, imm: u8 },
+    ShrRI { dst: X86Reg, imm: u8 },
 
-    // Control Flow
-    Jmp {
-        target: String,
-    },
-    JmpRel {
-        offset: i32,
-    },
+    Jmp { target: String },
+    JmpRel { offset: i32 },
 
-    Jcc {
-        cond: Condition,
-        target: String,
-    },
-    JccRel {
-        cond: Condition,
-        offset: i32,
-    },
+    Jcc { cond: Condition, target: String },
+    JccRel { cond: Condition, offset: i32 },
 
-    Call {
-        target: String,
-    },
-    CallRel {
-        offset: i32,
-    },
+    Call { target: String },
+    CallRel { offset: i32 },
 
     Ret,
 
-    // Stack
-    Push {
-        src: X86Reg,
-    },
-    PushI {
-        imm: i32,
-    },
+    Push { src: X86Reg },
+    PushI { imm: i32 },
 
-    Pop {
-        dst: X86Reg,
-    },
+    Pop { dst: X86Reg },
 
-    // System
     Syscall,
 
-    // Port I/O
-    // Read a byte from the port in DX into AL.
     InAlDx,
-    // Write the byte in AL to the port in DX.
     OutDxAl,
 
-    // Pseudo-instructions (resolved before encoding)
-    Label {
-        name: String,
-    },
+    Label { name: String },
 
-    Comment {
-        text: String,
-    },
+    Comment { text: String },
 }
 
 impl fmt::Display for X86Instr {
@@ -455,24 +308,22 @@ impl fmt::Display for X86Instr {
     }
 }
 
-/// Sequence of x86-64 instructions forming one function.
 #[derive(Clone, Debug)]
 pub struct X86Function {
     pub name: String,
     pub instructions: Vec<X86Instr>,
 }
 
-/// Complete x86-64 program.
 #[derive(Clone, Debug)]
 pub struct X86Program {
     pub functions: Vec<X86Function>,
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
-
     #[test]
+
     fn test_instruction_display() {
         let instr = X86Instr::MovRR {
             dst: X86Reg::Rax,
@@ -486,8 +337,8 @@ mod tests {
         };
         assert_eq!(format!("{}", instr), "add rsp, -8");
     }
-
     #[test]
+
     fn test_mem_operand_display() {
         let mem = MemOperand::base_disp(X86Reg::Rbp, -8);
         assert_eq!(format!("{}", mem), "[rbp-8]");
@@ -495,8 +346,8 @@ mod tests {
         let mem = MemOperand::base_index_disp(X86Reg::Rax, X86Reg::Rcx, 4, 0);
         assert_eq!(format!("{}", mem), "[rax+rcx*4]");
     }
-
     #[test]
+
     fn test_condition_negate() {
         assert_eq!(Condition::E.negate(), Condition::Ne);
         assert_eq!(Condition::L.negate(), Condition::Ge);

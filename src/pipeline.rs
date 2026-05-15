@@ -48,9 +48,8 @@ use std::fmt;
 fn reset_pipeline_state() {
     reset_fresh_var_counter();
 }
-
-/// Error from one stage of compilation.
 #[derive(Debug)]
+
 pub enum CompileError<'src> {
     LexError(String),
     ParseError(String),
@@ -66,14 +65,12 @@ impl<'src> fmt::Display for CompileError<'src> {
         }
     }
 }
-
-/// DTAL text produced by a successful compilation.
 #[derive(Debug, Clone)]
+
 pub struct CompileOutput {
     pub dtal: String,
 }
 
-/// Compilation output that retains intermediate representations.
 pub struct VerboseOutput<'src> {
     pub tokens: Vec<(String, String)>,
     pub tast: crate::common::tast::TProgram<'src>,
@@ -82,26 +79,9 @@ pub struct VerboseOutput<'src> {
     pub dtal: String,
 }
 
-/// Compile source code to emitted DTAL text.
-///
-/// # Errors
-///
-/// Returns [`CompileError::LexError`], [`CompileError::ParseError`], or
-/// [`CompileError::TypeError`] depending on the first failed stage.
-///
-/// # Example
-///
-/// ```
-/// use veritas::pipeline::compile;
-///
-/// let source = "fn add(x: int, y: int) -> int { x + y }";
-/// let output = compile(source).unwrap();
-/// assert!(output.dtal.contains(".function add"));
-/// ```
 pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
     reset_pipeline_state();
 
-    // Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -112,7 +92,6 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
         )
     })?;
 
-    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -128,33 +107,23 @@ pub fn compile(source: &str) -> Result<CompileOutput, CompileError<'_>> {
             )
         })?;
 
-    // Type checking
     let tast = check_program(&ast).map_err(CompileError::TypeError)?;
 
-    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Generate DTAL
     let dtal_program = codegen_program(&tir);
 
-    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(CompileOutput { dtal })
 }
 
-/// Compile source code to emitted DTAL text with optimisation options.
-///
-/// # Errors
-///
-/// Returns [`CompileError`] when lexing, parsing, or type checking fails.
 pub fn compile_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
 ) -> Result<CompileOutput, CompileError<'src>> {
     reset_pipeline_state();
 
-    // Lexical analysis
     let tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -165,7 +134,6 @@ pub fn compile_optimized<'src>(
         )
     })?;
 
-    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -181,36 +149,24 @@ pub fn compile_optimized<'src>(
             )
         })?;
 
-    // Type checking
     let tast = check_program(&ast).map_err(CompileError::TypeError)?;
 
-    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Generate DTAL
     let mut dtal_program = codegen_program(&tir);
 
-    // Optimise (if enabled)
     if opt_config.any_enabled() {
         optimize_program(&mut dtal_program, opt_config);
     }
 
-    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(CompileOutput { dtal })
 }
 
-/// Compile source code and return all intermediate stages.
-///
-/// # Errors
-///
-/// Returns [`CompileError`] when lexing, parsing, or type checking fails before
-/// all intermediate representations can be produced.
 pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     reset_pipeline_state();
 
-    // Lexical analysis
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -221,13 +177,11 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
         )
     })?;
 
-    // Capture tokens as strings for display
     let token_strings: Vec<(String, String)> = raw_tokens
         .iter()
         .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
         .collect();
 
-    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -243,16 +197,12 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
             )
         })?;
 
-    // Type checking
     let tast = check_program(&ast).map_err(CompileError::TypeError)?;
 
-    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Generate DTAL
     let dtal_program = codegen_program(&tir);
 
-    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(VerboseOutput {
@@ -264,12 +214,6 @@ pub fn compile_verbose(source: &str) -> Result<VerboseOutput<'_>, CompileError<'
     })
 }
 
-/// Compile source code for the bare-metal target without Linux intrinsics.
-///
-/// # Errors
-///
-/// Returns [`CompileError`] when lexing, parsing, or bare-metal type checking
-/// fails.
 pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, CompileError<'_>> {
     use crate::frontend::typechecker::check_program_bare_metal;
 
@@ -315,11 +259,6 @@ pub fn compile_verbose_bare_metal(source: &str) -> Result<VerboseOutput<'_>, Com
     })
 }
 
-/// Compile source code with verbose output and optimisation.
-///
-/// # Errors
-///
-/// Returns [`CompileError`] when lexing, parsing, or type checking fails.
 pub fn compile_verbose_optimized<'src>(
     source: &'src str,
     opt_config: &OptConfig,
@@ -327,12 +266,6 @@ pub fn compile_verbose_optimized<'src>(
     compile_verbose_configured(source, Some(opt_config), false)
 }
 
-/// Compile source code with explicit target and optimisation options.
-///
-/// # Errors
-///
-/// Returns [`CompileError`] when lexing, parsing, or the selected type-checking
-/// mode fails.
 pub fn compile_verbose_configured<'src>(
     source: &'src str,
     opt_config: Option<&OptConfig>,
@@ -340,7 +273,6 @@ pub fn compile_verbose_configured<'src>(
 ) -> Result<VerboseOutput<'src>, CompileError<'src>> {
     reset_pipeline_state();
 
-    // Lexical analysis
     let raw_tokens = lexer().parse(source).into_result().map_err(|errors| {
         CompileError::LexError(
             errors
@@ -351,13 +283,11 @@ pub fn compile_verbose_configured<'src>(
         )
     })?;
 
-    // Capture tokens as strings for display
     let token_strings: Vec<(String, String)> = raw_tokens
         .iter()
         .map(|(tok, span)| (format!("{:?}", tok), format!("{:?}", span)))
         .collect();
 
-    // Parsing
     let eoi = (source.len()..source.len()).into();
     let token_stream = raw_tokens.as_slice().map(eoi, |(t, s)| (t, s));
     let ast = program_parser()
@@ -373,7 +303,6 @@ pub fn compile_verbose_configured<'src>(
             )
         })?;
 
-    // Type checking
     let tast = if bare_metal {
         crate::frontend::typechecker::check_program_bare_metal(&ast)
     } else {
@@ -381,24 +310,20 @@ pub fn compile_verbose_configured<'src>(
     }
     .map_err(CompileError::TypeError)?;
 
-    // Lower to TIR (SSA form)
     let tir = lower_program(&tast);
 
-    // Generate DTAL
     let mut dtal_program = if bare_metal {
         crate::backend::codegen::codegen_program_with_target(&tir, true)
     } else {
         codegen_program(&tir)
     };
 
-    // Optimise (if enabled)
     if let Some(opt_config) = opt_config
         && opt_config.any_enabled()
     {
         optimize_program(&mut dtal_program, opt_config);
     }
 
-    // Emit text
     let dtal = emit_program(&dtal_program);
 
     Ok(VerboseOutput {
@@ -410,12 +335,6 @@ pub fn compile_verbose_configured<'src>(
     })
 }
 
-/// Compile source code and print source-context errors on failure.
-///
-/// # Errors
-///
-/// Returns `Err(())` after printing a diagnostic for lex, parse, or type
-/// errors.
 #[allow(clippy::result_unit_err)]
 pub fn compile_and_report(filename: &str, source: &str) -> Result<String, ()> {
     match compile(source) {
@@ -434,12 +353,12 @@ pub fn compile_and_report(filename: &str, source: &str) -> Result<String, ()> {
         }
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
-
     #[test]
+
     fn test_compile_identity_function() {
         let source = r#"
             fn id(x: int) -> int {
@@ -456,8 +375,8 @@ mod tests {
 
         println!("=== Identity Function ===\n{}", output.dtal);
     }
-
     #[test]
+
     fn test_compile_add_function() {
         let source = r#"
             fn add(x: int, y: int) -> int {
@@ -470,13 +389,13 @@ mod tests {
 
         let output = result.unwrap();
         assert!(output.dtal.contains(".function add"));
-        assert!(output.dtal.contains("add ")); // add instruction
+        assert!(output.dtal.contains("add "));
         assert!(output.dtal.contains("ret"));
 
         println!("=== Add Function ===\n{}", output.dtal);
     }
-
     #[test]
+
     fn test_compile_constant() {
         let source = r#"
             fn const_five() -> int {
@@ -489,14 +408,14 @@ mod tests {
 
         let output = result.unwrap();
         assert!(output.dtal.contains(".function const_five"));
-        assert!(output.dtal.contains("mov")); // mov immediate
-        assert!(output.dtal.contains("5")); // the value 5
+        assert!(output.dtal.contains("mov"));
+        assert!(output.dtal.contains("5"));
         assert!(output.dtal.contains("ret"));
 
         println!("=== Const Five ===\n{}", output.dtal);
     }
-
     #[test]
+
     fn test_compile_with_let() {
         let source = r#"
             fn double(n: int) -> int {
@@ -510,12 +429,12 @@ mod tests {
 
         let output = result.unwrap();
         assert!(output.dtal.contains(".function double"));
-        assert!(output.dtal.contains("add ")); // add instruction
+        assert!(output.dtal.contains("add "));
 
         println!("=== Double Function ===\n{}", output.dtal);
     }
-
     #[test]
+
     fn test_compile_conditional() {
         let source = r#"
             fn abs(x: int) -> int {
@@ -534,14 +453,14 @@ mod tests {
 
         let output = result.unwrap();
         assert!(output.dtal.contains(".function abs"));
-        assert!(output.dtal.contains("cmp")); // comparison
-        assert!(output.dtal.contains("jmp")); // jump
+        assert!(output.dtal.contains("cmp"));
+        assert!(output.dtal.contains("jmp"));
         assert!(output.dtal.contains("ret"));
 
         println!("=== Abs Function ===\n{}", output.dtal);
     }
-
     #[test]
+
     fn test_compile_branch_joined_singletons_as_array_index() {
         let source = r#"
             fn choose(flag: bool) -> int {
@@ -563,8 +482,8 @@ mod tests {
             result.err()
         );
     }
-
     #[test]
+
     fn test_compile_multi_function() {
         let source = r#"
             fn helper(n: int) -> int {
@@ -584,12 +503,12 @@ mod tests {
         assert!(output.dtal.contains(".function helper"));
         assert!(output.dtal.contains(".function main"));
         assert!(output.dtal.contains("call helper"));
-        assert!(output.dtal.contains("mul")); // multiply
+        assert!(output.dtal.contains("mul"));
 
         println!("=== Multi-function Program ===\n{}", output.dtal);
     }
-
     #[test]
+
     fn test_compile_type_error() {
         let source = r#"
             fn bad() -> int {
@@ -604,8 +523,8 @@ mod tests {
             other => panic!("Expected TypeError, got {:?}", other),
         }
     }
-
     #[test]
+
     fn test_compile_parse_error() {
         let source = r#"
             fn bad( -> int {

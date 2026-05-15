@@ -1,20 +1,10 @@
-#include <stdio.h>
 
-#include "../checked_bounds.h"
 
-#ifndef N
-#define N 120
-#endif
 
-#ifndef TSTEPS
-#define TSTEPS 40
-#endif
 
 static long long a[N];
 static long long b[N];
 
-#define A(i) a[CHECKED_IDX1("a", (i), N)]
-#define B(i) b[CHECKED_IDX1("b", (i), N)]
 
 static void init_array(void) {
     for (int i = 0; i < N; i++) {

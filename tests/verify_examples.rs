@@ -76,10 +76,6 @@ macro_rules! expect_verification_failure {
     };
 }
 
-// ============================================================================
-// Success cases: compile + verify (29 tests)
-// ============================================================================
-
 verify_example!(e2e_01_simple, "01_simple.veri");
 verify_example!(e2e_02_conditionals, "02_conditionals.veri");
 verify_example!(e2e_03_arrays, "03_arrays.veri");
@@ -118,14 +114,9 @@ verify_example!(e2e_serial_driver, "serial_driver.veri");
 verify_example!(e2e_smt_minimal, "smt_minimal_annotations.veri");
 verify_example!(e2e_smt_synthesis, "smt_synthesis_tests.veri");
 
-// Text round-trip
 verify_roundtrip!(e2e_roundtrip_01_simple, "01_simple.veri");
 verify_roundtrip!(e2e_roundtrip_07_function_calls, "07_function_calls.veri");
 verify_roundtrip!(e2e_roundtrip_add, "add.veri");
-
-// ============================================================================
-// Feature-dependent: need array store/select axioms in constraint domain
-// ============================================================================
 
 verify_example!(e2e_20_array_loop_invariant, "20_array_loop_invariant.veri");
 verify_example!(e2e_selective_invalidation, "selective_invalidation.veri");
@@ -146,12 +137,7 @@ verify_example!(
     "37_mutable_scalar_borrow_call.veri"
 );
 
-// This example currently compiles but exceeds the verifier's supported join/type model.
 expect_verification_failure!(e2e_verify_fail_28_nested_array, "28_nested_array.veri");
-
-// ============================================================================
-// Error cases: should fail during compilation
-// ============================================================================
 
 expect_compile_error!(e2e_err_01_type_mismatch, "01_type_mismatch.veri");
 expect_compile_error!(e2e_err_02_undefined_variable, "02_undefined_variable.veri");

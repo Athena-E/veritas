@@ -1,4 +1,3 @@
-// I/O runtime test: print_int, print_char, read_int
 
 fn print_number(n: int) {
     print_int(n);

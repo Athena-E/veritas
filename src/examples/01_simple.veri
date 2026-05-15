@@ -1,4 +1,3 @@
-// Simple function with basic arithmetic
 fn main() {
     let x: int = 42;
     let y: int = 10;

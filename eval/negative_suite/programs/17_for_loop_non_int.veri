@@ -1,5 +1,3 @@
-// Error: For loop bounds must be integers
-// Expected error: E001 - Type mismatch
 
 fn main() {
     for i in true..false {

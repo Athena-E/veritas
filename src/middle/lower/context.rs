@@ -10,42 +10,23 @@ use crate::middle::tir::{BlockId, PhiNode, Terminator, TirBuilder, TirFunction, 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-/// Context for lowering TAST to TIR
-///
-/// Tracks the current state during lowering, including:
-/// - Variable name to SSA register mappings
-/// - The TIR builder for creating blocks and instructions
 pub struct LoweringContext<'src> {
-    /// The TIR builder
     pub builder: TirBuilder<'src>,
 
-    /// Map from variable names to their current SSA register
-    /// In SSA, each assignment creates a new register, so this
-    /// always points to the "current" version of each variable.
     var_map: BTreeMap<String, VirtualReg>,
 
-    /// Map from variable names to their types
-    /// Used to create phi nodes with correct types (not IType::Int placeholders)
     var_type_map: BTreeMap<String, IType<'src>>,
 
-    /// Stack of variable maps for nested scopes
-    /// Used to restore variable bindings when exiting a scope
     scope_stack: Vec<ScopeSnapshot<'src>>,
 
-    /// Whether the current binding for a variable still owns its value.
     owned_live_map: BTreeMap<String, bool>,
 
-    /// Whether the current binding for a variable is a live borrow value.
     borrow_live_map: BTreeMap<String, bool>,
 
-    /// Lowering-time metadata for scalar reference bindings that are backed by
-    /// hidden one-element cells.
     scalar_borrow_map: BTreeMap<String, ScalarBorrowBinding<'src>>,
 
-    /// Current nested lexical region handle, if any.
     current_region: Option<VirtualReg>,
 
-    /// Stack of outer region handles when entering nested regions.
     region_stack: Vec<Option<VirtualReg>>,
 }
 
@@ -57,8 +38,8 @@ struct ScopeSnapshot<'src> {
     scalar_borrow_map: BTreeMap<String, ScalarBorrowBinding<'src>>,
     declared_names: BTreeSet<String>,
 }
-
 #[derive(Clone)]
+
 pub struct ScalarBorrowBinding<'src> {
     pub owner_name: String,
     pub cell_reg: VirtualReg,
@@ -68,7 +49,6 @@ pub struct ScalarBorrowBinding<'src> {
 }
 
 impl<'src> LoweringContext<'src> {
-    /// Create a new lowering context
     pub fn new() -> Self {
         Self {
             builder: TirBuilder::new(),
@@ -83,17 +63,14 @@ impl<'src> LoweringContext<'src> {
         }
     }
 
-    /// Allocate a fresh virtual register
     pub fn fresh_reg(&mut self) -> VirtualReg {
         self.builder.fresh_reg()
     }
 
-    /// Bind a variable name to an SSA register
     pub fn bind_var(&mut self, name: &str, reg: VirtualReg) {
         self.var_map.insert(name.to_string(), reg);
     }
 
-    /// Bind a variable name to an SSA register with its type
     pub fn bind_var_typed(&mut self, name: &str, reg: VirtualReg, ty: IType<'src>) {
         self.var_map.insert(name.to_string(), reg);
         self.var_type_map.insert(name.to_string(), ty);
@@ -105,7 +82,6 @@ impl<'src> LoweringContext<'src> {
         );
     }
 
-    /// Declare a new lexical binding in the current scope.
     pub fn declare_var_typed(&mut self, name: &str, reg: VirtualReg, ty: IType<'src>) {
         self.bind_var_typed(name, reg, ty);
         if let Some(scope) = self.scope_stack.last_mut() {
@@ -113,12 +89,10 @@ impl<'src> LoweringContext<'src> {
         }
     }
 
-    /// Look up the current SSA register for a variable
     pub fn lookup_var(&self, name: &str) -> Option<VirtualReg> {
         self.var_map.get(name).copied()
     }
 
-    /// Get variable name → register name substitution pairs for all bound variables
     pub fn var_substitutions(&self) -> Vec<(String, String)> {
         self.var_map
             .iter()
@@ -126,7 +100,6 @@ impl<'src> LoweringContext<'src> {
             .collect()
     }
 
-    /// Look up the type of a variable
     pub fn lookup_var_type(&self, name: &str) -> IType<'src> {
         self.var_type_map.get(name).cloned().unwrap_or(IType::Int)
     }
@@ -183,30 +156,22 @@ impl<'src> LoweringContext<'src> {
         self.scalar_borrow_map.get(name)
     }
 
-    /// Get a snapshot of the current variable map
-    /// Used for tracking which variables are modified in branches
     pub fn snapshot_var_map(&self) -> BTreeMap<String, VirtualReg> {
         self.var_map.clone()
     }
 
-    /// Get a snapshot of the current variable type map.
     pub fn snapshot_var_type_map(&self) -> BTreeMap<String, IType<'src>> {
         self.var_type_map.clone()
     }
 
-    /// Restore the variable map from a previous snapshot
-    /// Used to reset state before lowering alternative control flow paths
     pub fn restore_var_map(&mut self, snapshot: BTreeMap<String, VirtualReg>) {
         self.var_map = snapshot;
     }
 
-    /// Restore the variable type map from a previous snapshot.
     pub fn restore_var_type_map(&mut self, snapshot: BTreeMap<String, IType<'src>>) {
         self.var_type_map = snapshot;
     }
 
-    /// Get all variables that differ between two snapshots
-    /// Returns: Vec<(var_name, reg_in_snapshot1, reg_in_snapshot2)>
     pub fn diff_var_maps(
         &self,
         before: &BTreeMap<String, VirtualReg>,
@@ -223,7 +188,6 @@ impl<'src> LoweringContext<'src> {
         diffs
     }
 
-    /// Enter a new scope (pushes current var_map)
     pub fn enter_scope(&mut self) {
         self.scope_stack.push(ScopeSnapshot {
             var_map: self.var_map.clone(),
@@ -235,7 +199,6 @@ impl<'src> LoweringContext<'src> {
         });
     }
 
-    /// Emit drops for owned locals declared in the current scope.
     pub fn emit_scope_exit_drops(&mut self) {
         let Some(scope) = self.scope_stack.last() else {
             return;
@@ -265,7 +228,6 @@ impl<'src> LoweringContext<'src> {
         }
     }
 
-    /// Exit a scope (restores previous variable state)
     pub fn exit_scope(&mut self) {
         if let Some(snapshot) = self.scope_stack.pop() {
             for name in snapshot.declared_names {
@@ -454,30 +416,22 @@ impl<'src> LoweringContext<'src> {
         self.current_region = self.region_stack.pop().unwrap_or(None);
     }
 
-    /// Create a new block and return its ID
     pub fn new_block(&mut self) -> BlockId {
         self.builder.new_block()
     }
 
-    /// Start building a block
     pub fn start_block(&mut self, id: BlockId) {
         self.builder.start_block(id);
     }
 
-    /// Add an instruction to the current block
     pub fn emit(&mut self, instr: TirInstr<'src>) {
         self.builder.add_instr(instr);
     }
 
-    /// Add a phi node to the current block
     pub fn emit_phi(&mut self, phi: PhiNode<'src>) {
         self.builder.add_phi(phi);
     }
 
-    /// Update a phi node in a finished block by adding an incoming edge
-    ///
-    /// This is needed for loops where the phi node is created before
-    /// the body is lowered (and thus before we know the incoming value).
     pub fn update_phi_incoming(
         &mut self,
         block_id: BlockId,
@@ -492,22 +446,18 @@ impl<'src> LoweringContext<'src> {
         }
     }
 
-    /// Finish the current block with a terminator
     pub fn finish_block(&mut self, terminator: Terminator, predecessors: Vec<BlockId>) {
         self.builder.finish_block(terminator, predecessors);
     }
 
-    /// Check if currently building a block
     pub fn is_building(&self) -> bool {
         self.builder.is_building()
     }
 
-    /// Get the current block ID
     pub fn current_block(&self) -> Option<BlockId> {
         self.builder.current_block_id()
     }
 
-    /// Build the final TIR function
     #[allow(clippy::too_many_arguments)]
     pub fn build_function(
         self,

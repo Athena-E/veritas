@@ -52,7 +52,6 @@ def main() -> None:
     ax_elf = fig.add_subplot(gs[1, 0])
     ax_text = fig.add_subplot(gs[1, 1])
 
-    # Top: full feature-suite Veritas ELF/code-bearing size distribution.
     labels = [row["program"] for row in veritas_rows]
     values = [int(row["veritas_elf_bytes"]) for row in veritas_rows]
     y = np.arange(len(labels))
@@ -64,7 +63,6 @@ def main() -> None:
     ax_top.set_title("Full Feature-Suite Veritas Binary Sizes", fontsize=11)
     ax_top.grid(axis="x", alpha=0.2)
 
-    # Bottom-left: representative ELF comparison against GCC O2.
     subset_labels = [row["program"] for row in subset_rows]
     veritas_elf = [int(row["veritas_elf_bytes"]) for row in subset_rows]
     gcc_elf = [int(row["gcc_o2_elf_bytes"]) for row in subset_rows]
@@ -80,7 +78,6 @@ def main() -> None:
     ax_elf.grid(axis="x", alpha=0.2)
     ax_elf.legend(frameon=False, fontsize=8, loc="lower right")
 
-    # Bottom-right: representative code-bearing size comparison.
     veritas_text = [int(row["veritas_text_bytes"]) for row in subset_rows]
     gcc_text = [int(row["gcc_o2_text_bytes"]) for row in subset_rows]
     ax_text.barh(y2 - h / 2, veritas_text, height=h, color="#184E77", label="Veritas code-bearing")

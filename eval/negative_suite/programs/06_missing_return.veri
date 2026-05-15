@@ -1,5 +1,3 @@
-// Error: Function missing return value
-// Expected error: E006 - Missing return value
 
 fn get_number() -> int {
     let x: int = 42;

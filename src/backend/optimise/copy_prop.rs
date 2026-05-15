@@ -24,12 +24,8 @@ use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
 use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashMap;
 
-/// Type alias for copy map: virtual destination → virtual source register
 type CopyMap = HashMap<VirtualReg, Reg>;
 
-/// Apply copy propagation to a function
-///
-/// Returns true if any changes were made
 pub fn copy_propagate_function(func: &mut DtalFunction) -> bool {
     let mut changed = false;
 
@@ -40,32 +36,25 @@ pub fn copy_propagate_function(func: &mut DtalFunction) -> bool {
     changed
 }
 
-/// Apply copy propagation within a single block
 fn copy_propagate_block(block: &mut DtalBlock) -> bool {
     let mut changed = false;
     let mut copy_map: CopyMap = HashMap::new();
 
     for instr in &mut block.instructions {
-        // First, rewrite uses in this instruction
         changed |= rewrite_uses(instr, &copy_map);
 
-        // Update copy map based on this instruction's effects
         update_copy_map(instr, &mut copy_map);
     }
 
     changed
 }
 
-/// Resolve a register through the copy chain to find the original source
-///
-/// Returns the ultimate source register (could be physical or virtual)
 fn resolve(reg: VirtualReg, copy_map: &CopyMap) -> Reg {
     let mut current = Reg::Virtual(reg);
-    // Follow the copy chain (handles transitive copies: a=b; c=a → c=b)
     while let Reg::Virtual(vreg) = current {
         if let Some(&src) = copy_map.get(&vreg) {
             if src == current {
-                break; // Avoid infinite loops
+                break;
             }
             current = src;
         } else {
@@ -75,9 +64,6 @@ fn resolve(reg: VirtualReg, copy_map: &CopyMap) -> Reg {
     current
 }
 
-/// Rewrite register uses in an instruction using the copy map
-///
-/// Returns true if any register was replaced
 fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
     let mut changed = false;
 
@@ -130,7 +116,6 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
         DtalInstr::Push { src, .. } => {
             changed |= try_replace_virtual(src, copy_map);
         }
-        // Instructions without register uses
         DtalInstr::MovImm { .. }
         | DtalInstr::Pop { .. }
         | DtalInstr::Alloca { .. }
@@ -155,9 +140,6 @@ fn rewrite_uses(instr: &mut DtalInstr, copy_map: &CopyMap) -> bool {
     changed
 }
 
-/// Try to replace a virtual register with its resolved source
-///
-/// Returns true if the register was replaced
 fn try_replace_virtual(reg: &mut Reg, copy_map: &CopyMap) -> bool {
     if let Reg::Virtual(vreg) = *reg {
         let resolved = resolve(vreg, copy_map);
@@ -169,9 +151,7 @@ fn try_replace_virtual(reg: &mut Reg, copy_map: &CopyMap) -> bool {
     false
 }
 
-/// Update the copy map based on an instruction's definition
 fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
-    // Get the register defined by this instruction
     let def_reg = match instr {
         DtalInstr::MovImm { dst, .. }
         | DtalInstr::MovReg { dst, .. }
@@ -193,21 +173,14 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         _ => None,
     };
 
-    // If this instruction defines a register, invalidate any copies that use it as source
     if let Some(def) = def_reg {
         if let Reg::Virtual(def_vreg) = def {
-            // Remove any existing mapping FOR this register (it's being redefined)
             copy_map.remove(&def_vreg);
         }
 
-        // Invalidate any mappings that have this register as their source
-        // (works for both physical and virtual register sources)
         copy_map.retain(|_, src| *src != def);
     }
 
-    // If this is a pure virtual-to-virtual move, record the copy.
-    // Do not propagate physical-register sources: later backend passes rely on
-    // these explicit materialisation moves to reason about ABI values.
     if let DtalInstr::MovReg {
         dst: Reg::Virtual(dst_vreg),
         src: Reg::Virtual(src_vreg),
@@ -228,18 +201,15 @@ fn update_copy_map(instr: &DtalInstr, copy_map: &mut CopyMap) {
         copy_map.insert(*dst_vreg, resolved_src);
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{BinaryOp, TypeState};
     use crate::dtal::types::DtalType;
-
     #[test]
+
     fn test_simple_copy_propagation() {
-        // v0 = 42
-        // v1 = v0  (copy)
-        // v2 = v1 + v1  (should become v0 + v0)
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -271,7 +241,6 @@ mod tests {
         let changed = copy_propagate_block(&mut block);
         assert!(changed);
 
-        // Check that the BinOp now uses v0 instead of v1
         if let DtalInstr::BinOp { lhs, rhs, .. } = &block.instructions[2] {
             assert_eq!(*lhs, v0);
             assert_eq!(*rhs, v0);
@@ -279,13 +248,9 @@ mod tests {
             panic!("Expected BinOp instruction");
         }
     }
-
     #[test]
+
     fn test_transitive_copy_propagation() {
-        // v0 = 42
-        // v1 = v0
-        // v2 = v1  (transitive copy)
-        // v3 = v2 + v2  (should become v0 + v0)
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -323,7 +288,6 @@ mod tests {
         let changed = copy_propagate_block(&mut block);
         assert!(changed);
 
-        // Check that the BinOp now uses v0 instead of v2
         if let DtalInstr::BinOp { lhs, rhs, .. } = &block.instructions[3] {
             assert_eq!(*lhs, v0);
             assert_eq!(*rhs, v0);
@@ -331,13 +295,9 @@ mod tests {
             panic!("Expected BinOp instruction");
         }
     }
-
     #[test]
+
     fn test_invalidation_on_redef() {
-        // v0 = 42
-        // v1 = v0  (copy)
-        // v0 = 100  (redefine v0)
-        // v2 = v1 + v1  (should stay v1 + v1, since v0 was redefined)
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -372,10 +332,8 @@ mod tests {
         };
 
         let changed = copy_propagate_block(&mut block);
-        // No change because the copy v1=v0 is invalidated by v0's redefinition
         assert!(!changed);
 
-        // v1 should still be v1
         if let DtalInstr::BinOp { lhs, rhs, .. } = &block.instructions[3] {
             assert_eq!(*lhs, v1);
             assert_eq!(*rhs, v1);
@@ -383,14 +341,11 @@ mod tests {
             panic!("Expected BinOp instruction");
         }
     }
-
     #[test]
+
     fn test_does_not_propagate_from_physical_regs() {
         use crate::dtal::regs::PhysicalReg;
 
-        // v0 = r0  (copy from physical)
-        // v1 = v0 + v0  (must stay v0 + v0 so later backend stages still see
-        // the explicit ABI materialisation move)
         let r0 = Reg::Physical(PhysicalReg::R0);
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));

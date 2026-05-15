@@ -24,19 +24,12 @@ use crate::dtal::instr::{DtalFunction, DtalInstr};
 use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::{HashMap, HashSet};
 
-/// A detected natural loop
 struct NaturalLoop {
-    /// The loop header block label (target of the back-edge)
     _header: String,
-    /// All block labels in the loop (including header)
     blocks: HashSet<String>,
-    /// The entry block label (non-loop predecessor of header)
     entry: String,
 }
 
-/// Apply LICM to a function
-///
-/// Returns true if any instructions were hoisted
 pub fn licm_function(func: &mut DtalFunction) -> bool {
     if func.blocks.len() < 2 {
         return false;
@@ -62,10 +55,6 @@ pub fn licm_function(func: &mut DtalFunction) -> bool {
     changed
 }
 
-/// Compute dominators using iterative dataflow
-///
-/// dom[entry] = {entry}
-/// dom[B] = {B} ∪ ∩{dom[P] | P ∈ predecessors(B)}
 fn compute_dominators(
     block_labels: &[String],
     predecessors: &HashMap<String, Vec<String>>,
@@ -115,7 +104,6 @@ fn compute_dominators(
     dom
 }
 
-/// Find all natural loops in the function
 fn find_loops(
     block_labels: &[String],
     successors: &HashMap<String, Vec<String>>,
@@ -135,7 +123,6 @@ fn find_loops(
                     let header = succ.clone();
                     let loop_blocks = collect_natural_loop(&header, label, predecessors);
 
-                    // Require a unique preheader so hoisted values dominate every entry.
                     if let Some(header_preds) = predecessors.get(&header) {
                         let non_loop_preds: Vec<_> = header_preds
                             .iter()
@@ -157,7 +144,6 @@ fn find_loops(
     loops
 }
 
-/// Collect all blocks in a natural loop given a back-edge B → H
 fn collect_natural_loop(
     header: &str,
     back_edge_source: &str,
@@ -167,14 +153,12 @@ fn collect_natural_loop(
     loop_blocks.insert(header.to_string());
 
     if header == back_edge_source {
-        // Self-loop
         return loop_blocks;
     }
 
     let mut worklist = vec![back_edge_source.to_string()];
     while let Some(node) = worklist.pop() {
         if loop_blocks.insert(node.clone()) {
-            // New node — add its predecessors to worklist
             if let Some(preds) = predecessors.get(&node) {
                 for pred in preds {
                     if !loop_blocks.contains(pred) {
@@ -188,9 +172,6 @@ fn collect_natural_loop(
     loop_blocks
 }
 
-/// Count the number of definitions per virtual register across all blocks.
-/// A register with multiple definitions is loop-carried or non-SSA; hoisting
-/// one of its writes would break the update flow.
 fn count_all_defs(func: &DtalFunction) -> HashMap<VirtualReg, usize> {
     let mut counts: HashMap<VirtualReg, usize> = HashMap::new();
     for block in &func.blocks {
@@ -203,7 +184,6 @@ fn count_all_defs(func: &DtalFunction) -> HashMap<VirtualReg, usize> {
     counts
 }
 
-/// Collect the set of virtual registers defined in each block
 fn collect_block_defs(func: &DtalFunction) -> HashMap<String, HashSet<VirtualReg>> {
     let mut result = HashMap::new();
     for block in &func.blocks {
@@ -218,7 +198,6 @@ fn collect_block_defs(func: &DtalFunction) -> HashMap<String, HashSet<VirtualReg
     result
 }
 
-/// Hoist loop-invariant instructions from a single loop
 fn hoist_loop(
     func: &mut DtalFunction,
     lp: &NaturalLoop,
@@ -240,11 +219,10 @@ fn hoist_loop(
         }
     }
 
-    // DTAL is not strict SSA; only single-definition registers are safe to relocate.
     let def_counts = count_all_defs(func);
 
     let mut hoistable_defs: HashSet<VirtualReg> = HashSet::new();
-    let mut hoistable_instrs: Vec<(String, usize)> = Vec::new(); // (block_label, instr_index)
+    let mut hoistable_instrs: Vec<(String, usize)> = Vec::new();
 
     let mut changed = true;
     while changed {
@@ -323,7 +301,6 @@ fn hoist_loop(
         .find(|b| b.label == lp.entry)
         .unwrap();
 
-    // Preserve existing phi moves at the end of the preheader.
     let insert_pos = entry_block
         .instructions
         .iter()
@@ -338,7 +315,6 @@ fn hoist_loop(
     true
 }
 
-/// Check if an instruction is a kind that can be hoisted (pure computation)
 fn is_hoistable_kind(instr: &DtalInstr) -> bool {
     matches!(
         instr,
@@ -353,7 +329,6 @@ fn is_hoistable_kind(instr: &DtalInstr) -> bool {
     )
 }
 
-/// Get the virtual register defined by an instruction (if any)
 fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
     let reg = match instr {
         DtalInstr::MovImm { dst, .. }
@@ -377,7 +352,6 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
     })
 }
 
-/// Get the virtual registers used by an instruction
 fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
     let regs: Vec<Reg> = match instr {
         DtalInstr::MovReg { src, .. } => vec![*src],
@@ -385,7 +359,6 @@ fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         DtalInstr::AddImm { src, .. } => vec![*src],
         DtalInstr::ShlImm { src, .. } | DtalInstr::ShrImm { src, .. } => vec![*src],
         DtalInstr::Not { src, .. } | DtalInstr::Neg { src, .. } => vec![*src],
-        // MovImm has no register uses
         DtalInstr::MovImm { .. } => vec![],
         _ => vec![],
     };
@@ -397,8 +370,8 @@ fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         })
         .collect()
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{BinaryOp, DtalBlock, TypeState};
@@ -409,29 +382,6 @@ mod tests {
         Reg::Virtual(VirtualReg(n))
     }
 
-    /// Build a function with a simple loop:
-    ///
-    /// entry:
-    ///     mov v10, 0           (loop init)
-    ///     mov v0, v10          (phi move: i = 0)
-    ///     jmp header
-    ///
-    /// header:
-    ///     cmpimm v0, 10
-    ///     blt body
-    ///     jmp exit
-    ///
-    /// body:
-    ///     mov v3, 7            ← loop-invariant (constant)
-    ///     mov v4, 3            ← loop-invariant (constant)
-    ///     mul v5, v3, v4       ← loop-invariant (both operands invariant)
-    ///     add v6, v0, v5       ← NOT invariant (uses v0 = loop var)
-    ///     addimm v1, v0, 1     (i_next = i + 1)
-    ///     mov v0, v1           (phi move: i = i_next)
-    ///     jmp header
-    ///
-    /// exit:
-    ///     ret
     fn make_loop_func() -> DtalFunction {
         DtalFunction {
             name: "test_loop".to_string(),
@@ -529,21 +479,16 @@ mod tests {
             ],
         }
     }
-
     #[test]
+
     fn test_licm_hoists_invariant_instructions() {
         let mut func = make_loop_func();
 
         let changed = licm_function(&mut func);
         assert!(changed);
 
-        // Entry block should now contain the hoisted instructions
         let entry = &func.blocks[0];
-        // Original: MovImm v10, MovReg v0, Jmp
-        // After LICM: MovImm v10, [MovImm v3, MovImm v4, BinOp Mul v5], MovReg v0, Jmp
-        // The hoisted instructions go before the phi moves
 
-        // Check that v3=7, v4=3, v5=v3*v4 are in the entry block
         let has_v3 = entry
             .instructions
             .iter()
@@ -559,7 +504,6 @@ mod tests {
         assert!(has_v4, "v4 = 3 should be hoisted to entry");
         assert!(has_v5, "v5 = v3 * v4 should be hoisted to entry");
 
-        // Body should NOT have v3, v4, v5 definitions anymore
         let body = &func.blocks[2];
         let body_has_v3 = body
             .instructions
@@ -567,16 +511,14 @@ mod tests {
             .any(|i| matches!(i, DtalInstr::MovImm { dst, imm: 7, .. } if *dst == vreg(3)));
         assert!(!body_has_v3, "v3 should be removed from body");
 
-        // Body should still have v6 (depends on loop var v0)
         let body_has_v6 = body.instructions.iter().any(
             |i| matches!(i, DtalInstr::BinOp { op: BinaryOp::Add, dst, .. } if *dst == vreg(6)),
         );
         assert!(body_has_v6, "v6 should remain in body (uses loop var)");
     }
-
     #[test]
+
     fn test_licm_no_hoist_when_nothing_invariant() {
-        // Loop where every instruction depends on the loop variable
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
@@ -620,7 +562,6 @@ mod tests {
                     label: ".test_bb2".to_string(),
                     entry_state: TypeState::new(),
                     instructions: vec![
-                        // v1 = v0 * 2 — depends on loop var
                         DtalInstr::BinOp {
                             op: BinaryOp::Mul,
                             dst: vreg(1),
@@ -650,10 +591,9 @@ mod tests {
         let changed = licm_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_licm_no_hoist_side_effects() {
-        // Loop with a Store — should not be hoisted
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],
@@ -697,7 +637,6 @@ mod tests {
                     label: ".test_bb2".to_string(),
                     entry_state: TypeState::new(),
                     instructions: vec![
-                        // Store has side effects — not hoistable
                         DtalInstr::Store {
                             base: vreg(10),
                             offset: vreg(0),
@@ -725,11 +664,9 @@ mod tests {
         let changed = licm_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_licm_requires_unique_preheader() {
-        // Header has two non-loop predecessors. Hoisting into either one would
-        // leave the other entry path without the hoisted definition.
         let mut func = DtalFunction {
             name: "test".to_string(),
             params: vec![],

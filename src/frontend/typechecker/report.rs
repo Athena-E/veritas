@@ -1,16 +1,12 @@
-// Pretty error reporting with source highlighting using ariadne
-
 use crate::frontend::typechecker::TypeError;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-/// Report a type error with source highlighting
 pub fn report_type_error(filename: &str, source: &str, error: &TypeError) {
     let report = build_report(error);
     report
         .eprint(Source::from(source))
         .expect("Failed to print error report");
 
-    // Print filename for context
     eprintln!(
         "  --> {}:{}",
         filename,
@@ -68,7 +64,6 @@ fn get_line_col(source: &str, offset: usize) -> String {
     format!("{}:{}", line, col)
 }
 
-/// Build an ariadne Report from a TypeError
 fn build_report(error: &TypeError) -> Report<'static, std::ops::Range<usize>> {
     match error {
         TypeError::TypeMismatch {

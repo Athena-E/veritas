@@ -1,4 +1,3 @@
-// C equivalent of 20_binary_search.veri
 
 static int binary_search(const int arr[10], int target) {
     int lo = 0;

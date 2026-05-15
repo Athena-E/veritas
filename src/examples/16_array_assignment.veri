@@ -1,4 +1,3 @@
-// Simple array indexing assignment with literal index
 fn simple_array_assignment() {
     let mut arr: [int; 5] = [0; 5];
     arr[0] = 10;
@@ -8,7 +7,6 @@ fn simple_array_assignment() {
     arr[4] = 50;
 }
 
-// Array indexing assignment with loop variable index
 fn variable_index_assignment(value: int) {
     let mut numbers: [int; 10] = [0; 10];
     for i in 0..10 {
@@ -16,7 +14,6 @@ fn variable_index_assignment(value: int) {
     }
 }
 
-// Array indexing assignment with expression as value
 fn expression_value_assignment() {
     let mut arr: [int; 5] = [0; 5];
     let x: int = 10;
@@ -25,7 +22,6 @@ fn expression_value_assignment() {
     arr[1] = x * x;
 }
 
-// Array indexing assignment with computed index
 fn expression_index_assignment() {
     let mut arr: [int; 10] = [0; 10];
     for i in 0..5 {
@@ -34,7 +30,6 @@ fn expression_index_assignment() {
     }
 }
 
-// Multiple assignments to same array
 fn multiple_assignments() {
     let mut data: [int; 100] = [0; 100];
     data[0] = 1;
@@ -42,7 +37,6 @@ fn multiple_assignments() {
     data[2] = data[0] + data[1];
 }
 
-// Array assignment in a loop
 fn fill_array_with_loop() {
     let mut arr: [int; 10] = [0; 10];
     for i in 0..10 {
@@ -50,7 +44,6 @@ fn fill_array_with_loop() {
     }
 }
 
-// Array assignment in conditional blocks
 fn conditional_array_assignment(condition: bool) {
     let mut arr: [int; 3] = [0; 3];
     arr[0] = 1;

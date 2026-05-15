@@ -2,8 +2,6 @@ use crate::common::span::Span;
 use crate::common::types::{IProposition, IType};
 use std::fmt;
 
-/// Type errors that can occur during type checking.
-/// Some variants are reserved for future features.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum TypeError<'src> {
@@ -13,7 +11,6 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
-    // A refinement predicate could not be proven
     Unprovable {
         proposition: IProposition<'src>,
         context: String,
@@ -54,7 +51,6 @@ pub enum TypeError<'src> {
         span: Span,
     },
 
-    // Assignment to mutable variable violates master type constraint
     MasterTypeMismatch {
         variable: String,
         master_type: IType<'src>,

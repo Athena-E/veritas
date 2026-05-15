@@ -3,7 +3,6 @@ use crate::backend::regalloc::allocator::AllocationResult;
 use crate::backend::x86_64::regs::Location;
 use crate::dtal::regs::{Reg, VirtualReg};
 
-/// Physical location assigned to a virtual register.
 pub(super) enum PhysLoc {
     Reg(Reg),
     Spill(i32),
@@ -21,7 +20,6 @@ fn resolve(vreg: VirtualReg, alloc: &AllocationResult) -> PhysLoc {
     try_resolve(vreg, alloc).unwrap_or_else(|| panic!("Unallocated virtual register v{}", vreg.0))
 }
 
-/// Resolve a virtual or physical register to a physical location.
 pub(super) fn resolve_reg(reg: Reg, alloc: &AllocationResult) -> PhysLoc {
     match reg {
         Reg::Virtual(vreg) => resolve(vreg, alloc),
@@ -29,7 +27,6 @@ pub(super) fn resolve_reg(reg: Reg, alloc: &AllocationResult) -> PhysLoc {
     }
 }
 
-/// Resolve a register, returning `None` for dead virtual registers.
 pub(super) fn resolve_reg_opt(reg: Reg, alloc: &AllocationResult) -> Option<PhysLoc> {
     match reg {
         Reg::Virtual(vreg) => try_resolve(vreg, alloc),

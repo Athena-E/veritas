@@ -65,8 +65,8 @@ fn make_func_with_entry_state(
         }],
     }
 }
-
 #[test]
+
 fn move_owned_and_drop_owned_update_owned_register_state() {
     let mut state = TypeState::new();
     let array_ty = DtalType::Array {
@@ -107,8 +107,8 @@ fn move_owned_and_drop_owned_update_owned_register_state() {
 
     assert!(!state.owned_registers.contains(&v(1)));
 }
-
 #[test]
+
 fn dtal_text_roundtrip_preserves_owned_annotations() {
     use crate::backend::emit::emit_program;
 
@@ -174,8 +174,8 @@ fn dtal_text_roundtrip_preserves_owned_annotations() {
         DtalInstr::DropOwned { src, .. } if *src == v(1)
     ));
 }
-
 #[test]
+
 fn owned_call_marks_return_registers_owned() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -210,8 +210,8 @@ fn owned_call_marks_return_registers_owned() {
             .contains(&Reg::Physical(PhysicalReg::LR))
     );
 }
-
 #[test]
+
 fn consuming_call_argument_is_consumed_at_call_boundary() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -249,8 +249,8 @@ fn consuming_call_argument_is_consumed_at_call_boundary() {
     assert!(!state.owned_registers.contains(&r1));
     assert!(state.consumed_registers.contains(&r1));
 }
-
 #[test]
+
 fn consumed_owned_register_cannot_be_used_again() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -289,8 +289,8 @@ fn consumed_owned_register_cannot_be_used_again() {
 
     assert!(matches!(err, VerifyError::ConsumedRegister { reg, .. } if reg == v(0)));
 }
-
 #[test]
+
 fn double_drop_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -329,8 +329,8 @@ fn double_drop_is_rejected() {
         VerifyError::ConsumedRegister { reg, .. } if reg == v(0)
     ));
 }
-
 #[test]
+
 fn plain_mov_of_owned_value_is_rejected_as_ownership_duplication() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -356,8 +356,8 @@ fn plain_mov_of_owned_value_is_rejected_as_ownership_duplication() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn duplicate_live_owners_of_same_object_are_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -374,8 +374,8 @@ fn duplicate_live_owners_of_same_object_are_rejected() {
     let err = checker::verify_unique_owned_objects(&state, ".entry", "test").unwrap_err();
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn alias_borrow_allows_non_owning_alias_of_owned_value() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -404,8 +404,8 @@ fn alias_borrow_allows_non_owning_alias_of_owned_value() {
     assert!(!state.owned_registers.contains(&v(1)));
     assert_eq!(state.shared_borrow_object_ids.get(&v(1)).copied(), Some(21));
 }
-
 #[test]
+
 fn move_owned_while_shared_borrow_live_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -433,8 +433,8 @@ fn move_owned_while_shared_borrow_live_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn drop_owned_while_shared_borrow_live_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -461,8 +461,8 @@ fn drop_owned_while_shared_borrow_live_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn alias_borrow_outside_call_setup_is_allowed() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -488,8 +488,8 @@ fn alias_borrow_outside_call_setup_is_allowed() {
 
     verify_dtal(&program).unwrap();
 }
-
 #[test]
+
 fn alias_borrow_can_chain_from_existing_shared_borrow() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -531,8 +531,8 @@ fn alias_borrow_can_chain_from_existing_shared_borrow() {
     assert_eq!(state.shared_borrow_object_ids.get(&v(2)).copied(), Some(41));
     assert!(state.owned_registers.contains(&v(0)));
 }
-
 #[test]
+
 fn borrow_end_releases_shared_borrow_so_owner_can_move() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -583,8 +583,8 @@ fn borrow_end_releases_shared_borrow_so_owner_can_move() {
     )
     .unwrap();
 }
-
 #[test]
+
 fn borrow_end_without_live_shared_borrow_is_rejected() {
     let mut state = TypeState::new();
     state.register_types.insert(v(0), DtalType::Int);
@@ -604,8 +604,8 @@ fn borrow_end_without_live_shared_borrow_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn borrow_end_with_wrong_lifetime_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -644,8 +644,8 @@ fn borrow_end_with_wrong_lifetime_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn borrow_mut_of_owned_value_is_allowed() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -676,8 +676,8 @@ fn borrow_mut_of_owned_value_is_allowed() {
     );
     assert!(state.owned_registers.contains(&v(0)));
 }
-
 #[test]
+
 fn borrow_mut_while_shared_borrow_live_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -706,8 +706,8 @@ fn borrow_mut_while_shared_borrow_live_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn alias_borrow_while_mutable_borrow_live_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -736,8 +736,8 @@ fn alias_borrow_while_mutable_borrow_live_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn plain_mov_of_mutable_borrow_is_rejected() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -762,8 +762,8 @@ fn plain_mov_of_mutable_borrow_is_rejected() {
 
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn branch_local_shared_borrow_is_rejected_at_join() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -825,8 +825,8 @@ fn branch_local_shared_borrow_is_rejected_at_join() {
     let err = verify_dtal(&program).unwrap_err();
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn mixed_shared_and_mutable_borrow_is_rejected_at_join() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -896,8 +896,8 @@ fn mixed_shared_and_mutable_borrow_is_rejected_at_join() {
     let err = verify_dtal(&program).unwrap_err();
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn borrow_end_on_one_path_only_is_rejected_at_join() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -964,8 +964,8 @@ fn borrow_end_on_one_path_only_is_rejected_at_join() {
     let err = verify_dtal(&program).unwrap_err();
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn loop_carried_shared_borrow_is_preserved() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1036,8 +1036,8 @@ fn loop_carried_shared_borrow_is_preserved() {
 
     verify_dtal(&program).unwrap();
 }
-
 #[test]
+
 fn alias_borrow_for_consuming_call_argument_is_rejected() {
     let program = make_program(vec![
         make_func(
@@ -1074,8 +1074,8 @@ fn alias_borrow_for_consuming_call_argument_is_rejected() {
     let err = verify_dtal(&program).unwrap_err();
     assert!(matches!(err, VerifyError::OwnershipViolation { .. }));
 }
-
 #[test]
+
 fn test_verify_simple_function() {
     let program = make_program(vec![make_func(
         "id",
@@ -1096,8 +1096,8 @@ fn test_verify_simple_function() {
     let result = verify_dtal(&program);
     assert!(result.is_ok(), "Verification failed: {:?}", result.err());
 }
-
 #[test]
+
 fn test_verify_singleton_match() {
     let program = make_program(vec![make_func(
         "const_five",
@@ -1122,8 +1122,8 @@ fn test_verify_singleton_match() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_movimm_rejects_wrong_singleton_annotation() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1151,8 +1151,8 @@ fn test_movimm_rejects_wrong_singleton_annotation() {
         VerifyError::SingletonMismatch { .. }
     ));
 }
-
 #[test]
+
 fn test_movimm_accepts_correct_annotation() {
     let program = make_program(vec![make_func(
         "ok",
@@ -1172,8 +1172,8 @@ fn test_movimm_accepts_correct_annotation() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_reject_undefined_register() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1194,8 +1194,8 @@ fn test_reject_undefined_register() {
         VerifyError::UndefinedRegister { .. }
     ));
 }
-
 #[test]
+
 fn test_entry_state_constraint_feeds_context() {
     let mut entry_state = TypeState::new();
     entry_state.register_types.insert(v(0), DtalType::Int);
@@ -1217,8 +1217,8 @@ fn test_entry_state_constraint_feeds_context() {
         "Entry state constraint should be available in verification context"
     );
 }
-
 #[test]
+
 fn test_constraint_assert_provable_from_precondition() {
     let mut func = make_func(
         "ok",
@@ -1252,8 +1252,8 @@ fn test_constraint_assert_provable_from_precondition() {
         "Precondition should make the assert provable"
     );
 }
-
 #[test]
+
 fn test_constraint_assert_unprovable() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1272,8 +1272,8 @@ fn test_constraint_assert_unprovable() {
         VerifyError::UnprovableConstraint { .. }
     ));
 }
-
 #[test]
+
 fn test_constraint_assert_z3_transitivity() {
     let mut func = make_func(
         "ok",
@@ -1307,8 +1307,8 @@ fn test_constraint_assert_z3_transitivity() {
         "x >= 5 should imply x >= 3 via Z3"
     );
 }
-
 #[test]
+
 fn test_movreg_derives_from_source_ignoring_annotation() {
     let program = make_program(vec![make_func(
         "ok",
@@ -1328,8 +1328,8 @@ fn test_movreg_derives_from_source_ignoring_annotation() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_singleton_subtype_of_int() {
     let program = make_program(vec![make_func(
         "ok",
@@ -1349,8 +1349,8 @@ fn test_singleton_subtype_of_int() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_reject_bool_as_int_at_return() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1383,8 +1383,8 @@ fn test_reject_bool_as_int_at_return() {
         VerifyError::ReturnTypeMismatch { .. }
     ));
 }
-
 #[test]
+
 fn test_array_subtyping_compatible() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1392,8 +1392,8 @@ fn test_array_subtyping_compatible() {
     };
     assert!(checker::types_compatible(&arr_ty, &arr_ty));
 }
-
 #[test]
+
 fn test_array_subtyping_different_sizes() {
     let arr10 = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1405,8 +1405,8 @@ fn test_array_subtyping_different_sizes() {
     };
     assert!(!checker::types_compatible(&arr10, &arr5));
 }
-
 #[test]
+
 fn test_reject_wrong_type_annotation() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1437,8 +1437,8 @@ fn test_reject_wrong_type_annotation() {
         VerifyError::TypeMismatch { .. }
     ));
 }
-
 #[test]
+
 fn test_accept_valid_type_annotation() {
     let program = make_program(vec![make_func(
         "ok",
@@ -1467,8 +1467,8 @@ fn test_accept_valid_type_annotation() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_accept_phi_type_annotation() {
     let program = make_program(vec![make_func(
         "ok",
@@ -1492,8 +1492,8 @@ fn test_accept_phi_type_annotation() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_reject_type_annotation_int_to_singleton() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1513,8 +1513,8 @@ fn test_reject_type_annotation_int_to_singleton() {
         "Cannot narrow Int to SingletonInt via annotation"
     );
 }
-
 #[test]
+
 fn test_reject_load_without_bounds_proof() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1544,8 +1544,8 @@ fn test_reject_load_without_bounds_proof() {
         VerifyError::BoundsCheckFailed { .. }
     ));
 }
-
 #[test]
+
 fn test_accept_load_with_constant_in_bounds() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1578,8 +1578,8 @@ fn test_accept_load_with_constant_in_bounds() {
     )]);
     let _result = verify_dtal(&program);
 }
-
 #[test]
+
 fn test_accept_load_with_precondition_bounds() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1623,8 +1623,8 @@ fn test_accept_load_with_precondition_bounds() {
         "Precondition provides bounds proof for load"
     );
 }
-
 #[test]
+
 fn test_reject_loadop_without_bounds_proof() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1652,8 +1652,8 @@ fn test_reject_loadop_without_bounds_proof() {
         "LoadOp without bounds proof should be rejected"
     );
 }
-
 #[test]
+
 fn test_accept_loadop_with_precondition_bounds() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1699,8 +1699,8 @@ fn test_accept_loadop_with_precondition_bounds() {
         "Precondition provides bounds proof for loadop"
     );
 }
-
 #[test]
+
 fn test_reject_store_without_bounds_proof() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -1729,8 +1729,8 @@ fn test_reject_store_without_bounds_proof() {
         VerifyError::BoundsCheckFailed { .. }
     ));
 }
-
 #[test]
+
 fn test_reject_unprovable_postcondition() {
     let mut func = make_func(
         "bad",
@@ -1763,8 +1763,8 @@ fn test_reject_unprovable_postcondition() {
         VerifyError::PostconditionFailed { .. }
     ));
 }
-
 #[test]
+
 fn test_accept_provable_postcondition() {
     let mut func = make_func(
         "ok",
@@ -1796,8 +1796,8 @@ fn test_accept_provable_postcondition() {
         "Postcondition should be provable from precondition"
     );
 }
-
 #[test]
+
 fn test_reject_unprovable_precondition_at_call() {
     let callee = {
         let mut f = make_func(
@@ -1850,8 +1850,8 @@ fn test_reject_unprovable_precondition_at_call() {
         VerifyError::PreconditionFailed { .. }
     ));
 }
-
 #[test]
+
 fn test_branch_derives_constraint_for_assert() {
     let mut func = make_func(
         "ok",
@@ -1900,8 +1900,8 @@ fn test_branch_derives_constraint_for_assert() {
         "Fall-through constraint v0 >= 10 should be derived from blt"
     );
 }
-
 #[test]
+
 fn test_fallthrough_propagates_state() {
     let program = make_program(vec![make_func(
         "ok",
@@ -1952,8 +1952,8 @@ fn test_fallthrough_propagates_state() {
         "Fall-through should propagate v1 to .bb1"
     );
 }
-
 #[test]
+
 fn test_reject_return_type_mismatch() {
     let program = make_program(vec![make_func(
         "bad",
@@ -1977,8 +1977,8 @@ fn test_reject_return_type_mismatch() {
         VerifyError::ReturnTypeMismatch { .. }
     ));
 }
-
 #[test]
+
 fn test_binop_derives_symbolic_type() {
     let program = make_program(vec![make_func(
         "ok",
@@ -2015,8 +2015,8 @@ fn test_binop_derives_symbolic_type() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_addi_derives_symbolic_type() {
     let program = make_program(vec![make_func(
         "ok",
@@ -2047,8 +2047,8 @@ fn test_addi_derives_symbolic_type() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_singleton_coercion_via_constraint() {
     let constraints = vec![Constraint::Eq(
         IndexExpr::Var("n".to_string()),
@@ -2062,8 +2062,8 @@ fn test_singleton_coercion_via_constraint() {
         &constraints
     ));
 }
-
 #[test]
+
 fn test_array_size_coercion_via_constraint() {
     let constraints = vec![Constraint::Eq(
         IndexExpr::Var("n".to_string()),
@@ -2083,8 +2083,8 @@ fn test_array_size_coercion_via_constraint() {
         &constraints
     ));
 }
-
 #[test]
+
 fn test_declared_entry_state_verified() {
     use crate::dtal::instr::TypeState;
 
@@ -2113,8 +2113,8 @@ fn test_declared_entry_state_verified() {
     }]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_state_coercion_at_jump() {
     use crate::dtal::instr::TypeState;
 
@@ -2157,8 +2157,8 @@ fn test_state_coercion_at_jump() {
     }]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_reject_wrong_entry_state() {
     use crate::dtal::instr::TypeState;
 
@@ -2195,8 +2195,8 @@ fn test_reject_wrong_entry_state() {
     let result = verify_dtal(&program);
     assert!(result.is_err(), "State coercion should fail: int(5) ≤ Bool");
 }
-
 #[test]
+
 fn test_not_derives_bool_ignoring_annotation() {
     let program = make_program(vec![make_func(
         "ok",
@@ -2216,8 +2216,8 @@ fn test_not_derives_bool_ignoring_annotation() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_not_derived_bool_fails_int_return() {
     let program = make_program(vec![make_func(
         "bad",
@@ -2242,8 +2242,8 @@ fn test_not_derived_bool_fails_int_return() {
         VerifyError::ReturnTypeMismatch { .. }
     ));
 }
-
 #[test]
+
 fn test_load_derives_element_type_from_array() {
     let arr_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Bool),
@@ -2282,8 +2282,8 @@ fn test_load_derives_element_type_from_array() {
         "Load should derive element type from array base"
     );
 }
-
 #[test]
+
 fn test_pointer_arithmetic_over_nested_array_derives_row_type() {
     let row_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -2353,8 +2353,8 @@ fn test_pointer_arithmetic_over_nested_array_derives_row_type() {
     let program = make_program(vec![func]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_call_derives_return_type_from_signature() {
     let callee = make_func(
         "returns_bool",
@@ -2398,8 +2398,8 @@ fn test_call_derives_return_type_from_signature() {
         );
     }
 }
-
 #[test]
+
 fn test_call_wrong_annotation_caught_via_signature() {
     let callee = make_func(
         "returns_bool",
@@ -2433,8 +2433,8 @@ fn test_call_wrong_annotation_caught_via_signature() {
         panic!("Expected ReturnTypeMismatch from caller");
     }
 }
-
 #[test]
+
 fn test_push_pop_derives_type_from_stack() {
     let program = make_program(vec![make_func(
         "ok",
@@ -2462,8 +2462,8 @@ fn test_push_pop_derives_type_from_stack() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_push_pop_bool_derives_correctly() {
     let program = make_program(vec![make_func(
         "ok",
@@ -2501,8 +2501,8 @@ fn lr() -> Reg {
 fn r7() -> Reg {
     Reg::Physical(PhysicalReg::R7)
 }
-
 #[test]
+
 fn test_physical_simple_return() {
     let program = make_program(vec![make_func(
         "main",
@@ -2529,8 +2529,8 @@ fn test_physical_simple_return() {
     )]);
     assert!(verify_dtal(&program).is_ok());
 }
-
 #[test]
+
 fn test_physical_return_type_mismatch() {
     let program = make_program(vec![make_func(
         "bad",
@@ -2562,8 +2562,8 @@ fn test_physical_return_type_mismatch() {
         VerifyError::ReturnTypeMismatch { .. }
     ));
 }
-
 #[test]
+
 fn test_physical_r0_not_checked_for_return() {
     let program = make_program(vec![make_func(
         "main",
@@ -2601,8 +2601,8 @@ fn test_physical_r0_not_checked_for_return() {
         "Physical return should check LR, not R0"
     );
 }
-
 #[test]
+
 fn test_physical_cqo_idiv() {
     let program = make_program(vec![make_func(
         "div",
@@ -2639,8 +2639,8 @@ fn test_physical_cqo_idiv() {
         "Cqo + Idiv should verify correctly"
     );
 }
-
 #[test]
+
 fn test_physical_idiv_without_cqo_fails() {
     let program = make_program(vec![make_func(
         "bad",
@@ -2672,8 +2672,8 @@ fn test_physical_idiv_without_cqo_fails() {
     let result = verify_dtal(&program);
     assert!(result.is_err(), "Idiv without R2 defined should fail");
 }
-
 #[test]
+
 fn test_physical_spill_store_load() {
     let program = make_program(vec![make_func(
         "spill",
@@ -2708,8 +2708,8 @@ fn test_physical_spill_store_load() {
         "Spill store/load should verify"
     );
 }
-
 #[test]
+
 fn test_physical_shared_borrow_spill_store_load() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -2768,8 +2768,8 @@ fn test_physical_shared_borrow_spill_store_load() {
         "Physical shared-borrow spill store/load should verify"
     );
 }
-
 #[test]
+
 fn test_physical_mutable_borrow_spill_store_load() {
     let array_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -2828,8 +2828,8 @@ fn test_physical_mutable_borrow_spill_store_load() {
         "Physical mutable-borrow spill store/load should verify"
     );
 }
-
 #[test]
+
 fn test_physical_spill_load_allows_more_specific_array_view() {
     let stored_ty = DtalType::Array {
         element_type: Arc::new(DtalType::Int),
@@ -2881,8 +2881,8 @@ fn test_physical_spill_load_allows_more_specific_array_view() {
         "Spill load should allow a more specific array view than the stored supertype"
     );
 }
-
 #[test]
+
 fn test_physical_call_sets_lr() {
     let callee = make_func(
         "get_value",
@@ -2947,8 +2947,8 @@ fn test_physical_call_sets_lr() {
         "Physical call should set LR to return type"
     );
 }
-
 #[test]
+
 fn test_physical_prologue_defines_scratch_regs() {
     let program = make_program(vec![make_func(
         "main",
@@ -2985,8 +2985,8 @@ fn test_physical_prologue_defines_scratch_regs() {
         "Prologue should define scratch registers"
     );
 }
-
 #[test]
+
 fn test_i64_overflow_check_function() {
     let ctx = vec![
         Constraint::And(
@@ -3019,8 +3019,8 @@ fn test_i64_overflow_check_function() {
         "check_i64_overflow_constraint should pass for bounded operands"
     );
 }
-
 #[test]
+
 fn test_i64_overflow_constraint_proof() {
     let ctx = vec![
         Constraint::And(

@@ -1,5 +1,3 @@
-// Error: Wrong number of arguments
-// Expected error: E009 - Wrong number of arguments
 
 fn add(a: int, b: int) -> int {
     a + b

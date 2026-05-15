@@ -1,5 +1,3 @@
-// Linear search on an array
-// Returns the index of the target if found, -1 if not found
 
 fn linear_search(arr: [int; 10], target: int) -> int {
     let mut result: int = 0 - 1;
@@ -29,9 +27,6 @@ fn main() {
     arr[8] = 56;
     arr[9] = 4;
 
-    // Search for 42 (should return index 3)
     let found_idx: int = linear_search(arr, 42);
 
-    // Search for 99 (should return -1, not found)
-    // let not_found_idx: int = linear_search(arr, 99);
 }

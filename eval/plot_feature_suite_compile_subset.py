@@ -21,8 +21,6 @@ INPUT_CSV = (
 OUTPUT_DIR = REPO_ROOT / "docs" / "veritas-dissertation" / "figures"
 OUTPUT_BASENAME = "chapter4_feature_suite_compile_cost_subset"
 
-# Representative programs: simple baselines, array reasoning, contracts,
-# quantifiers, arithmetic safety, borrowing, and algorithmic proof obligations.
 SUBSET = [
     "01_simple",
     "02_conditionals",

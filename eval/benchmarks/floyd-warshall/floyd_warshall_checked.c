@@ -1,15 +1,8 @@
-#include <stdio.h>
-#include <time.h>
 
-#include "../checked_bounds.h"
 
-#ifndef N
-#define N 180
-#endif
 
 static long long path[N][N];
 
-#define PATH(i, j) path[CHECKED_IDX1("path", (i), N)][CHECKED_IDX1("path", (j), N)]
 
 static void init_array(void) {
     for (int i = 0; i < N; i++)

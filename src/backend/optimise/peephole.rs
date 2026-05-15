@@ -17,9 +17,6 @@
 
 use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr};
 
-/// Apply peephole optimisations to a function
-///
-/// Returns true if any changes were made
 pub fn peephole_function(func: &mut DtalFunction) -> bool {
     let mut changed = false;
 
@@ -30,17 +27,13 @@ pub fn peephole_function(func: &mut DtalFunction) -> bool {
     changed
 }
 
-/// Apply peephole optimisations within a single block
 fn peephole_block(block: &mut DtalBlock) -> bool {
     let mut changed = false;
 
-    // Pass 1: 2-instruction pair rewrites (mark first instruction for removal)
     let mut remove = vec![false; block.instructions.len()];
     let len = block.instructions.len();
+    #[allow(clippy::needless_range_loop)]
     if len >= 2 {
-        // We need split borrows, so use index-based access with unsafe-free
-        // pattern: check pair, mutate second, mark first for removal.
-        #[allow(clippy::needless_range_loop)]
         for i in 0..len - 1 {
             if let Some(replacement) =
                 try_peephole_pair(&block.instructions[i], &block.instructions[i + 1])
@@ -60,7 +53,6 @@ fn peephole_block(block: &mut DtalBlock) -> bool {
         });
     }
 
-    // Pass 2: single-instruction rewrites
     for instr in &mut block.instructions {
         changed |= try_peephole(instr);
     }
@@ -68,12 +60,7 @@ fn peephole_block(block: &mut DtalBlock) -> bool {
     changed
 }
 
-/// Try to fuse a pair of adjacent instructions
-///
-/// Returns a replacement for the second instruction if the pair matches.
-/// The first instruction should be removed by the caller.
 fn try_peephole_pair(first: &DtalInstr, second: &DtalInstr) -> Option<DtalInstr> {
-    // Negation: MovImm dst, 0; BinOp Sub dst, dst, operand  →  Neg dst, operand
     if let (
         DtalInstr::MovImm {
             dst: d1, imm: 0, ..
@@ -99,12 +86,8 @@ fn try_peephole_pair(first: &DtalInstr, second: &DtalInstr) -> Option<DtalInstr>
     None
 }
 
-/// Try to apply a peephole rewrite to a single instruction
-///
-/// Returns true if the instruction was rewritten
 fn try_peephole(instr: &mut DtalInstr) -> bool {
     match instr {
-        // Shift by 0 → MovReg (identity)
         DtalInstr::ShlImm {
             dst,
             src,
@@ -125,7 +108,6 @@ fn try_peephole(instr: &mut DtalInstr) -> bool {
             true
         }
 
-        // AddImm with immediate 0 → MovReg (identity)
         DtalInstr::AddImm { dst, src, imm, ty } if *imm == 0 => {
             *instr = DtalInstr::MovReg {
                 dst: *dst,
@@ -135,43 +117,38 @@ fn try_peephole(instr: &mut DtalInstr) -> bool {
             true
         }
 
-        // Same-register BinOp patterns
         DtalInstr::BinOp {
             op,
             dst,
             lhs,
             rhs,
             ty,
-        } if lhs == rhs => {
-            match op {
-                // x - x = 0, x ^ x = 0
-                BinaryOp::Sub | BinaryOp::BitXor => {
-                    *instr = DtalInstr::MovImm {
-                        dst: *dst,
-                        imm: 0,
-                        ty: ty.clone(),
-                    };
-                    true
-                }
-                // x & x = x, x | x = x, x && x = x, x || x = x
-                BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::And | BinaryOp::Or => {
-                    let src = *lhs;
-                    *instr = DtalInstr::MovReg {
-                        dst: *dst,
-                        src,
-                        ty: ty.clone(),
-                    };
-                    true
-                }
-                _ => false,
+        } if lhs == rhs => match op {
+            BinaryOp::Sub | BinaryOp::BitXor => {
+                *instr = DtalInstr::MovImm {
+                    dst: *dst,
+                    imm: 0,
+                    ty: ty.clone(),
+                };
+                true
             }
-        }
+            BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::And | BinaryOp::Or => {
+                let src = *lhs;
+                *instr = DtalInstr::MovReg {
+                    dst: *dst,
+                    src,
+                    ty: ty.clone(),
+                };
+                true
+            }
+            _ => false,
+        },
 
         _ => false,
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{DtalBlock, DtalFunction, TypeState};
@@ -197,8 +174,8 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_addimm_zero_to_mov() {
         let mut func = make_func(vec![
             DtalInstr::AddImm {
@@ -224,8 +201,8 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
-
     #[test]
+
     fn test_addimm_nonzero_unchanged() {
         let mut func = make_func(vec![
             DtalInstr::AddImm {
@@ -244,8 +221,8 @@ mod tests {
         let changed = peephole_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_sub_same_reg_to_zero() {
         let mut func = make_func(vec![
             DtalInstr::BinOp {
@@ -270,8 +247,8 @@ mod tests {
             DtalInstr::MovImm { imm: 0, .. }
         ));
     }
-
     #[test]
+
     fn test_xor_same_reg_to_zero() {
         let mut func = make_func(vec![
             DtalInstr::BinOp {
@@ -296,8 +273,8 @@ mod tests {
             DtalInstr::MovImm { imm: 0, .. }
         ));
     }
-
     #[test]
+
     fn test_bitand_same_reg_to_copy() {
         let mut func = make_func(vec![
             DtalInstr::BinOp {
@@ -324,8 +301,8 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
-
     #[test]
+
     fn test_bitor_same_reg_to_copy() {
         let mut func = make_func(vec![
             DtalInstr::BinOp {
@@ -352,8 +329,8 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
-
     #[test]
+
     fn test_logical_and_same_reg_to_copy() {
         let mut func = make_func(vec![
             DtalInstr::BinOp {
@@ -378,8 +355,8 @@ mod tests {
             DtalInstr::MovReg { .. }
         ));
     }
-
     #[test]
+
     fn test_logical_or_same_reg_to_copy() {
         let mut func = make_func(vec![
             DtalInstr::BinOp {
@@ -404,10 +381,9 @@ mod tests {
             DtalInstr::MovReg { .. }
         ));
     }
-
     #[test]
+
     fn test_different_regs_unchanged() {
-        // sub v2, v0, v1 where v0 != v1 — should NOT be rewritten
         let mut func = make_func(vec![
             DtalInstr::BinOp {
                 op: BinaryOp::Sub,
@@ -426,10 +402,9 @@ mod tests {
         let changed = peephole_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_add_same_reg_unchanged() {
-        // add v1, v0, v0 — NOT an identity, should stay (it's x + x = 2x)
         let mut func = make_func(vec![
             DtalInstr::BinOp {
                 op: BinaryOp::Add,
@@ -448,8 +423,8 @@ mod tests {
         let changed = peephole_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_constraint_assert_untouched() {
         use crate::dtal::constraints::{Constraint, IndexExpr};
 
@@ -463,10 +438,9 @@ mod tests {
         let changed = peephole_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_negation_fusion() {
-        // MovImm v1, 0; BinOp Sub v1, v1, v0  →  Neg v1, v0
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(1),
@@ -490,7 +464,6 @@ mod tests {
         let changed = peephole_function(&mut func);
         assert!(changed);
 
-        // Should be 3 instructions: Neg, Push, Ret (MovImm removed)
         assert_eq!(func.blocks[0].instructions.len(), 3);
 
         if let DtalInstr::Neg { dst, src, .. } = &func.blocks[0].instructions[0] {
@@ -500,10 +473,9 @@ mod tests {
             panic!("Expected Neg, got {:?}", &func.blocks[0].instructions[0]);
         }
     }
-
     #[test]
+
     fn test_negation_no_fusion_nonzero_imm() {
-        // MovImm v1, 5; BinOp Sub v1, v1, v0  →  no change (imm != 0)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(1),
@@ -528,10 +500,9 @@ mod tests {
         assert!(!changed);
         assert_eq!(func.blocks[0].instructions.len(), 4);
     }
-
     #[test]
+
     fn test_negation_no_fusion_different_regs() {
-        // MovImm v1, 0; BinOp Sub v2, v1, v0  →  no change (dst != d1)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(1),

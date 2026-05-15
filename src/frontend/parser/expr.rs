@@ -4,7 +4,6 @@ use crate::common::ownership::BorrowKind;
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
-// Expression parser for use in type contexts
 pub fn expr_parser_for_types<'tokens, 'src: 'tokens, I>()
 -> impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
@@ -20,7 +19,6 @@ where
             BorrowMut,
         }
 
-        // Literals
         let lit = select! {
             Token::Num(n) => Literal::Int(n),
             Token::True => Literal::Bool(true),
@@ -29,18 +27,15 @@ where
         .map(Expr::Literal)
         .labelled("literal");
 
-        // Variables
         let var = select! { Token::Ident(name) => name }
             .map(Expr::Variable)
             .labelled("identifier");
 
-        // Parenthesized expression
         let paren = expr
             .clone()
             .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
             .map(|(e, _)| e);
 
-        // Array initialization: [value; length]
         let array_init = expr
             .clone()
             .then_ignore(just(Token::Ctrl(';')))
@@ -51,7 +46,6 @@ where
                 length: Box::new(length),
             });
 
-        // Function call
         let call = select! { Token::Ident(name) => name }
             .then(
                 expr.clone()
@@ -63,7 +57,6 @@ where
             )
             .map(|(func_name, args)| Expr::Call { func_name, args });
 
-        // Quantifier expressions: forall i in start..end { body }
         let forall_expr = just(Token::Forall)
             .ignore_then(select! { Token::Ident(name) => name })
             .then_ignore(just(Token::In))
@@ -117,7 +110,6 @@ where
             )))
             .boxed();
 
-        // Array indexing
         let indexed = atom.foldl_with(
             expr.clone()
                 .delimited_by(just(Token::Ctrl('[')), just(Token::Ctrl(']')))
@@ -133,7 +125,6 @@ where
             },
         );
 
-        // Prefix operators
         let op_prefix = choice((
             just(Token::Op("&"))
                 .ignore_then(just(Token::Mut))
@@ -172,8 +163,6 @@ where
             })
             .boxed();
 
-        // Binary operators with precedence
-        // Multiplication
         let op_mul_div = just(Token::Op("*"))
             .to(BinOp::Mul)
             .or(just(Token::Op("/")).to(BinOp::Div))
@@ -192,7 +181,6 @@ where
                     )
                 });
 
-        // Addition and subtraction
         let op_add = just(Token::Op("+")).to(BinOp::Add);
         let op_sub = just(Token::Op("-")).to(BinOp::Sub);
         let sum = product
@@ -212,7 +200,6 @@ where
             )
             .boxed();
 
-        // Shifts (between addition and bitwise AND)
         let op_shl = just(Token::Op("<<")).to(BinOp::Shl);
         let op_shr = just(Token::Op(">>")).to(BinOp::Shr);
         let shift = sum.clone().foldl_with(
@@ -229,7 +216,6 @@ where
             },
         );
 
-        // Bitwise AND
         let op_bitand = just(Token::Op("&")).to(BinOp::BitAnd);
         let bit_and =
             shift
@@ -245,7 +231,6 @@ where
                     )
                 });
 
-        // Bitwise XOR
         let op_bitxor = just(Token::Op("^")).to(BinOp::BitXor);
         let bit_xor =
             bit_and
@@ -261,7 +246,6 @@ where
                     )
                 });
 
-        // Bitwise OR
         let op_bitor = just(Token::Op("|")).to(BinOp::BitOr);
         let bitwise =
             bit_xor
@@ -277,7 +261,6 @@ where
                     )
                 });
 
-        // Comparisons
         let op_lt = just(Token::Op("<")).to(BinOp::Lt);
         let op_lte = just(Token::Op("<=")).to(BinOp::Lte);
         let op_gt = just(Token::Op(">")).to(BinOp::Gt);
@@ -300,7 +283,6 @@ where
             },
         );
 
-        // Logical operators
         let op_and = just(Token::Op("&&")).to(BinOp::And);
         let op_or = just(Token::Op("||")).to(BinOp::Or);
         let logical = comparison
@@ -320,7 +302,6 @@ where
             )
             .boxed();
 
-        // Implication (lowest precedence among binary operators)
         let op_implies = just(Token::Op("==>")).to(BinOp::Implies);
         let implication =
             logical
@@ -341,8 +322,6 @@ where
     .boxed()
 }
 
-// Full expression parser (reuses expr_parser_for_types for inline expressions,
-// and adds if-expressions with statement blocks)
 pub fn expr_parser<'tokens, 'src: 'tokens, I>()
 -> impl Parser<'tokens, I, Spanned<Expr<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
@@ -350,7 +329,6 @@ where
 {
     let inline_expr = expr_parser_for_types();
 
-    // Statements
     let ty = type_parser();
 
     let let_stmt = just(Token::Let)
@@ -382,8 +360,6 @@ where
 
     let stmt = choice((let_stmt, assign_stmt));
 
-    // Block parser: { stmts* expr? }
-    // Supports both statement-only blocks and blocks with a trailing expression
     let block = just(Token::Ctrl('{'))
         .ignore_then(
             stmt.clone()
@@ -397,7 +373,6 @@ where
             trailing_expr: trailing.map(Box::new),
         });
 
-    // If expression
     let if_expr = just(Token::If)
         .ignore_then(inline_expr.clone())
         .then(block.clone())

@@ -5,9 +5,6 @@ use crate::dtal::regs::{PhysicalReg, Reg, VirtualReg};
 use crate::dtal::types::DtalType;
 use std::sync::Arc;
 
-// === Helper functions ===
-
-/// Parse a register name like "v0", "r0", "sp", "fp", "lr"
 pub(super) fn parse_reg(s: &str) -> Option<Reg> {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix('v') {
@@ -40,7 +37,6 @@ pub(super) fn parse_reg(s: &str) -> Option<Reg> {
     }
 }
 
-/// Parse a comparison operation name
 pub(super) fn parse_cmpop(s: &str) -> Option<CmpOp> {
     match s {
         "eq" => Some(CmpOp::Eq),
@@ -53,13 +49,10 @@ pub(super) fn parse_cmpop(s: &str) -> Option<CmpOp> {
     }
 }
 
-/// Split instruction text from trailing type comment
-/// e.g. "mov v0, 42    ; int" -> ("mov v0, 42", Some("int"))
 pub(super) fn split_instruction_comment(line: &str) -> (&str, Option<&str>) {
-    // Find "    :" separator (4 spaces + colon) — type annotation syntax
     if let Some(pos) = line.find("    : ") {
         let instr = line[..pos].trim();
-        let comment = line[pos + 6..].trim(); // skip "    : "
+        let comment = line[pos + 6..].trim();
         return (
             instr,
             if comment.is_empty() {
@@ -69,10 +62,9 @@ pub(super) fn split_instruction_comment(line: &str) -> (&str, Option<&str>) {
             },
         );
     }
-    // Legacy: "    ;" separator (4 spaces + semicolon) — backward compatibility
     if let Some(pos) = line.find("    ;") {
         let instr = line[..pos].trim();
-        let comment = line[pos + 5..].trim(); // skip "    ;"
+        let comment = line[pos + 5..].trim();
         return (
             instr,
             if comment.is_empty() {
@@ -85,7 +77,6 @@ pub(super) fn split_instruction_comment(line: &str) -> (&str, Option<&str>) {
     (line.trim(), None)
 }
 
-/// Parse a type from a string
 pub(super) fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
     let s = s.trim();
     match s {
@@ -100,7 +91,6 @@ pub(super) fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
             Ok(DtalType::SingletonInt(idx))
         }
         _ if s.starts_with('[') && s.ends_with(']') => {
-            // [int; 10]
             let inner = &s[1..s.len() - 1];
             let semi = find_top_level_char(inner, ';')
                 .ok_or_else(|| err_static(format!("expected ';' in array type '{}'", s)))?;
@@ -126,14 +116,12 @@ pub(super) fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
             Ok(DtalType::Master(Arc::new(inner)))
         }
         _ if s.starts_with("exists ") => {
-            // exists n. int(n) where constraint
-            let rest = &s[7..]; // skip "exists "
+            let rest = &s[7..];
             let dot = rest
                 .find('.')
                 .ok_or_else(|| err_static(format!("expected '.' in existential type '{}'", s)))?;
             let witness_var = rest[..dot].trim().to_string();
             let after_dot = rest[dot + 1..].trim();
-            // Expect "int(<witness_var>) where <constraint>"
             let where_pos = after_dot.find(" where ").ok_or_else(|| {
                 err_static(format!("expected 'where' in existential type '{}'", s))
             })?;
@@ -145,7 +133,6 @@ pub(super) fn parse_type_str(s: &str) -> Result<DtalType, DtalParseError> {
             })
         }
         _ if s.starts_with('{') && s.ends_with('}') => {
-            // {x: int | constraint }
             let inner = &s[1..s.len() - 1].trim();
             let colon = inner
                 .find(':')
@@ -173,7 +160,6 @@ fn err_static(msg: String) -> DtalParseError {
     DtalParseError { line: 0, msg }
 }
 
-/// Parse a constraint from string
 pub(super) fn parse_constraint_str(s: &str) -> Result<Constraint, DtalParseError> {
     let s = s.trim();
     if s == "true" {
@@ -183,11 +169,9 @@ pub(super) fn parse_constraint_str(s: &str) -> Result<Constraint, DtalParseError
         return Ok(Constraint::False);
     }
 
-    // Try to parse parenthesized expressions
     if s.starts_with('(') && s.ends_with(')') {
         let inner = &s[1..s.len() - 1];
 
-        // Check for binary constraint operators: &&, ||, ==>
         if let Some(pos) = find_top_level_op(inner, "&&") {
             let left = parse_constraint_str(inner[..pos].trim())?;
             let right = parse_constraint_str(inner[pos + 2..].trim())?;
@@ -204,22 +188,18 @@ pub(super) fn parse_constraint_str(s: &str) -> Result<Constraint, DtalParseError
             return Ok(Constraint::Implies(Box::new(left), Box::new(right)));
         }
 
-        // Check for quantifiers
         if inner.starts_with("forall ") || inner.starts_with("exists ") {
             return parse_quantifier(inner);
         }
 
-        // Otherwise, parse as inner expression
         return parse_constraint_str(inner);
     }
 
-    // Negation
     if let Some(rest) = s.strip_prefix('!') {
         let inner = parse_constraint_str(rest)?;
         return Ok(Constraint::Not(Box::new(inner)));
     }
 
-    // Binary comparison operators (look for top-level)
     for (op_str, make) in &[
         (
             "==",
@@ -253,7 +233,6 @@ pub(super) fn parse_constraint_str(s: &str) -> Result<Constraint, DtalParseError
         }
     }
 
-    // Non-parenthesized && / ||
     if let Some(pos) = find_top_level_op(s, "&&") {
         let left = parse_constraint_str(s[..pos].trim())?;
         let right = parse_constraint_str(s[pos + 2..].trim())?;
@@ -269,7 +248,6 @@ pub(super) fn parse_constraint_str(s: &str) -> Result<Constraint, DtalParseError
 }
 
 fn parse_quantifier(s: &str) -> Result<Constraint, DtalParseError> {
-    // forall x in 0..10 { body }  OR  exists x in 0..10 { body }
     let is_forall = s.starts_with("forall ");
     let rest = if is_forall {
         &s["forall ".len()..]
@@ -316,14 +294,11 @@ fn parse_quantifier(s: &str) -> Result<Constraint, DtalParseError> {
     }
 }
 
-/// Parse an index expression
 pub(super) fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
     let s = s.trim();
 
-    // Parenthesized
     if s.starts_with('(') && s.ends_with(')') {
         let inner = &s[1..s.len() - 1];
-        // Look for top-level +, -, *, /
         for (op_str, make) in &[
             (
                 "+",
@@ -351,7 +326,6 @@ pub(super) fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
         return parse_index_expr(inner);
     }
 
-    // Array access: name[idx]
     if let Some(bracket) = s.find('[')
         && s.ends_with(']')
     {
@@ -361,19 +335,16 @@ pub(super) fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
         return Ok(IndexExpr::Select(name, Box::new(idx)));
     }
 
-    // Integer constant
     if let Ok(n) = s.parse::<i128>() {
         return Ok(IndexExpr::Const(n));
     }
 
-    // Negative integer
     if s.starts_with('-')
         && let Ok(n) = s[1..].parse::<i128>()
     {
         return Ok(IndexExpr::Const(-n));
     }
 
-    // Variable
     if s.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return Ok(IndexExpr::Var(s.to_string()));
     }
@@ -381,7 +352,6 @@ pub(super) fn parse_index_expr(s: &str) -> Result<IndexExpr, DtalParseError> {
     Err(err_static(format!("cannot parse index expr '{}'", s)))
 }
 
-/// Find a top-level comparison operator (not inside parens)
 fn find_top_level_cmp(s: &str, op: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     let op_bytes = op.as_bytes();
@@ -396,7 +366,6 @@ fn find_top_level_cmp(s: &str, op: &str) -> Option<usize> {
         }
 
         if depth == 0 && &bytes[i..i + op_bytes.len()] == op_bytes {
-            // For < and >, make sure we're not matching <= or >= or ==>
             if op == "<" && i + 1 < bytes.len() && bytes[i + 1] == b'=' {
                 i += 1;
                 continue;
@@ -406,17 +375,14 @@ fn find_top_level_cmp(s: &str, op: &str) -> Option<usize> {
                 continue;
             }
             if op == ">" && i > 0 && bytes[i - 1] == b'=' {
-                // part of ==>
                 i += 1;
                 continue;
             }
             if op == "==" && i > 0 && bytes[i - 1] == b'!' {
-                // part of !=
                 i += 1;
                 continue;
             }
             if op == "==" && i + 2 < bytes.len() && bytes[i + 2] == b'>' {
-                // part of ==>
                 i += 1;
                 continue;
             }
@@ -427,7 +393,6 @@ fn find_top_level_cmp(s: &str, op: &str) -> Option<usize> {
     None
 }
 
-/// Find a top-level logical operator (&&, ||, ==>)
 fn find_top_level_op(s: &str, op: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     let op_bytes = op.as_bytes();
@@ -449,12 +414,10 @@ fn find_top_level_op(s: &str, op: &str) -> Option<usize> {
     None
 }
 
-/// Find a top-level arithmetic operator
 fn find_top_level_arith(s: &str, op: &str) -> Option<usize> {
     find_top_level_op(s, op)
 }
 
-/// Find a character at the top level (not inside brackets/parens)
 pub(super) fn find_top_level_char(s: &str, ch: char) -> Option<usize> {
     let mut depth = 0i32;
     for (i, c) in s.char_indices() {
@@ -468,7 +431,6 @@ pub(super) fn find_top_level_char(s: &str, ch: char) -> Option<usize> {
     None
 }
 
-/// Split a string at top-level commas
 pub(super) fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth = 0i32;

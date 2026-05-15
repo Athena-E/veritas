@@ -23,23 +23,13 @@ use std::collections::HashMap;
 
 use super::isel;
 
-/// Code generation context
 pub struct CodegenContext {
-    /// Generated DTAL blocks
     blocks: Vec<DtalBlock>,
-    /// Map from TIR BlockId to DTAL label
     block_labels: HashMap<BlockId, String>,
-    /// Current function name (for label generation)
     func_name: String,
-    /// Variable name → register name substitutions for constraints
     pub var_subs: Vec<(String, String)>,
-    /// Whether we're targeting bare metal (no Linux syscalls available).
-    /// Controls whether `AllocArray` lowers to a heap call or a stack alloca.
     pub bare_metal: bool,
-    /// Whether this function needs a hosted function-local region.
     pub needs_hosted_region: bool,
-    /// Whether this hosted function returns an owned array and therefore
-    /// allocates into the caller's region instead of a callee-local region.
     pub returns_owned_array: bool,
 }
 
@@ -56,7 +46,6 @@ impl CodegenContext {
         }
     }
 
-    /// Generate a label for a block
     pub fn label_for_block(&mut self, block_id: BlockId) -> String {
         if let Some(label) = self.block_labels.get(&block_id) {
             return label.clone();
@@ -66,26 +55,19 @@ impl CodegenContext {
         label
     }
 
-    /// Add a generated DTAL block
     pub fn add_block(&mut self, block: DtalBlock) {
         self.blocks.push(block);
     }
 
-    /// Take all generated blocks
     pub fn take_blocks(self) -> Vec<DtalBlock> {
         self.blocks
     }
 }
 
-/// Generate DTAL code for a TIR program (default: hosted Linux target).
 pub fn codegen_program<'src>(program: &TirProgram<'src>) -> DtalProgram {
     codegen_program_with_target(program, false)
 }
 
-/// Generate DTAL code, choosing host vs bare-metal target.
-///
-/// Bare-metal currently keeps `AllocArray` on the stack; hosted routes it
-/// through a function-local mmap-backed region allocator.
 pub fn codegen_program_with_target<'src>(
     program: &TirProgram<'src>,
     bare_metal: bool,
@@ -96,18 +78,11 @@ pub fn codegen_program_with_target<'src>(
         .map(|f| codegen_function_with_target(f, bare_metal))
         .collect();
 
-    // Inject runtime function stubs so the verifier can check call-site
-    // types without needing the runtime's implementation.
     functions.extend(runtime_function_stubs());
 
     DtalProgram { functions }
 }
 
-/// Create stub DtalFunction entries for runtime intrinsics.
-///
-/// These have correct signatures but empty block lists. The verifier
-/// uses them to check preconditions and derive return types at call
-/// sites, but never attempts to verify their bodies (no blocks to verify).
 fn runtime_function_stubs() -> Vec<DtalFunction> {
     use crate::dtal::regs::{PhysicalReg, Reg};
     use crate::dtal::types::DtalType;
@@ -161,7 +136,6 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
             postcondition: None,
             blocks: vec![],
         },
-        // Hosted function-local region helpers.
         DtalFunction {
             name: crate::backend::runtime::RT_REGION_ENTER.to_string(),
             params: vec![],
@@ -195,7 +169,6 @@ fn runtime_function_stubs() -> Vec<DtalFunction> {
     ]
 }
 
-/// Generate DTAL code for a TIR function with target selection.
 pub fn codegen_function_with_target<'src>(
     func: &TirFunction<'src>,
     bare_metal: bool,
@@ -274,11 +247,6 @@ pub fn codegen_function_with_target<'src>(
     dtal_func
 }
 
-/// Compute entry states for all blocks and stamp them onto the DTAL function.
-///
-/// Stamps both register types and constraints from dataflow analysis.
-/// The constraints include branch-derived constraints from predecessor edges,
-/// which the verifier uses as the block's initial context.
 fn stamp_entry_states(func: &mut DtalFunction) {
     use crate::verifier::dataflow::analyze_function;
 
@@ -291,7 +259,6 @@ fn stamp_entry_states(func: &mut DtalFunction) {
     }
 }
 
-/// Generate DTAL code for a basic block
 fn codegen_block<'src>(
     ctx: &mut CodegenContext,
     block: &BasicBlock<'src>,
@@ -381,7 +348,6 @@ fn emit_region_leave(instrs: &mut Vec<DtalInstr>) {
     });
 }
 
-/// Lower a phi node to mov instructions
 fn lower_phi_node<'src>(
     instrs: &mut Vec<DtalInstr>,
     phi: &PhiNode<'src>,
@@ -402,7 +368,6 @@ fn lower_phi_node<'src>(
     });
 }
 
-/// Lower a TIR terminator to DTAL instructions
 fn lower_terminator<'src>(
     instrs: &mut Vec<DtalInstr>,
     terminator: &Terminator,
@@ -430,7 +395,6 @@ fn lower_terminator<'src>(
             let true_label = ctx.label_for_block(*true_target);
             let false_label = ctx.label_for_block(*false_target);
 
-            // Reuse SetCC's source comparison so verification sees `v1 < v2`, not `v_cond != 0`.
             let (branch_cond, needs_cmp) = find_original_comparison(instrs, *cond);
 
             if needs_cmp {
@@ -497,14 +461,6 @@ fn lower_terminator<'src>(
     }
 }
 
-/// Find the original comparison that produced a condition register.
-///
-/// Scans backwards through the instruction list for a `SetCC` that defined
-/// `cond_reg`. If found, returns the `CmpOp` from the `SetCC` and `false`
-/// (no new Cmp needed). The preceding `Cmp`/`CmpImm` instruction remains
-/// in the stream, so the verifier's `last_cmp` is already set correctly.
-///
-/// If not found, returns `(Ne, true)` — caller should emit `CmpImm cond, 0`.
 fn find_original_comparison(
     instrs: &[DtalInstr],
     cond_reg: crate::dtal::VirtualReg,
@@ -513,14 +469,11 @@ fn find_original_comparison(
 
     let target = Reg::Virtual(cond_reg);
 
-    // Scan backwards for SetCC that defined cond_reg
     for instr in instrs.iter().rev() {
         match instr {
             DtalInstr::SetCC { dst, cond } if *dst == target => {
                 return (*cond, false);
             }
-            // If we hit an instruction that redefines the register via something
-            // other than SetCC, stop looking
             DtalInstr::MovImm { dst, .. }
             | DtalInstr::MovReg { dst, .. }
             | DtalInstr::BinOp { dst, .. }
@@ -541,11 +494,9 @@ fn find_original_comparison(
         }
     }
 
-    // Fallback: condition wasn't from a SetCC
     (CmpOp::Ne, true)
 }
 
-/// Emit mov instructions for phi nodes in the target block
 fn emit_phi_moves<'src>(
     instrs: &mut Vec<DtalInstr>,
     target_block: BlockId,
@@ -554,7 +505,6 @@ fn emit_phi_moves<'src>(
 ) {
     if let Some(block) = func.blocks.get(&target_block) {
         for phi in &block.phi_nodes {
-            // Find the incoming value for current_block
             for (pred_block, incoming_reg) in &phi.incoming {
                 if *pred_block == current_block {
                     let ty = DtalType::from_itype(&phi.ty);
@@ -578,9 +528,6 @@ fn emit_phi_moves<'src>(
     }
 }
 
-/// Substitute variable names in a constraint with register names.
-///
-/// Replaces `IndexExpr::Var("param_name")` with `IndexExpr::Var("v0")` etc.
 pub(crate) fn substitute_constraint_vars(
     constraint: &crate::dtal::Constraint,
     subs: &[(String, String)],
@@ -633,7 +580,6 @@ pub(crate) fn substitute_constraint_vars(
             upper,
             body,
         } => {
-            // Don't substitute the bound variable inside the body
             let filtered: Vec<_> = subs.iter().filter(|(n, _)| n != var).cloned().collect();
             Constraint::Forall {
                 var: var.clone(),
@@ -659,7 +605,6 @@ pub(crate) fn substitute_constraint_vars(
     }
 }
 
-/// Substitute variable names in an index expression with register names.
 pub(crate) fn substitute_index_vars(
     expr: &crate::dtal::IndexExpr,
     subs: &[(String, String)],

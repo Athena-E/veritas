@@ -29,7 +29,6 @@ use crate::backend::x86_64::regs::X86Reg;
 use crate::dtal::instr::{BinaryOp, CmpOp, DtalFunction, DtalInstr, DtalProgram};
 use crate::dtal::regs::{PhysicalReg, Reg};
 
-/// Map a DTAL `PhysicalReg` to an x86-64 register.
 fn phys_to_x86(preg: PhysicalReg) -> X86Reg {
     match preg {
         PhysicalReg::R0 => X86Reg::Rdi,
@@ -73,13 +72,6 @@ fn cmpop_to_condition(op: CmpOp) -> Condition {
     }
 }
 
-/// Encode a physically-allocated DTAL program to machine code.
-///
-/// # Panics
-///
-/// Panics if a live virtual register reaches this trusted encoder. Run
-/// [`crate::backend::physalloc::physically_allocate`] and verify the result
-/// before calling this function.
 pub fn encode_physical_dtal(program: &DtalProgram) -> EncodedProgram {
     let x86_program = lower_to_x86(program);
     let mut encoder = Encoder::new();
@@ -302,13 +294,10 @@ fn lower_instruction(out: &mut Vec<X86Instr>, instr: &DtalInstr) {
         }
 
         DtalInstr::PortIn { .. } => {
-            // Read from the port in DX; the byte result is returned in AL.
             out.push(X86Instr::InAlDx);
-            // Physalloc is responsible for placing operands in the right regs.
         }
 
         DtalInstr::PortOut { .. } => {
-            // Write the byte in AL to the port in DX.
             out.push(X86Instr::OutDxAl);
         }
 

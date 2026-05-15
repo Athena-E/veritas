@@ -129,9 +129,6 @@ def write_metadata(run_dir: Path) -> None:
 def render_veritas_variant(spec: KernelSpec, size: int) -> str:
     text = spec.veritas_source.read_text(encoding="utf-8")
 
-    # Source-specific global numeric replacement is sufficient here because the
-    # benchmark sources use the problem-size literals consistently and do not
-    # reuse them for unrelated constants.
     if spec.key == "floyd_warshall":
         return text.replace("500", str(size))
     if spec.key == "jacobi_2d":

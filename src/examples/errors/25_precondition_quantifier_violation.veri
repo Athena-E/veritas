@@ -1,5 +1,3 @@
-// Error: calling a function with a quantified precondition
-// that cannot be satisfied at the call site
 
 fn needs_all_positive(arr: [int; 3]) -> int
     requires forall i in 0..3 { arr[i] > 0 }

@@ -21,13 +21,7 @@ fn main() -> int {
     let mut zero_arr: [int; 3] = [0; 3];
     list_arg_sorted(zero_arr);
 
-    // test error
-    //let mut arr: [int; 3] = [0;3];
-    //arr[0] = 0;
-    //arr[1] = 1;
-    //arr[2] = 0;
 
-    // test success
     let mut arr: [int; 3] = [0;3];
     arr[0] = 0;
     arr[1] = 1;

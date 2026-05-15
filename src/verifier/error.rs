@@ -28,11 +28,6 @@ use crate::dtal::regs::Reg;
 use crate::dtal::types::DtalType;
 use std::fmt;
 
-/// Error emitted while verifying a DTAL program.
-///
-/// Variants are grouped by the invariant that failed: type derivation,
-/// ownership, control-flow joins, contract obligations, constraint proofs, or
-/// verifier-internal assumptions.
 #[derive(Debug)]
 pub enum VerifyError {
     TypeMismatch {
@@ -119,7 +114,6 @@ pub enum VerifyError {
         context: Vec<Constraint>,
     },
 
-    // Indicates an invariant violation inside the verifier.
     InternalError {
         msg: String,
     },

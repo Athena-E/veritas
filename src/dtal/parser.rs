@@ -8,7 +8,6 @@ use crate::dtal::instr::{BinaryOp, DtalBlock, DtalFunction, DtalInstr, DtalProgr
 use crate::dtal::regs::Reg;
 use crate::dtal::types::DtalType;
 
-/// Parse error for DTAL text
 #[derive(Debug, Clone)]
 pub struct DtalParseError {
     pub line: usize,
@@ -33,7 +32,6 @@ fn parse_optional_lifetime_token(token: &str) -> (Option<LifetimeId>, usize) {
     (None, 1)
 }
 
-/// Parse DTAL text into a program
 pub fn parse_dtal(input: &str) -> Result<DtalProgram, Vec<DtalParseError>> {
     let mut parser = DtalParser::new(input);
     parser.parse_program()
@@ -91,7 +89,6 @@ impl<'a> DtalParser<'a> {
         let mut functions = Vec::new();
         let mut errors = Vec::new();
 
-        // Skip header comments
         while let Some(line) = self.current_line() {
             let trimmed = line.trim();
             if trimmed.starts_with(';') || trimmed.is_empty() {
@@ -111,7 +108,6 @@ impl<'a> DtalParser<'a> {
                 Ok(func) => functions.push(func),
                 Err(e) => {
                     errors.push(e);
-                    // Skip to next .function directive
                     self.advance();
                     while let Some(line) = self.current_line() {
                         if line.trim().starts_with(".function ") {
@@ -131,7 +127,6 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_function(&mut self) -> Result<DtalFunction, DtalParseError> {
-        // .function <name>
         let line = self
             .current_line()
             .ok_or_else(|| self.err("expected .function"))?;
@@ -142,7 +137,6 @@ impl<'a> DtalParser<'a> {
         let name = trimmed[".function ".len()..].trim().to_string();
         self.advance();
 
-        // Parse directives
         let mut params = Vec::new();
         let mut return_type = DtalType::Unit;
         let mut precondition = None;
@@ -167,7 +161,6 @@ impl<'a> DtalParser<'a> {
             }
         }
 
-        // Skip blank lines
         while let Some(line) = self.current_line() {
             if line.trim().is_empty() {
                 self.advance();
@@ -176,7 +169,6 @@ impl<'a> DtalParser<'a> {
             }
         }
 
-        // Skip entry point label (function_name:)
         if let Some(line) = self.current_line() {
             let trimmed = line.trim();
             if trimmed.ends_with(':') && !trimmed.starts_with('.') {
@@ -184,7 +176,6 @@ impl<'a> DtalParser<'a> {
             }
         }
 
-        // Parse blocks
         let mut blocks = Vec::new();
         while let Some(line) = self.current_line() {
             let trimmed = line.trim();
@@ -209,7 +200,6 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_params(&self, line: &str) -> Result<Vec<(Reg, DtalType)>, DtalParseError> {
-        // .params {v0: int, v1: bool}
         let content = line.trim_start_matches(".params ").trim();
         let inner = content
             .strip_prefix('{')
@@ -225,7 +215,6 @@ impl<'a> DtalParser<'a> {
             if part.is_empty() {
                 continue;
             }
-            // Use top-level ':' to avoid matching inside nested types like {v: int | ...}
             let colon_pos = find_top_level_char(part, ':')
                 .ok_or_else(|| self.err(format!("expected ':' in param '{}'", part)))?;
             let reg_str = part[..colon_pos].trim();
@@ -239,7 +228,6 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_block(&mut self) -> Result<DtalBlock, DtalParseError> {
-        // label:
         let line = self
             .current_line()
             .ok_or_else(|| self.err("expected block label"))?;
@@ -248,11 +236,9 @@ impl<'a> DtalParser<'a> {
 
         let mut entry_state = TypeState::new();
 
-        // Parse entry state directives and skip legacy comments
         while let Some(line) = self.current_line() {
             let trimmed = line.trim();
 
-            // Parse .entry {reg: type, ...} directive
             if let Some(content) = trimmed.strip_prefix(".entry ") {
                 if let Some(inner) = content.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
                     for pair in split_top_level(inner, ',') {
@@ -293,7 +279,6 @@ impl<'a> DtalParser<'a> {
                 continue;
             }
 
-            // Parse .assume constraint directive
             if let Some(constraint_str) = trimmed.strip_prefix(".assume ") {
                 let constraint = parse_constraint_str(constraint_str)?;
                 entry_state.constraints.push(constraint);
@@ -301,7 +286,6 @@ impl<'a> DtalParser<'a> {
                 continue;
             }
 
-            // Skip legacy entry state comments
             if trimmed == "; Entry state:" {
                 self.advance();
                 while let Some(line) = self.current_line() {
@@ -318,19 +302,16 @@ impl<'a> DtalParser<'a> {
             break;
         }
 
-        // Parse instructions
         let mut instructions = Vec::new();
         while let Some(line) = self.current_line() {
             let trimmed = line.trim();
 
-            // Stop at next block, next function, or blank line between functions
             if (trimmed.ends_with(':') && !trimmed.starts_with(';'))
                 || trimmed.starts_with(".function ")
             {
                 break;
             }
 
-            // Blank line — could be end of function
             if trimmed.is_empty() {
                 break;
             }
@@ -351,34 +332,28 @@ impl<'a> DtalParser<'a> {
     fn parse_instruction(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
         let trimmed = line.trim();
 
-        // Annotation instructions as directives
         if trimmed.starts_with(".type ") {
             return self.parse_type_annotation(trimmed);
         }
         if trimmed.starts_with(".assert ") {
             return self.parse_constraint_assert(trimmed);
         }
-        // .assume in instruction stream: skip (block-level .assume is handled
-        // in parse_block; instruction-level assumes are no longer emitted)
         if trimmed.starts_with(".assume ") {
             return Ok(None);
         }
-        // Legacy comment-style annotation instructions (backward compatibility)
         if trimmed.starts_with("; type ") {
             return self.parse_type_annotation_legacy(trimmed);
         }
         if trimmed.starts_with("; assume ") {
-            return Ok(None); // Legacy assume — skip
+            return Ok(None);
         }
         if trimmed.starts_with("; assert ") {
             return self.parse_constraint_assert_legacy(trimmed);
         }
-        // Regular comments
         if trimmed.starts_with(';') {
             return Ok(None);
         }
 
-        // Split instruction from type annotation comment
         let (instr_part, ty_comment) = split_instruction_comment(trimmed);
         let tokens: Vec<&str> = instr_part.split_whitespace().collect();
 
@@ -410,12 +385,11 @@ impl<'a> DtalParser<'a> {
             "drop_owned" => self.parse_drop_owned(&tokens, ty_comment),
             _ if tokens[0].starts_with("set") => self.parse_setcc(&tokens),
             _ if tokens[0].starts_with('b') && tokens.len() >= 2 => self.parse_branch(&tokens),
-            _ => Ok(None), // Unknown instruction, skip
+            _ => Ok(None),
         }
     }
 
     fn parse_type_annotation(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // .type v0: int
         let rest = line.trim_start_matches(".type ").trim();
         let colon = rest
             .find(':')
@@ -429,9 +403,7 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_constraint_assert(&self, line: &str) -> Result<Option<DtalInstr>, DtalParseError> {
-        // .assert <constraint>
         let rest = line.trim_start_matches(".assert ").trim();
-        // Strip any trailing legacy " ; msg" comment
         let constraint_str = if let Some(pos) = rest.find(" ; ") {
             &rest[..pos]
         } else {
@@ -440,8 +412,6 @@ impl<'a> DtalParser<'a> {
         let constraint = parse_constraint_str(constraint_str)?;
         Ok(Some(DtalInstr::ConstraintAssert { constraint }))
     }
-
-    // Legacy comment-style annotation parsers (backward compatibility)
 
     fn parse_type_annotation_legacy(
         &self,
@@ -478,8 +448,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // mov v0, 42    ; int
-        // mov v0, v1    ; int
         if tokens.len() < 3 {
             return Err(self.err("mov requires at least 2 operands"));
         }
@@ -506,7 +474,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // load v0, [v1 + v2]    ; int
         let full = tokens[1..].join(" ");
         let dst_end = full
             .find(',')
@@ -517,7 +484,6 @@ impl<'a> DtalParser<'a> {
         let dst =
             parse_reg(dst_str).ok_or_else(|| self.err(format!("invalid dst '{}'", dst_str)))?;
 
-        // Parse [base + offset]
         let inner = rest.trim_start_matches('[').trim_end_matches(']').trim();
         let plus_pos = inner
             .find('+')
@@ -637,7 +603,6 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_store(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {
-        // store [v0 + v1], v2
         let full = tokens[1..].join(" ");
         let bracket_end = full
             .find(']')
@@ -666,7 +631,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // add v0, v1, v2    ; int
         if tokens.len() < 4 {
             return Err(self.err("binop requires 3 operands"));
         }
@@ -715,7 +679,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // addi v0, v1, 42    ; int
         if tokens.len() < 4 {
             return Err(self.err("addi requires 3 operands"));
         }
@@ -740,7 +703,6 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_cmp(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {
-        // cmp v0, v1  OR  cmp v0, 42
         if tokens.len() < 3 {
             return Err(self.err("cmp requires 2 operands"));
         }
@@ -760,8 +722,7 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_setcc(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {
-        // seteq v0
-        let cond_str = &tokens[0][3..]; // skip "set"
+        let cond_str = &tokens[0][3..];
         let cond = parse_cmpop(cond_str)
             .ok_or_else(|| self.err(format!("invalid setcc condition '{}'", cond_str)))?;
         if tokens.len() < 2 {
@@ -778,7 +739,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // not v0, v1    ; bool
         if tokens.len() < 3 {
             return Err(self.err("not requires 2 operands"));
         }
@@ -803,7 +763,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // neg v0, v1    : int
         if tokens.len() < 3 {
             return Err(self.err("neg requires 2 operands"));
         }
@@ -883,8 +842,7 @@ impl<'a> DtalParser<'a> {
     }
 
     fn parse_branch(&self, tokens: &[&str]) -> Result<Option<DtalInstr>, DtalParseError> {
-        // beq .label  OR  bne .label
-        let cond_str = &tokens[0][1..]; // skip 'b'
+        let cond_str = &tokens[0][1..];
         let cond = parse_cmpop(cond_str)
             .ok_or_else(|| self.err(format!("invalid branch condition '{}'", cond_str)))?;
         if tokens.len() < 2 {
@@ -901,15 +859,12 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // call foo    : int   (new syntax)
-        // call foo    ; -> int   (legacy)
         if tokens.len() < 2 {
             return Err(self.err("call requires target"));
         }
         let return_ty = ty_comment
             .and_then(|s| {
                 let s = s.trim();
-                // Legacy: strip "-> " prefix if present
                 if let Some(rest) = s.strip_prefix("-> ") {
                     parse_type_str(rest.trim()).ok()
                 } else {
@@ -1000,7 +955,6 @@ impl<'a> DtalParser<'a> {
         tokens: &[&str],
         ty_comment: Option<&str>,
     ) -> Result<Option<DtalInstr>, DtalParseError> {
-        // alloca v0, 80    ; [int; 10]
         if tokens.len() < 3 {
             return Err(self.err("alloca requires 2 operands"));
         }
@@ -1042,13 +996,11 @@ impl<'a> DtalParser<'a> {
 
 mod syntax;
 
+#[cfg(test)]
+use syntax::parse_index_expr;
 use syntax::{
     find_top_level_char, parse_cmpop, parse_constraint_str, parse_reg, parse_type_str,
     split_instruction_comment, split_top_level,
 };
-
-#[cfg(test)]
-use syntax::parse_index_expr;
-
 #[cfg(test)]
 mod parser_tests;

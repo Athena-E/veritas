@@ -1,4 +1,3 @@
-// C equivalent of 10_advanced_types.veri
 
 static int use_positive(int n) {
     return n;

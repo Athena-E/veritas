@@ -1,6 +1,5 @@
 use crate::common::ast::{Block, Expr, Literal, Stmt};
 
-/// Substitute a variable with a literal integer in an expression.
 pub(super) fn substitute_var_with_literal<'src>(
     expr: &Expr<'src>,
     var_name: &str,
@@ -138,7 +137,6 @@ pub(super) fn substitute_var_with_literal<'src>(
     }
 }
 
-/// Substitute a variable with a literal integer in a statement.
 fn substitute_var_in_stmt<'src>(stmt: &Stmt<'src>, var_name: &str, value: i128) -> Stmt<'src> {
     match stmt {
         Stmt::Let {

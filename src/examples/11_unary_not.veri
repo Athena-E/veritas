@@ -1,4 +1,3 @@
-// Function with unary NOT operator
 fn test_not() {
     let x: bool = true;
     let y: bool = false;

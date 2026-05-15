@@ -34,7 +34,6 @@ use crate::middle::tir::phi::PhiNode;
 use crate::middle::tir::types::{BlockId, RegisterState};
 use std::collections::HashMap;
 
-/// Collection of TIR functions.
 #[derive(Clone, Debug)]
 pub struct TirProgram<'src> {
     pub functions: Vec<TirFunction<'src>>,
@@ -58,65 +57,45 @@ impl<'src> Default for TirProgram<'src> {
     }
 }
 
-/// TIR function represented as a typed SSA control-flow graph.
 #[derive(Clone, Debug)]
 pub struct TirFunction<'src> {
     pub name: String,
-    /// Parameters with their SSA registers and types.
     pub params: Vec<(VirtualReg, IType<'src>)>,
-    /// Parameter passing kind for each parameter, parallel to `params`.
     pub parameter_kinds: Vec<ParameterKind>,
-    /// Parameter names parallel to `params`, used when translating constraints.
     pub param_names: Vec<String>,
-    /// Return type.
     pub return_type: IType<'src>,
-    /// Whether returning from this function transfers ownership of the result.
     pub returns_owned: bool,
-    /// Optional precondition.
     pub precondition: Option<Constraint>,
-    /// Optional postcondition.
     pub postcondition: Option<Constraint>,
-    /// Entry block ID.
     pub entry_block: BlockId,
-    /// Basic blocks keyed by ID.
     pub blocks: HashMap<BlockId, BasicBlock<'src>>,
 }
 
 impl<'src> TirFunction<'src> {
-    /// Get a block by ID.
     pub fn get_block(&self, id: BlockId) -> Option<&BasicBlock<'src>> {
         self.blocks.get(&id)
     }
 
-    /// Get a mutable block by ID.
     pub fn get_block_mut(&mut self, id: BlockId) -> Option<&mut BasicBlock<'src>> {
         self.blocks.get_mut(&id)
     }
 
-    /// Iterate over all blocks.
     pub fn iter_blocks(&self) -> impl Iterator<Item = (&BlockId, &BasicBlock<'src>)> {
         self.blocks.iter()
     }
 }
 
-/// Basic block in a TIR control-flow graph.
 #[derive(Clone, Debug)]
 pub struct BasicBlock<'src> {
     pub id: BlockId,
-    /// Phi nodes at block entry.
     pub phi_nodes: Vec<PhiNode<'src>>,
-    /// Instructions in this block.
     pub instructions: Vec<TirInstr<'src>>,
-    /// Block terminator.
     pub terminator: Terminator,
-    /// Predecessor blocks.
     pub predecessors: Vec<BlockId>,
-    /// Type state at block entry after phi nodes.
     pub entry_state: RegisterState<'src>,
 }
 
 impl<'src> BasicBlock<'src> {
-    /// Create a basic block with the given ID and terminator.
     pub fn new(id: BlockId, terminator: Terminator) -> Self {
         Self {
             id,
@@ -128,24 +107,20 @@ impl<'src> BasicBlock<'src> {
         }
     }
 
-    /// Add an instruction to this block.
     pub fn add_instruction(&mut self, instr: TirInstr<'src>) {
         self.instructions.push(instr);
     }
 
-    /// Add a phi node to this block.
     pub fn add_phi(&mut self, phi: PhiNode<'src>) {
         self.phi_nodes.push(phi);
     }
 
-    /// Add a predecessor block.
     pub fn add_predecessor(&mut self, pred: BlockId) {
         if !self.predecessors.contains(&pred) {
             self.predecessors.push(pred);
         }
     }
 
-    /// Return successor blocks from the terminator.
     pub fn successors(&self) -> Vec<BlockId> {
         match &self.terminator {
             Terminator::Jump { target } => vec![*target],

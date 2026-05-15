@@ -8,12 +8,10 @@ use crate::common::types::IType;
 use crate::middle::lower::lower_function;
 use crate::middle::tir::{Terminator, TirInstr};
 
-/// Helper to create a spanned value with a dummy span
 fn spanned<T>(value: T) -> Spanned<T> {
     (value, Span::new(0, 0))
 }
 
-/// Test: fn id(x: int) -> int { x }
 #[test]
 fn test_lower_identity_function() {
     let func = TFunction {
@@ -39,20 +37,16 @@ fn test_lower_identity_function() {
 
     let tir_func = lower_function(&func);
 
-    // Verify function properties
     assert_eq!(tir_func.name, "id");
     assert_eq!(tir_func.params.len(), 1);
     assert!(matches!(tir_func.return_type, IType::Int));
 
-    // Verify we have at least one block
     assert!(!tir_func.blocks.is_empty());
 
-    // The entry block should have a Return terminator
     let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
     assert!(matches!(entry_block.terminator, Terminator::Return { .. }));
 }
 
-/// Test: fn add(x: int, y: int) -> int { let z = x + y; z }
 #[test]
 fn test_lower_function_with_let() {
     use crate::common::ast::BinOp;
@@ -104,11 +98,9 @@ fn test_lower_function_with_let() {
 
     let tir_func = lower_function(&func);
 
-    // Verify function properties
     assert_eq!(tir_func.name, "add");
     assert_eq!(tir_func.params.len(), 2);
 
-    // The entry block should have a BinOp instruction
     let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
     let has_binop = entry_block
         .instructions
@@ -117,7 +109,6 @@ fn test_lower_function_with_let() {
     assert!(has_binop, "Expected a BinOp instruction in the entry block");
 }
 
-/// Test: fn const_five() -> int { 5 }
 #[test]
 fn test_lower_function_returning_literal() {
     let func = TFunction {
@@ -140,11 +131,9 @@ fn test_lower_function_returning_literal() {
 
     let tir_func = lower_function(&func);
 
-    // Verify function properties
     assert_eq!(tir_func.name, "const_five");
     assert_eq!(tir_func.params.len(), 0);
 
-    // The entry block should have a LoadImm instruction
     let entry_block = tir_func.blocks.get(&tir_func.entry_block).unwrap();
     let has_loadimm = entry_block
         .instructions
@@ -153,7 +142,6 @@ fn test_lower_function_returning_literal() {
     assert!(has_loadimm, "Expected a LoadImm(5) instruction");
 }
 
-/// Test: fn abs(x: int) -> int { if x >= 0 { x } else { 0 - x } }
 #[test]
 fn test_lower_if_expression() {
     use crate::common::ast::BinOp;
@@ -214,21 +202,18 @@ fn test_lower_if_expression() {
 
     let tir_func = lower_function(&func);
 
-    // Verify function has multiple blocks (entry, then, else, merge)
     assert!(
         tir_func.blocks.len() >= 4,
         "Expected at least 4 blocks for if expression, got {}",
         tir_func.blocks.len()
     );
 
-    // Verify there's a Branch terminator somewhere
     let has_branch = tir_func
         .blocks
         .values()
         .any(|block| matches!(block.terminator, Terminator::Branch { .. }));
     assert!(has_branch, "Expected a Branch terminator for if expression");
 
-    // Verify there's a phi node in the merge block
     let has_phi = tir_func
         .blocks
         .values()
@@ -236,8 +221,6 @@ fn test_lower_if_expression() {
     assert!(has_phi, "Expected phi nodes for if expression merge");
 }
 
-/// Test: fn five() -> int ensures result == 5 { 5 }
-/// Verifies postcondition is lowered to TIR
 #[test]
 fn test_lower_function_with_postcondition() {
     use crate::common::ast::{BinOp, Expr};
@@ -275,7 +258,6 @@ fn test_lower_function_with_postcondition() {
 
     let tir_func = lower_function(&func);
 
-    // Verify function properties
     assert_eq!(tir_func.name, "five");
     assert!(
         tir_func.postcondition.is_some(),
@@ -283,8 +265,6 @@ fn test_lower_function_with_postcondition() {
     );
 }
 
-/// Test: fn no_postcond() -> int { 42 }
-/// Verifies functions without postconditions work correctly
 #[test]
 fn test_lower_function_without_postcondition() {
     let func = TFunction {
@@ -307,15 +287,14 @@ fn test_lower_function_without_postcondition() {
 
     let tir_func = lower_function(&func);
 
-    // Verify function properties
     assert_eq!(tir_func.name, "no_postcond");
     assert!(
         tir_func.postcondition.is_none(),
         "Expected no postcondition"
     );
 }
-
 #[test]
+
 fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
     let array_ty = IType::Array {
         element_type: std::sync::Arc::new(IType::Int),
@@ -369,8 +348,8 @@ fn test_lower_shared_borrow_binding_emits_borrow_and_scope_end() {
             .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
     );
 }
-
 #[test]
+
 fn test_lower_direct_scalar_borrow_call_materializes_hidden_cell() {
     let callee = TFunction {
         name: "inspect".to_string(),

@@ -9,22 +9,22 @@ use veritas::pipeline::{compile, compile_verbose};
 use veritas::verifier::{verify_dtal, verify_dtal_text};
 
 static ROBUSTNESS_LOCK: Mutex<()> = Mutex::new(());
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+
 enum Family {
     ValidArithmetic,
     ValidArrays,
     InvalidType,
     InvalidSyntax,
 }
-
 #[derive(Clone, Copy, Debug)]
+
 struct CorpusCase {
     family: Family,
     seed: u64,
 }
-
 #[derive(Clone, Copy, Debug)]
+
 struct SeededRng {
     state: u64,
 }
@@ -238,9 +238,9 @@ fn label(case: CorpusCase) -> String {
     };
     format!("{family}:seed={}", case.seed)
 }
-
 #[test]
 #[ignore = "robustness evaluation suite; run explicitly"]
+
 fn seeded_valid_programs_are_deterministic_and_verify() {
     let _guard = ROBUSTNESS_LOCK.lock().unwrap();
 
@@ -280,9 +280,9 @@ fn seeded_valid_programs_are_deterministic_and_verify() {
         });
     }
 }
-
 #[test]
 #[ignore = "robustness evaluation suite; run explicitly"]
+
 fn seeded_invalid_programs_fail_deterministically() {
     let _guard = ROBUSTNESS_LOCK.lock().unwrap();
 
@@ -309,9 +309,9 @@ fn seeded_invalid_programs_fail_deterministically() {
         );
     }
 }
-
 #[test]
 #[ignore = "robustness evaluation suite; run explicitly"]
+
 fn seeded_corpus_classification_is_stable() {
     let _guard = ROBUSTNESS_LOCK.lock().unwrap();
 

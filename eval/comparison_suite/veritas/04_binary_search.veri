@@ -1,8 +1,3 @@
-// ============================================================
-// Binary Search
-// Comparison-suite version based on the accepted canonical
-// feature-suite example.
-// ============================================================
 
 fn binary_search(arr: [int; 10], target: int) -> int
     requires forall i in 0..9 { arr[i] <= arr[i + 1] }

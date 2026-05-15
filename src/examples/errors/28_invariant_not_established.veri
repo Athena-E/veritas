@@ -1,6 +1,3 @@
-// Error: loop invariant not established at entry
-// Expected error: E020 - invariant not established
-// At i=1, invariant says arr[0]==0 but arr[0]==99
 
 fn main() -> int {
     let mut arr: [int; 5] = [99;5];

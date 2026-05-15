@@ -2,10 +2,8 @@ use crate::common::ast::Token;
 use crate::common::span::{Span, Spanned};
 use chumsky::prelude::*;
 
-// Lexer
 pub fn lexer<'src>()
 -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char, Span>>> {
-    // A parser for numbers (decimal and hex)
     let hex_num = just("0x")
         .ignore_then(
             any()
@@ -22,13 +20,12 @@ pub fn lexer<'src>()
         .unwrapped()
         .map(Token::Num);
 
-    // Character literals: 'a', '\n', '\t', '\\', '\''
     let char_escape = just('\\').ignore_then(choice((
-        just('n').to(10i128),  // newline
-        just('t').to(9i128),   // tab
-        just('\\').to(92i128), // backslash
-        just('\'').to(39i128), // single quote
-        just('0').to(0i128),   // null
+        just('n').to(10i128),
+        just('t').to(9i128),
+        just('\\').to(92i128),
+        just('\'').to(39i128),
+        just('0').to(0i128),
     )));
     let char_plain = any()
         .filter(|c: &char| *c != '\\' && *c != '\'')
@@ -40,7 +37,6 @@ pub fn lexer<'src>()
 
     let num = hex_num.or(dec_num).or(char_lit);
 
-    // A parser for operators
     let op = choice((
         just("==>"),
         just("=="),
@@ -68,10 +64,8 @@ pub fn lexer<'src>()
     ))
     .map(Token::Op);
 
-    // Parser for control characters
     let ctrl = one_of("(){}[];,:").map(Token::Ctrl);
 
-    // A parser for identifiers and keywords
     let ident = any()
         .filter(|c: &char| c.is_ascii_alphabetic() || *c == '_')
         .then(
@@ -117,7 +111,6 @@ pub fn lexer<'src>()
         .map_with(|tok, e| (tok, e.span()))
         .padded_by(comment.repeated())
         .padded()
-        // If error encountered, skip and attempt to lex the next character as a token instead
         .recover_with(skip_then_retry_until(any().ignored(), end()))
         .repeated()
         .collect()

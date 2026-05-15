@@ -1,5 +1,3 @@
-// Given an expression e, synthesize its type T and produce a typed expression e'
-
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::common::span::Spanned;
 use crate::common::tast::{TBlock, TExpr};
@@ -38,8 +36,6 @@ fn array_base_type<'src>(ty: &IType<'src>) -> Option<IType<'src>> {
     }
 }
 
-/// Synthesize the type of an expression
-/// Returns a typed expression and its type, or a type error
 pub fn synth_expr<'src>(
     ctx: &TypingContext<'src>,
     expr: &Spanned<Expr<'src>>,
@@ -47,7 +43,6 @@ pub fn synth_expr<'src>(
     let span = expr.1;
 
     match &expr.0 {
-        // INT-LIT: Integer literals have singleton types
         Expr::Literal(Literal::Int(n)) => {
             let ty = IType::SingletonInt(IValue::Int(*n));
             let texpr = TExpr::Literal {
@@ -57,7 +52,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), ty))
         }
 
-        // BOOL-LIT: Boolean literals have singleton types
         Expr::Literal(Literal::Bool(b)) => {
             let ty = IType::Bool;
             let texpr = TExpr::Literal {
@@ -67,35 +61,31 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), ty))
         }
 
-        // VAR: Look up variable in context
-        Expr::Variable(name) => {
-            match ctx.lookup_var(name) {
-                Some(VarBinding::Immutable(ty)) => {
-                    let texpr = TExpr::Variable {
-                        name: name.to_string(),
-                        ty: ty.clone(),
-                    };
-                    Ok(((texpr, span), ty.clone()))
-                }
-                Some(VarBinding::Mutable(binding)) => {
-                    // For mutable variables, use the current type
-                    let ty = binding.current_type.clone();
-                    let texpr = TExpr::Variable {
-                        name: name.to_string(),
-                        ty: ty.clone(),
-                    };
-                    Ok(((texpr, span), ty))
-                }
-                None if ctx.is_moved(name) => Err(TypeError::UseAfterMove {
+        Expr::Variable(name) => match ctx.lookup_var(name) {
+            Some(VarBinding::Immutable(ty)) => {
+                let texpr = TExpr::Variable {
                     name: name.to_string(),
-                    span,
-                }),
-                None => Err(TypeError::UndefinedVariable {
-                    name: name.to_string(),
-                    span,
-                }),
+                    ty: ty.clone(),
+                };
+                Ok(((texpr, span), ty.clone()))
             }
-        }
+            Some(VarBinding::Mutable(binding)) => {
+                let ty = binding.current_type.clone();
+                let texpr = TExpr::Variable {
+                    name: name.to_string(),
+                    ty: ty.clone(),
+                };
+                Ok(((texpr, span), ty))
+            }
+            None if ctx.is_moved(name) => Err(TypeError::UseAfterMove {
+                name: name.to_string(),
+                span,
+            }),
+            None => Err(TypeError::UndefinedVariable {
+                name: name.to_string(),
+                span,
+            }),
+        },
 
         Expr::Borrow { kind, expr: place } => {
             let place_name = match &place.0 {
@@ -232,7 +222,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), inner_ty))
         }
 
-        // BINOP-ARITH: Arithmetic operations with SMT synthesis
         Expr::BinOp {
             op:
                 op @ (BinOp::Add
@@ -251,7 +240,6 @@ pub fn synth_expr<'src>(
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
 
-            // Check both operands are subtypes of int
             if !is_subtype(ctx, &ty1, &IType::Int) {
                 return Err(TypeError::TypeMismatch {
                     expected: IType::Int,
@@ -267,7 +255,6 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Determine arithmetic mode: i64 if both operands are subtypes of i64
             let lhs_i64 = is_subtype(ctx, &ty1, &IType::I64);
             let rhs_i64 = is_subtype(ctx, &ty2, &IType::I64);
             let i64_mode = lhs_i64 && rhs_i64;
@@ -276,13 +263,10 @@ pub fn synth_expr<'src>(
             let rhs_u64 = is_subtype(ctx, &ty2, &IType::U64);
             let u64_mode = lhs_u64 && rhs_u64 && !i64_mode;
 
-            // Division safety: prove divisor is non-zero
             if *op == BinOp::Div || *op == BinOp::Mod {
                 check_divisor_nonzero(ctx, &rhs.0, rhs.1)?;
             }
 
-            // Reject compile-time-known overflowing folds for bounded machine
-            // integer modes.
             if u64_mode {
                 check_const_fold_overflow(*op, &ty1, &ty2, 0, u64::MAX as i128, span)?;
             } else if i64_mode {
@@ -296,7 +280,6 @@ pub fn synth_expr<'src>(
                 )?;
             }
 
-            // i64/u64 mode: emit overflow obligation via Z3.
             if u64_mode {
                 use crate::frontend::typechecker::helpers::check_no_overflow;
                 check_no_overflow(ctx, *op, &lhs.0, &rhs.0, 0, u64::MAX as i128, span)?;
@@ -313,7 +296,6 @@ pub fn synth_expr<'src>(
                 )?;
             }
 
-            // Choose the base type for the result refinement
             let result_base = if i64_mode {
                 IType::I64
             } else if u64_mode {
@@ -322,11 +304,8 @@ pub fn synth_expr<'src>(
                 IType::Int
             };
 
-            // Try constant folding first for precise singleton types
             let ty = match join_op(*op, &ty1, &ty2) {
                 IType::Int => {
-                    // Constant folding failed (non-singleton operands)
-                    // Use SMT synthesis: produce {v | v = lhs op rhs}
                     let result_expr = Expr::BinOp {
                         op: *op,
                         lhs: Box::new((**lhs).clone()),
@@ -334,7 +313,7 @@ pub fn synth_expr<'src>(
                     };
                     build_equality_refinement(&result_expr, span, result_base)
                 }
-                singleton_ty => singleton_ty, // Keep singleton if folding worked
+                singleton_ty => singleton_ty,
             };
 
             let texpr = TExpr::BinOp {
@@ -346,7 +325,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), ty))
         }
 
-        // BINOP-CMP: Comparison operations
         Expr::BinOp {
             op: op @ (BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq),
             lhs,
@@ -355,7 +333,6 @@ pub fn synth_expr<'src>(
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
 
-            // Check both operands are subtypes of int
             if !is_subtype(ctx, &ty1, &IType::Int) {
                 return Err(TypeError::TypeMismatch {
                     expected: IType::Int,
@@ -381,7 +358,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), ty))
         }
 
-        // BINOP-BOOL: Boolean operations
         Expr::BinOp {
             op: op @ (BinOp::And | BinOp::Or | BinOp::Implies),
             lhs,
@@ -390,7 +366,6 @@ pub fn synth_expr<'src>(
             let (tlhs, ty1) = synth_expr(ctx, lhs)?;
             let (trhs, ty2) = synth_expr(ctx, rhs)?;
 
-            // Check both operands are subtypes of bool
             if !is_subtype(ctx, &ty1, &IType::Bool) {
                 return Err(TypeError::TypeMismatch {
                     expected: IType::Bool,
@@ -416,7 +391,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), ty))
         }
 
-        // UNARY-NOT: Logical negation
         Expr::UnaryOp {
             op: UnaryOp::Not,
             cond,
@@ -440,7 +414,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), result_ty))
         }
 
-        // UNARY-NEG: Arithmetic negation
         Expr::UnaryOp {
             op: UnaryOp::Neg,
             cond,
@@ -455,7 +428,6 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // u64 negation: unsigned types cannot be negated at all
             let neg_u64 = is_subtype(ctx, &ty, &IType::U64) && !is_subtype(ctx, &ty, &IType::I64);
             if neg_u64 {
                 return Err(TypeError::IntegerOverflow {
@@ -464,7 +436,6 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // i64 negation: check operand != INT_MIN
             let neg_i64 = is_subtype(ctx, &ty, &IType::I64);
             if neg_i64 {
                 use crate::frontend::typechecker::helpers::check_no_negation_overflow;
@@ -480,12 +451,10 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), result_ty))
         }
 
-        // ARRAY-INDEX: Array indexing
         Expr::Index { base, index } => {
             let (tbase, base_ty) = synth_expr(ctx, base)?;
             let (tindex, index_ty) = synth_expr(ctx, index)?;
 
-            // Check index is an integer
             if !is_subtype(ctx, &index_ty, &IType::Int) {
                 return Err(TypeError::TypeMismatch {
                     expected: IType::Int,
@@ -494,11 +463,8 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extract element type from arrays and references-to-arrays
             match array_base_type(&base_ty) {
                 Some(IType::Array { element_type, size }) => {
-                    // Check array bounds - returns error if cannot prove safe
-                    // Use the actual index expression so SMT can use context propositions
                     check_array_bounds_expr(ctx, &index.0, &index_ty, &size, &base_ty, index.1)?;
 
                     let elem_ty = (*element_type).clone();
@@ -520,9 +486,7 @@ pub fn synth_expr<'src>(
             }
         }
 
-        // FUNC-CALL: Function call
         Expr::Call { func_name, args } => {
-            // Look up function signature
             let sig =
                 ctx.lookup_function(func_name)
                     .ok_or_else(|| TypeError::UndefinedFunction {
@@ -530,7 +494,6 @@ pub fn synth_expr<'src>(
                         span,
                     })?;
 
-            // Check argument count
             if args.0.len() != sig.parameters.len() {
                 return Err(TypeError::WrongNumberOfArguments {
                     expected: sig.parameters.len(),
@@ -539,7 +502,6 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Synth and check each argument
             let mut typed_args = Vec::new();
             let mut arg_types = Vec::new();
             let mut arg_kinds = Vec::new();
@@ -564,17 +526,11 @@ pub fn synth_expr<'src>(
                 arg_kinds.push(*arg_kind);
             }
 
-            // Check precondition if present
             if let Some(ref precond) = sig.precondition {
-                // Substitute argument values into the precondition
                 let arg_exprs: Vec<&Expr> = args.0.iter().map(|a| &a.0).collect();
                 let substituted_precond =
                     substitute_args_in_prop(precond, &sig.parameters, &arg_types, &arg_exprs);
 
-                // Substitute symbolic array sizes.
-                // For each parameter `arr: [T; n]` where n is symbolic, bind
-                // n → concrete_size from the actual argument's type, so the
-                // precondition can reason about the concrete length.
                 let substituted_precond =
                     substitute_symbolic_sizes(&substituted_precond, &sig.parameters, &arg_types);
 
@@ -598,17 +554,13 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), ret_ty))
         }
 
-        // ARRAY-INIT: Array initialization [e; n]
         Expr::ArrayInit { value, length } => {
             let (tvalue, elem_ty) = synth_expr(ctx, value)?;
 
             let size = eval_to_ivalue(length)?;
 
-            // Synthesize the length expression for the typed AST
             let (tlength, _) = synth_expr(ctx, length)?;
 
-            // Keep the synthesized element type (including singletons and refined types)
-            // SMT synthesis allows SingletonInt(0) <: {v | v >= 0} via SMT proof
             let array_ty = IType::Array {
                 element_type: Arc::new(elem_ty),
                 size,
@@ -622,13 +574,11 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), array_ty))
         }
 
-        // IF-EXPR: If expression with flow-sensitive typing
         Expr::If {
             cond,
             then_block,
             else_block,
         } => {
-            // Synthesize condition
             let (tcond, cond_ty) = synth_expr(ctx, cond)?;
 
             if !is_subtype(ctx, &cond_ty, &IType::Bool) {
@@ -639,14 +589,12 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extract proposition from condition
             let mut then_ctx = ctx.clone();
             if let Some(prop) = extract_proposition(&cond.0) {
                 then_ctx = then_ctx.with_proposition(prop);
             }
             then_ctx = then_ctx.enter_borrow_scope();
 
-            // Check then block statements, then handle trailing expression
             let (tthen_stmts, then_ctx_out) = check_stmts(&then_ctx, &then_block.statements)?;
             let (then_trailing, then_result_ty) = if let Some(trailing) = &then_block.trailing_expr
             {
@@ -662,9 +610,7 @@ pub fn synth_expr<'src>(
                 trailing_expr: then_trailing,
             };
 
-            // Type the else block
             let (telse_block, result_ty) = if let Some(else_stmts) = else_block {
-                // Extract negated proposition for else branch
                 let mut else_ctx = ctx.clone();
                 if let Some(prop) = extract_proposition(&cond.0) {
                     let neg_prop = negate_proposition(&prop);
@@ -687,7 +633,6 @@ pub fn synth_expr<'src>(
                     trailing_expr: else_trailing,
                 };
 
-                // If both branches have a trailing expression, use their join
                 let ty = match (&then_result_ty, &else_result_ty) {
                     (Some(t1), Some(t2)) => {
                         if is_subtype(ctx, t1, t2) {
@@ -716,7 +661,6 @@ pub fn synth_expr<'src>(
             Ok(((texpr, span), result_ty))
         }
 
-        // FORALL/EXISTS: Quantifier expressions (specification-only)
         Expr::Forall {
             var,
             start,
@@ -729,7 +673,6 @@ pub fn synth_expr<'src>(
             end,
             body,
         } => {
-            // Synthesize start and end — verify both are <: Int
             let (_tstart, start_ty) = synth_expr(ctx, start)?;
             if !is_subtype(ctx, &start_ty, &IType::Int) {
                 return Err(TypeError::TypeMismatch {
@@ -747,10 +690,8 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Extend context with var: Int and range propositions
             let mut extended_ctx = ctx.with_immutable(var.to_string(), IType::Int);
 
-            // Add range propositions: var >= start && var < end
             let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
             let lower_bound_expr = Expr::BinOp {
                 op: BinOp::Gte,
@@ -771,7 +712,6 @@ pub fn synth_expr<'src>(
                 predicate: Arc::new((upper_bound_expr, dummy_span)),
             });
 
-            // Synthesize body — verify it is <: Bool
             let (_tbody, body_ty) = synth_expr(&extended_ctx, body)?;
             if !is_subtype(&extended_ctx, &body_ty, &IType::Bool) {
                 return Err(TypeError::TypeMismatch {
@@ -781,9 +721,6 @@ pub fn synth_expr<'src>(
                 });
             }
 
-            // Quantifiers only appear in specification contexts (invariants, requires, ensures).
-            // Return a dummy TExpr — the invariant is consumed as raw Expr, not TExpr.
-            // Callers in specification context should use allow_quantifiers=true.
             if ctx.allow_quantifiers {
                 Ok((
                     (
@@ -810,7 +747,6 @@ pub fn synth_expr<'src>(
     }
 }
 
-/// Evaluate an expression to a compile-time value
 fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<'src>> {
     match &expr.0 {
         Expr::Literal(Literal::Int(n)) => Ok(IValue::Int(*n)),
@@ -819,14 +755,6 @@ fn eval_to_ivalue<'src>(expr: &Spanned<Expr<'src>>) -> Result<IValue, TypeError<
     }
 }
 
-/// Substitute argument types/values into a proposition (precondition or postcondition).
-/// This replaces parameter names with their actual argument values when possible.
-/// Substitute symbolic array-size variables in a proposition using the
-/// concrete sizes of the actual arguments.
-///
-/// For each parameter typed `[T; n]` with `n: Symbolic`, the argument must
-/// have a concrete `Int(k)` size (enforced by subtyping); we then rewrite
-/// every `Expr::Variable(n)` in the proposition to `Literal::Int(k)`.
 pub(super) fn substitute_symbolic_sizes<'src>(
     prop: &crate::common::types::IProposition<'src>,
     params: &[(String, IType<'src>)],
@@ -869,21 +797,14 @@ pub(super) fn substitute_args_in_prop<'src>(
     use crate::frontend::typechecker::helpers::rename_expr_var;
     use chumsky::span::SimpleSpan;
 
-    // First pass: substitute parameter names with argument expressions.
-    // - If argument is a variable: rename param -> arg_var
-    // - If argument is a complex expression (e.g., 0 - n): substitute the
-    //   entire expression tree for the parameter name in the precondition
     let mut renamed_expr = precond.predicate.0.clone();
     for ((param_name, _), arg_expr) in params.iter().zip(arg_exprs.iter()) {
         match arg_expr {
             Expr::Variable(arg_var) if *arg_var != param_name.as_str() => {
                 renamed_expr = rename_expr_var(&renamed_expr, param_name.as_str(), arg_var);
             }
-            Expr::Variable(_) => {
-                // Same name — no rename needed
-            }
+            Expr::Variable(_) => {}
             _ => {
-                // Complex expression: substitute the expression tree for the param name
                 use crate::frontend::typechecker::helpers::substitute_expr_for_var;
                 renamed_expr =
                     substitute_expr_for_var(&renamed_expr, param_name.as_str(), arg_expr);
@@ -891,13 +812,11 @@ pub(super) fn substitute_args_in_prop<'src>(
         }
     }
 
-    // Second pass: substitute singleton values (int literals)
     let mut substitutions: std::collections::HashMap<&str, &IType> =
         std::collections::HashMap::new();
     for ((param_name, _), (arg_ty, arg_expr)) in
         params.iter().zip(arg_types.iter().zip(arg_exprs.iter()))
     {
-        // Use the argument variable name if it was renamed, otherwise the param name
         let key: &str = if let Expr::Variable(arg_var) = arg_expr {
             arg_var
         } else {
@@ -914,19 +833,15 @@ pub(super) fn substitute_args_in_prop<'src>(
     }
 }
 
-/// Substitute parameter names with argument values in an expression
 fn substitute_in_expr<'src>(
     expr: &Expr<'src>,
     subs: &std::collections::HashMap<&str, &IType<'src>>,
 ) -> Expr<'src> {
     match expr {
         Expr::Variable(name) => {
-            // If this variable is a parameter, substitute with actual value if it's a singleton
             if let Some(arg_ty) = subs.get(name) {
                 match arg_ty {
                     IType::SingletonInt(IValue::Int(n)) => Expr::Literal(Literal::Int(*n)),
-                    // For symbolic or non-singleton types, keep the variable reference
-                    // (the variable will be looked up in the context during proof checking)
                     _ => expr.clone(),
                 }
             } else {
@@ -952,7 +867,6 @@ fn substitute_in_expr<'src>(
             body,
         } => {
             if subs.contains_key(var) {
-                // Bound variable shadows substitution
                 expr.clone()
             } else {
                 Expr::Forall {
@@ -982,7 +896,6 @@ fn substitute_in_expr<'src>(
             }
         }
 
-        // Other expression forms stay as-is
         _ => expr.clone(),
     }
 }

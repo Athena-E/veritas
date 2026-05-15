@@ -14,35 +14,24 @@ use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr};
 use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::{HashMap, HashSet};
 
-/// Liveness information for a single basic block
 #[derive(Clone, Debug, Default)]
 pub struct BlockLiveness {
-    /// Registers live at block entry
     pub live_in: HashSet<VirtualReg>,
-    /// Registers live at block exit
     pub live_out: HashSet<VirtualReg>,
-    /// Registers defined in this block
     pub defs: HashSet<VirtualReg>,
-    /// Registers used in this block (before any local def)
     pub uses: HashSet<VirtualReg>,
 }
 
-/// Liveness information for a function
 #[derive(Clone, Debug)]
 pub struct LivenessInfo {
-    /// Per-block liveness
     pub blocks: HashMap<String, BlockLiveness>,
-    /// Control flow graph: block -> successors
     pub successors: HashMap<String, Vec<String>>,
-    /// Control flow graph: block -> predecessors
     pub predecessors: HashMap<String, Vec<String>>,
 }
 
-/// Liveness analysis engine
 pub struct LivenessAnalysis;
 
 impl LivenessAnalysis {
-    /// Analyze liveness for a function
     pub fn analyze(func: &DtalFunction) -> LivenessInfo {
         let (successors, predecessors) = Self::build_cfg(func);
 
@@ -100,7 +89,6 @@ impl LivenessAnalysis {
         }
     }
 
-    /// Build control flow graph from function
     pub(crate) fn build_cfg(
         func: &DtalFunction,
     ) -> (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) {
@@ -126,10 +114,6 @@ impl LivenessAnalysis {
         (successors, predecessors)
     }
 
-    /// Get successors of a block based on its control flow instructions
-    ///
-    /// Scans all instructions since annotation instructions (e.g. ConstraintAssume)
-    /// may appear between branch/jump instructions.
     pub(crate) fn get_block_successors(
         block: &DtalBlock,
         func: &DtalFunction,
@@ -159,8 +143,6 @@ impl LivenessAnalysis {
             }
         }
 
-        // If there's a conditional branch but no unconditional jump or ret,
-        // then there's an implicit fall-through to the next block
         if !has_unconditional_jump && !has_ret && block_idx + 1 < func.blocks.len() {
             let next_label = func.blocks[block_idx + 1].label.clone();
             if !succs.contains(&next_label) {
@@ -171,20 +153,17 @@ impl LivenessAnalysis {
         succs
     }
 
-    /// Compute USE and DEF sets for a block
     fn compute_use_def(block: &DtalBlock) -> (HashSet<VirtualReg>, HashSet<VirtualReg>) {
         let mut uses = HashSet::new();
         let mut defs = HashSet::new();
 
         for instr in &block.instructions {
-            // Get uses before defs (order matters for local liveness)
             for reg in Self::instruction_uses(instr) {
                 if !defs.contains(&reg) {
                     uses.insert(reg);
                 }
             }
 
-            // Get defs
             if let Some(reg) = Self::instruction_def(instr) {
                 defs.insert(reg);
             }
@@ -193,7 +172,6 @@ impl LivenessAnalysis {
         (uses, defs)
     }
 
-    /// Get the register defined by an instruction (if any)
     fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
         let reg = match instr {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
@@ -214,14 +192,12 @@ impl LivenessAnalysis {
             _ => None,
         };
 
-        // Only return virtual registers
         reg.and_then(|r| match r {
             Reg::Virtual(v) => Some(v),
             Reg::Physical(_) => None,
         })
     }
 
-    /// Get the registers used by an instruction
     fn instruction_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
@@ -248,7 +224,6 @@ impl LivenessAnalysis {
             _ => vec![],
         };
 
-        // Only return virtual registers
         regs.into_iter()
             .filter_map(|r| match r {
                 Reg::Virtual(v) => Some(v),
@@ -257,7 +232,6 @@ impl LivenessAnalysis {
             .collect()
     }
 
-    /// Compute per-instruction liveness (more detailed than block-level)
     pub fn compute_instruction_liveness(
         block: &DtalBlock,
         live_out: &HashSet<VirtualReg>,
@@ -267,32 +241,26 @@ impl LivenessAnalysis {
             return vec![];
         }
 
-        // live[i] = registers live AFTER instruction i
         let mut live: Vec<HashSet<VirtualReg>> = vec![HashSet::new(); n];
         live[n - 1] = live_out.clone();
 
-        // Work backward
         for i in (0..n).rev() {
             let instr = &block.instructions[i];
 
-            // live_before = (live_after - def) ∪ uses
             let mut live_before = if i == n - 1 {
                 live_out.clone()
             } else {
                 live[i].clone()
             };
 
-            // Remove def
             if let Some(def) = Self::instruction_def(instr) {
                 live_before.remove(&def);
             }
 
-            // Add uses
             for reg in Self::instruction_uses(instr) {
                 live_before.insert(reg);
             }
 
-            // Store live_before as live_after of previous instruction
             if i > 0 {
                 live[i - 1] = live_before;
             }
@@ -302,25 +270,19 @@ impl LivenessAnalysis {
     }
 }
 
-/// Build an interference graph from liveness information
 #[derive(Debug, Default)]
 pub struct InterferenceGraph {
-    /// Adjacency list: reg -> set of interfering regs
-    /// Uses BTreeMap/BTreeSet for deterministic iteration order.
     pub edges: std::collections::BTreeMap<VirtualReg, std::collections::BTreeSet<VirtualReg>>,
-    /// All registers in the graph
     pub nodes: std::collections::BTreeSet<VirtualReg>,
 }
 
 impl InterferenceGraph {
-    /// Build interference graph from a function's liveness info
     pub fn build(func: &DtalFunction, liveness: &LivenessInfo) -> Self {
         let mut graph = InterferenceGraph::default();
 
         for block in &func.blocks {
             let block_info = &liveness.blocks[&block.label];
 
-            // Include live-in pairs; per-instruction sets are live-after only.
             let live_in_regs: Vec<_> = block_info.live_in.iter().copied().collect();
             for i in 0..live_in_regs.len() {
                 for j in (i + 1)..live_in_regs.len() {
@@ -331,7 +293,6 @@ impl InterferenceGraph {
             let live_sets =
                 LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
 
-            // Defs interfere with every register live after the instruction.
             for (instr_idx, live_set) in live_sets.iter().enumerate() {
                 let regs: Vec<_> = live_set.iter().copied().collect();
                 for i in 0..regs.len() {
@@ -366,7 +327,6 @@ impl InterferenceGraph {
         graph
     }
 
-    /// Add an edge between two registers
     pub fn add_edge(&mut self, a: VirtualReg, b: VirtualReg) {
         self.nodes.insert(a);
         self.nodes.insert(b);
@@ -374,7 +334,6 @@ impl InterferenceGraph {
         self.edges.entry(b).or_default().insert(a);
     }
 
-    /// Get neighbors of a register
     pub fn neighbors(&self, reg: VirtualReg) -> impl Iterator<Item = VirtualReg> + '_ {
         self.edges
             .get(&reg)
@@ -382,25 +341,18 @@ impl InterferenceGraph {
             .flat_map(|s| s.iter().copied())
     }
 
-    /// Get the degree (number of neighbors) of a register
     pub fn degree(&self, reg: VirtualReg) -> usize {
         self.edges.get(&reg).map_or(0, |s| s.len())
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{BinaryOp, TypeState};
     use crate::dtal::types::DtalType;
 
     fn make_test_function() -> DtalFunction {
-        // Simple function: result = a + b
-        // Block 0:
-        //   v0 = 10        ; a
-        //   v1 = 20        ; b
-        //   v2 = v0 + v1   ; result
-        //   ret
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -438,29 +390,22 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_liveness_simple() {
         let func = make_test_function();
         let liveness = LivenessAnalysis::analyze(&func);
 
-        // Entry block should exist
         assert!(liveness.blocks.contains_key("entry"));
 
         let entry = &liveness.blocks["entry"];
 
-        // v0 and v1 are defined and used locally
-        // v2 is defined at the end and not used
         assert!(entry.defs.contains(&VirtualReg(0)));
         assert!(entry.defs.contains(&VirtualReg(1)));
         assert!(entry.defs.contains(&VirtualReg(2)));
-
-        // v0 and v1 are used in the add instruction
-        // But they're defined before use, so not in uses set
-        // uses should be empty since all uses are after local defs
     }
-
     #[test]
+
     fn test_instruction_liveness() {
         let func = make_test_function();
         let liveness = LivenessAnalysis::analyze(&func);
@@ -469,31 +414,22 @@ mod tests {
 
         let live_sets = LivenessAnalysis::compute_instruction_liveness(block, &block_info.live_out);
 
-        // After v0 = 10: v0 is live
-        // After v1 = 20: v0, v1 are live
-        // After v2 = v0 + v1: v2 is live (but not used, so maybe not)
-        // After ret: nothing live
-
         assert_eq!(live_sets.len(), 4);
     }
-
     #[test]
+
     fn test_interference_graph() {
         let func = make_test_function();
         let liveness = LivenessAnalysis::analyze(&func);
         let graph = InterferenceGraph::build(&func, &liveness);
 
-        // v0 and v1 should interfere (both live at the add instruction)
         let v0 = VirtualReg(0);
         let v1 = VirtualReg(1);
 
         if graph.nodes.contains(&v0) && graph.nodes.contains(&v1) {
-            // Check if they interfere
             let v0_neighbors: HashSet<_> = graph.neighbors(v0).collect();
             let v1_neighbors: HashSet<_> = graph.neighbors(v1).collect();
 
-            // v0 and v1 are both live when v2 = v0 + v1 is computed
-            // So they should interfere
             assert!(
                 v0_neighbors.contains(&v1) || v1_neighbors.contains(&v0),
                 "v0 and v1 should interfere"
@@ -502,19 +438,6 @@ mod tests {
     }
 
     fn make_branching_function() -> DtalFunction {
-        // Function with control flow:
-        // entry:
-        //   v0 = 1
-        //   branch eq, then
-        // else:
-        //   v1 = 2
-        //   jmp exit
-        // then:
-        //   v1 = 3
-        //   jmp exit
-        // exit:
-        //   v2 = v0 + v1
-        //   ret
         use crate::dtal::instr::CmpOp;
 
         let v0 = Reg::Virtual(VirtualReg(0));
@@ -589,13 +512,12 @@ mod tests {
             ],
         }
     }
-
     #[test]
+
     fn test_cfg_construction() {
         let func = make_branching_function();
         let liveness = LivenessAnalysis::analyze(&func);
 
-        // Check successors
         let entry_succs = &liveness.successors["entry"];
         assert!(entry_succs.contains(&"then".to_string()));
         assert!(entry_succs.contains(&"else".to_string()));
@@ -606,28 +528,23 @@ mod tests {
         let then_succs = &liveness.successors["then"];
         assert!(then_succs.contains(&"exit".to_string()));
 
-        // Check predecessors
         let exit_preds = &liveness.predecessors["exit"];
         assert!(exit_preds.contains(&"else".to_string()));
         assert!(exit_preds.contains(&"then".to_string()));
     }
-
     #[test]
+
     fn test_liveness_across_branches() {
         let func = make_branching_function();
         let liveness = LivenessAnalysis::analyze(&func);
 
-        // v0 is defined in entry and used in exit
-        // So v0 should be live at exit of entry, and live at entry of else/then/exit
         let v0 = VirtualReg(0);
 
-        // v0 should be live out of entry
         assert!(
             liveness.blocks["entry"].live_out.contains(&v0),
             "v0 should be live out of entry"
         );
 
-        // v0 should be live in of exit (used there)
         assert!(
             liveness.blocks["exit"].live_in.contains(&v0),
             "v0 should be live in of exit"

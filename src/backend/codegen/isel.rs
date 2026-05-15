@@ -12,11 +12,6 @@ use crate::dtal::types::DtalType;
 use crate::middle::tir::instr::TirInstr;
 use crate::middle::tir::types::{BinaryOp as TirBinaryOp, UnaryOp as TirUnaryOp};
 
-/// Lower a TIR instruction to DTAL instructions
-///
-/// May emit multiple DTAL instructions for a single TIR instruction.
-/// `bare_metal` selects between hosted function-local region allocation and
-/// stack allocation (bare-metal, via `Alloca`) for arrays.
 pub fn lower_instruction<'src>(
     instrs: &mut Vec<DtalInstr>,
     tir_instr: &TirInstr<'src>,
@@ -178,7 +173,6 @@ pub fn lower_instruction<'src>(
             let element_size = 8u32;
             let total_size = element_size * (*size as u32);
 
-            // Arrays store mutable elements, so singleton refinements are widened.
             let element_dtal_ty = widen_to_base(DtalType::from_itype(element_ty));
             let array_ty = DtalType::Array {
                 element_type: Arc::new(element_dtal_ty),
@@ -186,14 +180,12 @@ pub fn lower_instruction<'src>(
             };
 
             if bare_metal {
-                // Bare-metal has no hosted allocator.
                 instrs.push(DtalInstr::Alloca {
                     dst: Reg::Virtual(*dst),
                     size: total_size,
                     ty: array_ty,
                 });
             } else {
-                // Runtime ABI: region in r0, size in r1, result in r0.
                 instrs.push(DtalInstr::MovImm {
                     dst: Reg::Physical(PhysicalReg::R1),
                     imm: total_size as i128,
@@ -257,8 +249,6 @@ pub fn lower_instruction<'src>(
             }
         }
 
-        // AssumeConstraint: the verifier derives constraints independently
-        // from branch conditions and existential types — no need to emit.
         TirInstr::AssumeConstraint { .. } => {}
 
         TirInstr::AssertConstraint { constraint } => {
@@ -269,7 +259,6 @@ pub fn lower_instruction<'src>(
     }
 }
 
-/// Lower a binary operation
 fn lower_binop<'src>(
     instrs: &mut Vec<DtalInstr>,
     dst: crate::dtal::VirtualReg,
@@ -400,7 +389,6 @@ fn lower_binop<'src>(
     }
 }
 
-/// Lower a comparison operation
 fn lower_comparison(
     instrs: &mut Vec<DtalInstr>,
     dst: crate::dtal::VirtualReg,
@@ -436,7 +424,6 @@ fn lower_comparison(
     });
 }
 
-/// Lower a unary operation
 fn lower_unaryop<'src>(
     instrs: &mut Vec<DtalInstr>,
     dst: crate::dtal::VirtualReg,
@@ -480,7 +467,6 @@ struct LowerCall<'a, 'src> {
     result_ty: &'a crate::common::types::IType<'src>,
 }
 
-/// Lower a function call
 fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
     use crate::dtal::regs::PhysicalReg;
 
@@ -589,11 +575,6 @@ fn lower_call<'src>(instrs: &mut Vec<DtalInstr>, call: LowerCall<'_, 'src>) {
     }
 }
 
-/// Widen a type to its base form for array element types.
-///
-/// `SingletonInt(n)` → `Int`. Refined types are preserved since they
-/// carry meaningful constraints (e.g., `{v: int | v > 0}` for positive arrays).
-/// Other types are returned unchanged.
 fn widen_to_base(ty: DtalType) -> DtalType {
     match ty {
         DtalType::SingletonInt(_) => DtalType::Int,

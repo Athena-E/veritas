@@ -1,5 +1,3 @@
-// Error: Arithmetic on boolean values
-// Expected error: E001 - Type mismatch
 
 fn main() {
     let a: bool = true;

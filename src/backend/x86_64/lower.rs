@@ -39,12 +39,10 @@ use crate::dtal::regs::Reg;
 #[cfg(test)]
 use crate::dtal::regs::VirtualReg;
 
-/// Lower a DTAL program to x86-64 machine-level IR.
 pub fn lower_program(program: &DtalProgram) -> X86Program {
     let mut functions = Vec::new();
 
     for func in &program.functions {
-        // Runtime stubs are provided by the runtime blob.
         if func.blocks.is_empty() {
             continue;
         }
@@ -54,7 +52,6 @@ pub fn lower_program(program: &DtalProgram) -> X86Program {
     X86Program { functions }
 }
 
-/// Lower one DTAL function after register allocation.
 fn lower_function(func: &DtalFunction) -> X86Function {
     let uses_reserved_region_reg = function_uses_reserved_region_reg(func);
     let allocatable_regs = if uses_reserved_region_reg {
@@ -200,20 +197,16 @@ fn function_uses_reserved_region_reg(func: &DtalFunction) -> bool {
     })
 }
 
-/// Per-function lowering state.
 struct FunctionLowerer<'a> {
     func: &'a DtalFunction,
     allocation: AllocationResult,
     instructions: Vec<X86Instr>,
-    /// Stack frame size for locals and spills.
     frame_size: i32,
-    /// Whether the next `Physical(R0)` read should use RAX instead of RDI.
     return_value_in_rax: bool,
 }
 
 impl<'a> FunctionLowerer<'a> {
     fn new(func: &'a DtalFunction, allocation: &AllocationResult) -> Self {
-        // Shift spill slots below the callee-saved save area.
         let callee_saved_size = (allocation.callee_saved_used.len() as i32) * 8;
         let mut adjusted = allocation.clone();
         for loc in adjusted.allocation.values_mut() {
@@ -222,7 +215,6 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
 
-        // Keep the stack 16-byte aligned after `push rbp` and callee saves.
         let spill_size = (adjusted.spill_slots as i32) * 8;
         let total_before_frame = 8 + callee_saved_size;
         let frame_size = if (total_before_frame + spill_size) % 16 != 0 {
@@ -259,7 +251,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Emit the function prologue.
     fn emit_prologue(&mut self) {
         self.instructions.push(X86Instr::Push { src: X86Reg::Rbp });
 
@@ -268,7 +259,6 @@ impl<'a> FunctionLowerer<'a> {
             src: X86Reg::Rsp,
         });
 
-        // Save callee-saved registers above the spill frame.
         for &reg in &self.allocation.callee_saved_used {
             self.instructions.push(X86Instr::Push { src: reg });
         }
@@ -280,15 +270,12 @@ impl<'a> FunctionLowerer<'a> {
             });
         }
 
-        // Parameter moves are a parallel assignment.
         self.emit_param_moves();
     }
 
-    /// Emit the function epilogue.
     fn emit_epilogue(&mut self) {
         let callee_saved_size = (self.allocation.callee_saved_used.len() as i32) * 8;
 
-        // Position `rsp` at the last callee-saved push before popping.
         self.instructions.push(X86Instr::MovRR {
             dst: X86Reg::Rsp,
             src: X86Reg::Rbp,
@@ -310,7 +297,6 @@ impl<'a> FunctionLowerer<'a> {
         self.instructions.push(X86Instr::Ret);
     }
 
-    /// Emit parameter moves as a parallel assignment.
     fn emit_param_moves(&mut self) {
         let mut pending: Vec<(X86Reg, Location)> = Vec::new();
 
@@ -346,7 +332,6 @@ impl<'a> FunctionLowerer<'a> {
                 let (src, dst) = pending.remove(idx);
                 self.store_from_reg(src, dst);
             } else {
-                // Break remaining cycles with R11.
                 let (first_src, first_dst) = pending.remove(0);
                 self.instructions.push(X86Instr::MovRR {
                     dst: X86Reg::R11,
@@ -357,7 +342,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower one DTAL instruction.
     fn lower_instruction(&mut self, instr: &DtalInstr) {
         match instr {
             DtalInstr::MovImm { dst, imm, .. } => {
@@ -430,7 +414,6 @@ impl<'a> FunctionLowerer<'a> {
                     CmpOp::Ge => Condition::Ge,
                 };
 
-                // RAX avoids legacy high-byte register encodings for `setcc`.
                 self.instructions.push(X86Instr::SetCC {
                     dst: X86Reg::Rax,
                     cond: x86_cond,
@@ -494,7 +477,6 @@ impl<'a> FunctionLowerer<'a> {
                     self.instructions.push(X86Instr::Push { src: reg });
                 }
 
-                // The call instruction expects 16-byte alignment before pushing RIP.
                 let push_bytes = (caller_saved_in_use.len() as i32) * 8;
                 let needs_padding = push_bytes % 16 != 0;
                 if needs_padding {
@@ -519,12 +501,10 @@ impl<'a> FunctionLowerer<'a> {
                     self.instructions.push(X86Instr::Pop { dst: reg });
                 }
 
-                // Defer RAX-to-R0 handling until the next `Physical(R0)` read.
                 self.return_value_in_rax = true;
             }
 
             DtalInstr::Ret => {
-                // DTAL returns via R0; x86-64 returns via RAX.
                 self.instructions.push(X86Instr::MovRR {
                     dst: X86Reg::Rax,
                     src: X86Reg::Rdi,
@@ -611,7 +591,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower `mov` from an immediate.
     fn lower_mov_imm(&mut self, dst: Reg, imm: i64) {
         let loc = self.get_vreg_location(dst);
         match loc {
@@ -640,9 +619,7 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower `mov` between registers or stack slots.
     fn lower_mov_reg(&mut self, dst: Reg, src: Reg) {
-        // After a call, `Physical(R0)` reads the RAX return value once.
         let src_loc = if self.return_value_in_rax {
             if let Reg::Physical(preg) = src {
                 use crate::dtal::regs::PhysicalReg;
@@ -689,7 +666,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower a binary operation.
     fn lower_binop(&mut self, op: BinaryOp, dst: Reg, lhs: Reg, rhs: Reg) {
         let lhs_loc = self.get_reg_location(lhs);
         let rhs_loc = self.get_reg_location(rhs);
@@ -697,7 +673,6 @@ impl<'a> FunctionLowerer<'a> {
 
         match op {
             BinaryOp::Div | BinaryOp::Mod => {
-                // Load the divisor before putting the dividend in RAX.
                 let rhs_reg = self.load_to_reg(rhs_loc, X86Reg::R11);
                 self.load_to_fixed_reg(lhs_loc, X86Reg::Rax);
                 let divisor = if rhs_reg == X86Reg::Rax {
@@ -721,7 +696,6 @@ impl<'a> FunctionLowerer<'a> {
                 self.store_from_reg(result_reg, dst_loc);
             }
             _ => {
-                // Use RAX as the result scratch to avoid clobbering operands.
                 self.load_to_fixed_reg(lhs_loc, X86Reg::Rax);
                 let rhs_reg = self.load_to_reg(rhs_loc, X86Reg::R11);
 
@@ -751,7 +725,6 @@ impl<'a> FunctionLowerer<'a> {
                         src: rhs_reg,
                     },
                     BinaryOp::Shl | BinaryOp::Shr => {
-                        // Variable shifts read the count from CL.
                         self.instructions.push(X86Instr::MovRR {
                             dst: X86Reg::Rcx,
                             src: rhs_reg,
@@ -770,7 +743,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower add immediate.
     fn lower_add_imm(&mut self, dst: Reg, src: Reg, imm: i64) {
         let src_loc = self.get_reg_location(src);
         let dst_loc = self.get_vreg_location(dst);
@@ -796,7 +768,6 @@ impl<'a> FunctionLowerer<'a> {
         self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 
-    /// Pick a scratch register that is not in `avoid`.
     fn pick_scratch(avoid: &[X86Reg]) -> X86Reg {
         for &candidate in &[X86Reg::Rax, X86Reg::Rdx, X86Reg::R11] {
             if !avoid.contains(&candidate) {
@@ -806,7 +777,6 @@ impl<'a> FunctionLowerer<'a> {
         unreachable!("ran out of scratch registers")
     }
 
-    /// Lower a load.
     fn lower_load(&mut self, dst: Reg, base: Reg, offset: Reg) {
         let base_loc = self.get_reg_location(base);
         let offset_loc = self.get_reg_location(offset);
@@ -836,7 +806,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower `dst = *[base + offset*8] op other`.
     fn lower_load_op(
         &mut self,
         op: crate::dtal::instr::BinaryOp,
@@ -887,7 +856,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower a store.
     fn lower_store(&mut self, base: Reg, offset: Reg, src: Reg) {
         let base_loc = self.get_reg_location(base);
         let offset_loc = self.get_reg_location(offset);
@@ -906,7 +874,6 @@ impl<'a> FunctionLowerer<'a> {
         });
     }
 
-    /// Lower `cmp`.
     fn lower_cmp(&mut self, lhs: Reg, rhs: Reg) {
         let lhs_loc = self.get_reg_location(lhs);
         let rhs_loc = self.get_reg_location(rhs);
@@ -930,7 +897,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower `cmp` against an immediate.
     fn lower_cmp_imm(&mut self, lhs: Reg, imm: i64) {
         let lhs_loc = self.get_reg_location(lhs);
         let lhs_reg = self.load_to_reg(lhs_loc, X86Reg::Rax);
@@ -951,7 +917,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Lower bitwise not.
     fn lower_not(&mut self, dst: Reg, src: Reg) {
         let src_loc = self.get_reg_location(src);
         let dst_loc = self.get_vreg_location(dst);
@@ -992,7 +957,6 @@ impl<'a> FunctionLowerer<'a> {
         self.store_from_reg(X86Reg::Rax, dst_loc);
     }
 
-    /// Get the location of a virtual or physical register.
     fn get_reg_location(&self, reg: Reg) -> Location {
         match reg {
             Reg::Virtual(vreg) => self.get_vreg_location(Reg::Virtual(vreg)),
@@ -1022,7 +986,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Get an allocated virtual register location.
     fn get_vreg_location(&self, reg: Reg) -> Location {
         match reg {
             Reg::Virtual(vreg) => self
@@ -1035,7 +998,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Load a location into a register, reusing existing registers when possible.
     fn load_to_reg(&mut self, loc: Location, scratch: X86Reg) -> X86Reg {
         match loc {
             Location::Reg(r) => r,
@@ -1050,7 +1012,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    /// Load a value into a required fixed register.
     fn load_to_fixed_reg(&mut self, loc: Location, dst: X86Reg) -> X86Reg {
         match loc {
             Location::Reg(r) => {
@@ -1066,7 +1027,6 @@ impl<'a> FunctionLowerer<'a> {
         dst
     }
 
-    /// Store a register value to a location.
     fn store_from_reg(&mut self, reg: X86Reg, loc: Location) {
         match loc {
             Location::Reg(r) => {
@@ -1082,14 +1042,14 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{DtalBlock, TypeState};
     use crate::dtal::types::DtalType;
-
     #[test]
+
     fn test_lower_simple_function() {
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
@@ -1144,8 +1104,8 @@ mod tests {
             println!("{}", instr);
         }
     }
-
     #[test]
+
     fn test_lower_with_branch() {
         use crate::dtal::instr::CmpOp;
 

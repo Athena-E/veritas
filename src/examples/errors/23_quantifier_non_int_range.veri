@@ -1,5 +1,3 @@
-// Error: quantifier range bounds must be integers
-// Expected error: type mismatch - expected int, found bool
 
 fn bad_range(n: int) -> int
     requires forall i in 0..n { i >= 0 }

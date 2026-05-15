@@ -1,4 +1,3 @@
-// PolyBench/C MEDIUM dataset: TSTEPS = 100, N = 400.
 fn main() -> int {
     let mut a: [int; 400] = [0; 400];
     let mut b: [int; 400] = [0; 400];

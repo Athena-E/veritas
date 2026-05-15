@@ -19,27 +19,18 @@ pub mod peephole;
 
 use crate::dtal::instr::DtalProgram;
 
-/// Configuration for optimization passes
 #[derive(Clone, Debug, Default)]
 pub struct OptConfig {
-    /// Enable constant folding pass
     pub constant_folding: bool,
-    /// Enable peephole optimisation pass
     pub peephole: bool,
-    /// Enable copy propagation pass
     pub copy_propagation: bool,
-    /// Enable dead code elimination pass
     pub dead_code_elimination: bool,
-    /// Enable loop-invariant code motion pass
     pub licm: bool,
-    /// Enable load-op fusion pass
     pub load_fusion: bool,
-    /// Maximum number of iterations for the optimization loop (None = unlimited)
     pub max_iterations: Option<usize>,
 }
 
 impl OptConfig {
-    /// Create config with all stable optimizations enabled by default.
     pub fn all() -> Self {
         Self {
             constant_folding: true,
@@ -52,12 +43,10 @@ impl OptConfig {
         }
     }
 
-    /// Create config with no optimizations enabled
     pub fn none() -> Self {
         Self::default()
     }
 
-    /// Check if any optimization is enabled
     pub fn any_enabled(&self) -> bool {
         self.constant_folding
             || self.peephole
@@ -68,19 +57,6 @@ impl OptConfig {
     }
 }
 
-/// Optimize a DTAL program according to the given configuration
-///
-/// Runs optimization passes in a loop until no more changes are made
-/// or the maximum iteration count is reached.
-///
-/// # Pass Ordering
-///
-/// 1. Constant folding (evaluates compile-time constants, folds immediates)
-/// 2. Peephole (structural rewrites: algebraic identities, degenerate immediates)
-/// 3. Copy propagation (exposes dead copies)
-/// 4. Dead code elimination (removes useless copies and folded-away MovImms)
-/// 5. LICM (hoists loop-invariant computations to before the loop)
-/// 6. Load-op fusion (fuses Load + BinOp Add into LoadOp)
 pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
     if !config.any_enabled() {
         return;
@@ -132,8 +108,8 @@ pub fn optimize_program(program: &mut DtalProgram, config: &OptConfig) {
         }
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, TypeState};
@@ -141,10 +117,6 @@ mod tests {
     use crate::dtal::types::DtalType;
 
     fn make_copy_chain_function() -> DtalFunction {
-        // v0 = 42
-        // v1 = v0
-        // v2 = v1
-        // ret (using v2)
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -175,7 +147,6 @@ mod tests {
                         src: v1,
                         ty: DtalType::Int,
                     },
-                    // Push v2 to use it (simulating return value setup)
                     DtalInstr::Push {
                         src: v2,
                         ty: DtalType::Int,
@@ -185,8 +156,8 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_opt_config_all() {
         let config = OptConfig::all();
         assert!(config.constant_folding);
@@ -197,16 +168,16 @@ mod tests {
         assert!(config.load_fusion);
         assert!(config.any_enabled());
     }
-
     #[test]
+
     fn test_opt_config_none() {
         let config = OptConfig::none();
         assert!(!config.copy_propagation);
         assert!(!config.dead_code_elimination);
         assert!(!config.any_enabled());
     }
-
     #[test]
+
     fn test_optimize_program_reduces_copies() {
         let mut program = DtalProgram {
             functions: vec![make_copy_chain_function()],
@@ -215,7 +186,6 @@ mod tests {
         let config = OptConfig::all();
         optimize_program(&mut program, &config);
 
-        // After optimization, the push should use v0 directly
         let func = &program.functions[0];
         let push_instr = func.blocks[0]
             .instructions
@@ -223,7 +193,6 @@ mod tests {
             .find(|i| matches!(i, DtalInstr::Push { .. }));
 
         if let Some(DtalInstr::Push { src, .. }) = push_instr {
-            // Copy propagation should have replaced v2 with v0
             assert_eq!(*src, Reg::Virtual(VirtualReg(0)));
         }
     }

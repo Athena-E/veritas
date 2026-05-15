@@ -27,11 +27,9 @@ pub mod context;
 pub mod expr;
 pub mod function;
 pub mod stmt;
-
 #[cfg(test)]
 mod tests;
 
-// Re-exports
 pub use context::LoweringContext;
 pub use function::lower_function;
 
@@ -39,7 +37,6 @@ use crate::common::tast::TProgram;
 use crate::common::types::IType;
 use crate::middle::tir::TirProgram;
 
-/// Lower a typed program to TIR
 pub fn lower_program<'src>(program: &TProgram<'src>) -> TirProgram<'src> {
     TirProgram {
         functions: program
@@ -50,14 +47,6 @@ pub fn lower_program<'src>(program: &TProgram<'src>) -> TirProgram<'src> {
     }
 }
 
-/// Widen an IType to its base form for phi nodes at join points.
-///
-/// Mutable variables change across iterations/branches, so phi nodes
-/// should use the widened base type rather than a narrow singleton.
-/// - `SingletonInt(n)` → `Int`
-/// - `RefinedInt { base, .. }` → `*base`
-/// - `Unit` → `Int` (unit variables reassigned to int in branches)
-/// - Other types pass through unchanged
 pub fn widen_itype(ty: IType<'_>) -> IType<'_> {
     match ty {
         IType::SingletonInt(_) => IType::Int,

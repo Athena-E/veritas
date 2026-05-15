@@ -1,8 +1,4 @@
-#ifndef VERITAS_CHECKED_BOUNDS_H
-#define VERITAS_CHECKED_BOUNDS_H
 
-#include <stdio.h>
-#include <stdlib.h>
 
 static inline int checked_idx1(const char *name, int idx, int upper, const char *file, int line) {
     if (idx < 0 || idx >= upper) {
@@ -13,6 +9,4 @@ static inline int checked_idx1(const char *name, int idx, int upper, const char 
     return idx;
 }
 
-#define CHECKED_IDX1(name, idx, upper) checked_idx1((name), (idx), (upper), __FILE__, __LINE__)
 
-#endif

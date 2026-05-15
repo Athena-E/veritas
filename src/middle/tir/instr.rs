@@ -31,38 +31,31 @@ use crate::common::types::IType;
 use crate::dtal::{Constraint, VirtualReg};
 use crate::middle::tir::types::{BinaryOp, BlockId, UnaryOp};
 
-/// Typed SSA instruction.
-///
-/// Most variants define at most one destination virtual register. Ownership
-/// operations are explicit so later lowering stages do not infer moves,
-/// borrows, or drops from source syntax.
 #[derive(Clone, Debug)]
 pub enum TirInstr<'src> {
-    /// `dst = immediate`
     LoadImm {
         dst: VirtualReg,
         value: i64,
         ty: IType<'src>,
     },
 
-    /// `dst = src`
     Copy {
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// `dst = move src`
     MoveOwned {
         dst: VirtualReg,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// `drop src`
-    DropOwned { src: VirtualReg, ty: IType<'src> },
+    DropOwned {
+        src: VirtualReg,
+        ty: IType<'src>,
+    },
 
-    /// `dst = &src`
     BorrowShared {
         lifetime: Option<LifetimeId>,
         dst: VirtualReg,
@@ -70,7 +63,6 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
-    /// `dst = &mut src`
     BorrowMut {
         lifetime: Option<LifetimeId>,
         dst: VirtualReg,
@@ -78,14 +70,12 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
-    /// End the borrow held in `src`.
     BorrowEnd {
         lifetime: Option<LifetimeId>,
         src: VirtualReg,
         ty: IType<'src>,
     },
 
-    /// `dst = lhs op rhs`
     BinOp {
         dst: VirtualReg,
         op: BinaryOp,
@@ -94,7 +84,6 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
-    /// `dst = op operand`
     UnaryOp {
         dst: VirtualReg,
         op: UnaryOp,
@@ -102,7 +91,6 @@ pub enum TirInstr<'src> {
         ty: IType<'src>,
     },
 
-    /// `dst = base[index]`
     ArrayLoad {
         dst: VirtualReg,
         base: VirtualReg,
@@ -111,7 +99,6 @@ pub enum TirInstr<'src> {
         bounds_constraint: Constraint,
     },
 
-    /// `base[index] = value`
     ArrayStore {
         base: VirtualReg,
         index: VirtualReg,
@@ -119,7 +106,6 @@ pub enum TirInstr<'src> {
         bounds_constraint: Constraint,
     },
 
-    /// `dst = call func(args...)`
     Call {
         dst: Option<VirtualReg>,
         func: String,
@@ -130,7 +116,6 @@ pub enum TirInstr<'src> {
         result_ty: IType<'src>,
     },
 
-    /// Allocate an array on the stack.
     AllocArray {
         dst: VirtualReg,
         element_ty: IType<'src>,
@@ -138,21 +123,24 @@ pub enum TirInstr<'src> {
         region: Option<VirtualReg>,
     },
 
-    /// Enter a nested lexical region, yielding a region handle.
-    RegionEnter { dst: VirtualReg },
+    RegionEnter {
+        dst: VirtualReg,
+    },
 
-    /// Leave a nested lexical region.
-    RegionLeave { region: VirtualReg },
+    RegionLeave {
+        region: VirtualReg,
+    },
 
-    /// Assume a branch or precondition constraint.
-    AssumeConstraint { constraint: Constraint },
+    AssumeConstraint {
+        constraint: Constraint,
+    },
 
-    /// Carry a frontend-proven constraint for verification.
-    AssertConstraint { constraint: Constraint },
+    AssertConstraint {
+        constraint: Constraint,
+    },
 }
 
 impl<'src> TirInstr<'src> {
-    /// Return the destination register, if any.
     pub fn dst(&self) -> Option<VirtualReg> {
         match self {
             TirInstr::LoadImm { dst, .. } => Some(*dst),
@@ -175,7 +163,6 @@ impl<'src> TirInstr<'src> {
         }
     }
 
-    /// Return the result type, if any.
     pub fn result_type(&self) -> Option<&IType<'src>> {
         match self {
             TirInstr::LoadImm { ty, .. } => Some(ty),
@@ -199,29 +186,24 @@ impl<'src> TirInstr<'src> {
     }
 }
 
-/// Control-flow terminator for a TIR basic block.
 #[derive(Clone, Debug)]
 pub enum Terminator {
-    /// Unconditional jump.
-    Jump { target: BlockId },
+    Jump {
+        target: BlockId,
+    },
 
-    /// Conditional branch.
     Branch {
         cond: VirtualReg,
         true_target: BlockId,
         false_target: BlockId,
-        /// Constraint added to the true branch.
         true_constraint: Box<Constraint>,
-        /// Constraint added to the false branch.
         false_constraint: Box<Constraint>,
     },
 
-    /// Return from the function.
     Return {
         value: Option<VirtualReg>,
         ownership: OwnershipMode,
     },
 
-    /// Unreachable control flow.
     Unreachable,
 }

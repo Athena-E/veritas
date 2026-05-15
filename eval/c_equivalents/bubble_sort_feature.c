@@ -1,5 +1,3 @@
-// C equivalent of src/examples/22_bubble_sort.veri
-// Sorts five integers, computes their sum, and returns the integer average.
 
 static void sort(int arr[5]) {
     for (int i = 0; i < 4; i++) {

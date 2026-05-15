@@ -38,13 +38,11 @@ use z3::{FuncDecl, SatResult, Solver, Sort};
 static VERIFIER_SMT_QUERIES: AtomicU64 = AtomicU64::new(0);
 static VERIFIER_SMT_TIME_NS: AtomicU64 = AtomicU64::new(0);
 
-/// Reset verifier SMT query counters.
 pub fn reset_verifier_smt_stats() {
     VERIFIER_SMT_QUERIES.store(0, Ordering::Relaxed);
     VERIFIER_SMT_TIME_NS.store(0, Ordering::Relaxed);
 }
 
-/// Return `(query_count, total_time_ns)` for verifier SMT queries.
 pub fn get_verifier_smt_stats() -> (u64, u64) {
     (
         VERIFIER_SMT_QUERIES.load(Ordering::Relaxed),
@@ -52,8 +50,6 @@ pub fn get_verifier_smt_stats() -> (u64, u64) {
     )
 }
 
-/// Convert an i128 value to a Z3 Int, falling back to string parsing for
-/// values outside the i64 range.
 fn z3_int_from_i128(n: i128) -> Int {
     if let Ok(n64) = i64::try_from(n) {
         Int::from_i64(n64)
@@ -62,11 +58,9 @@ fn z3_int_from_i128(n: i128) -> Int {
     }
 }
 
-/// SMT constraint oracle used by verifier checks.
 pub struct ConstraintOracle;
 
 impl ConstraintOracle {
-    /// Translate an `IndexExpr` into a Z3 integer expression.
     fn translate_index_expr(expr: &IndexExpr) -> Int {
         match expr {
             IndexExpr::Const(n) => z3_int_from_i128(*n),
@@ -86,7 +80,6 @@ impl ConstraintOracle {
         }
     }
 
-    /// Translate a `Constraint` into a Z3 boolean expression.
     fn translate_constraint(c: &Constraint) -> Bool {
         match c {
             Constraint::True => Bool::from_bool(true),
@@ -166,10 +159,6 @@ impl ConstraintOracle {
         }
     }
 
-    /// Check whether a goal constraint is provable from context.
-    ///
-    /// Uses the standard "negate and check unsatisfiability" pattern:
-    /// if context /\ !goal is UNSAT, then context |= goal (the goal is provable).
     pub fn is_provable(goal: &Constraint, context: &[Constraint]) -> bool {
         let start = Instant::now();
 
@@ -196,12 +185,12 @@ impl ConstraintOracle {
         result
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
-
     #[test]
+
     fn test_existential_mid_plus_one_ge_zero() {
         let v11 = IndexExpr::Var("v11".to_string());
         let v10 = IndexExpr::Var("v10".to_string());

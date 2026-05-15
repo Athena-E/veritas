@@ -4,7 +4,6 @@ use crate::common::span::{Span, Spanned};
 use std::fmt;
 use std::sync::Arc;
 
-/// Semantic types of compile-time values
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 pub enum IValue {
@@ -22,16 +21,14 @@ impl fmt::Display for IValue {
         }
     }
 }
-
-// Semantic types of propositions
 #[derive(Clone, Debug)]
+
 pub struct IProposition<'src> {
     pub var: String,
     pub predicate: Arc<Spanned<Expr<'src>>>,
 }
-
-// Internal, semantic representation of a type
 #[derive(Clone, Debug)]
+
 pub enum IType<'src> {
     Unit,
     Int,
@@ -49,12 +46,10 @@ pub enum IType<'src> {
         base: Arc<Self>,
         prop: IProposition<'src>,
     },
-    // Master/most general type for mutable variables
     Master(Arc<Self>),
 }
-
-// Internal representation of a function's signature to be stored in the global context (\Sigma_F)
 #[derive(Clone, Debug)]
+
 pub struct FunctionSignature<'src> {
     pub name: String,
     pub parameters: Vec<(String, IType<'src>)>,
@@ -63,12 +58,11 @@ pub struct FunctionSignature<'src> {
     pub return_ownership: OwnershipMode,
     pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,
-    pub postcondition: Option<IProposition<'src>>,
     #[allow(dead_code)]
+    pub postcondition: Option<IProposition<'src>>,
     pub span: Span,
 }
 
-// Helper function to display expressions (for propositions and refinements)
 fn fmt_expr(expr: &Expr) -> String {
     use crate::common::ast::{BinOp, Literal, UnaryOp};
 
@@ -128,7 +122,7 @@ fn fmt_expr(expr: &Expr) -> String {
         Expr::ArrayInit { value, length } => {
             format!("[{}; {}]", fmt_expr(&value.0), fmt_expr(&length.0))
         }
-        Expr::If { .. } => "<if-expr>".to_string(), // Simplified for type display
+        Expr::If { .. } => "<if-expr>".to_string(),
         Expr::Forall {
             var,
             start,

@@ -1,4 +1,3 @@
-// C equivalent of 03_arrays.veri
 
 static int endpoint_sum(const int arr[4]) {
     return arr[0] + arr[3];

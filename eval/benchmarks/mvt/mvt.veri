@@ -1,4 +1,3 @@
-// PolyBench/C MEDIUM dataset: N = 400.
 fn main() -> int {
     let mut a: [[int; 400]; 400] = [[0; 400]; 400];
     let mut x1: [int; 400] = [0; 400];

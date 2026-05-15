@@ -1,7 +1,5 @@
-// Error: Array index out of bounds
-// Expected error: E008 - Invalid array access
 
 fn main() {
     let arr: [int; 5] = [0; 5];
-    let x: int = arr[10];  // 10 >= 5, out of bounds
+    let x: int = arr[10];
 }

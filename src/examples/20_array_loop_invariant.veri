@@ -4,10 +4,6 @@ fn sorted(arr: [int; 5]) -> int
 
 fn main() -> int {
     let mut arr: [int; 5] = [0;5];
-    //for i in 0..5 invariant forall j in 0..i { arr[j] == j } {
-    //    arr[i] = i;
-    //}
-    //sorted(arr)
     let mut sum: int = 1;
     let mut a: int = 0;
     for i in 0..5 invariant forall j in 0..i { arr[j] <= 2 } {

@@ -69,9 +69,9 @@ fn assert_tamper_accepted(name: &str, source: &str, mutate: fn(&str) -> String) 
     verify_dtal_text(&tampered)
         .unwrap_or_else(|err| panic!("{}: safety-preserving tamper should verify: {}", name, err));
 }
-
 #[test]
 #[ignore = "slow trust-architecture tampering suite; run explicitly"]
+
 fn tampered_dtal_corpus_is_rejected() {
     let cases = [
         TamperCase {
@@ -282,9 +282,9 @@ fn tampered_dtal_corpus_is_rejected() {
         assert_tamper_rejected(case);
     }
 }
-
 #[test]
 #[ignore = "documents the safety-only boundary of DTAL verification"]
+
 fn type_preserving_semantic_tamper_can_still_verify() {
     assert_tamper_accepted(
         "wrong_search_constant_preserves_safety",

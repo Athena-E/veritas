@@ -305,7 +305,6 @@ fn print_bench_json(
 }
 
 fn main() {
-    // Parse command line arguments
     let args: Vec<String> = env::args().collect();
     let generate_tampering = args.iter().any(|a| a == "--generate-dtal-tampering");
 
@@ -373,7 +372,6 @@ fn main() {
 
     let file_path = &args[1];
 
-    // Handle --verify-dtal mode: standalone DTAL verification
     if args.iter().any(|a| a == "--verify-dtal") {
         let src = match fs::read_to_string(file_path) {
             Ok(content) => content,
@@ -411,7 +409,6 @@ fn main() {
         .position(|a| a == "-o")
         .and_then(|i| args.get(i + 1));
 
-    // Optimisation flags
     let optimize_all = args.iter().any(|a| a == "-O" || a == "--optimize");
     let const_fold = args.iter().any(|a| a == "--const-fold");
     let peephole = args.iter().any(|a| a == "--peephole");
@@ -420,7 +417,6 @@ fn main() {
     let licm = args.iter().any(|a| a == "--licm");
     let load_fusion = args.iter().any(|a| a == "--load-fusion");
 
-    // Build optimisation config
     let opt_config = if optimize_all {
         OptConfig::all()
     } else {
@@ -440,7 +436,6 @@ fn main() {
         println!("{}", "=".repeat(60));
     }
 
-    // Read the source file
     let src = match fs::read_to_string(file_path) {
         Ok(content) => content,
         Err(e) => {
@@ -450,18 +445,15 @@ fn main() {
     };
 
     if !quiet && !bench {
-        // Print the source code
         println!("\nSource code:");
         println!("{}", "-".repeat(60));
         println!("{}", src);
         println!("{}", "-".repeat(60));
     }
 
-    // Reset SMT stats before compilation
     reset_frontend_smt_stats();
     reset_verifier_smt_stats();
 
-    // Run the full compilation pipeline
     if verbose {
         println!("\n[1] Lexing...");
     }
@@ -514,10 +506,8 @@ fn main() {
                 }
             }
 
-            // Reset verifier SMT counters after compilation, before benchmarking
             reset_verifier_smt_stats();
 
-            // Verify DTAL if requested
             let mut verify_elapsed = std::time::Duration::ZERO;
             if verify && !physical {
                 if verbose {
@@ -545,7 +535,6 @@ fn main() {
                 }
             }
 
-            // Show tokens if requested
             if show_tokens {
                 println!("\n{}", "=".repeat(60));
                 println!("Tokens ({}):", output.tokens.len());
@@ -555,7 +544,6 @@ fn main() {
                 }
             }
 
-            // Show typed AST if requested
             if show_ast {
                 println!("\n{}", "=".repeat(60));
                 println!("Typed AST:");
@@ -571,7 +559,6 @@ fn main() {
                 }
             }
 
-            // Show TIR if requested
             if show_tir {
                 println!("\n{}", "=".repeat(60));
                 println!("TIR (SSA form):");
@@ -597,7 +584,6 @@ fn main() {
                 }
             }
 
-            // Show DTAL output unless generating native code
             if !native && output_file.is_none() {
                 println!("\n{}", "=".repeat(60));
                 println!("DTAL Output:");
@@ -605,10 +591,8 @@ fn main() {
                 println!("{}", output.dtal);
             }
 
-            // Generate native code if requested
             if native || output_file.is_some() {
                 let encoded = if physical {
-                    // Verification after physical allocation
                     if verbose {
                         println!("\n[8] Physical allocation (regalloc → physical DTAL)...");
                     }
@@ -651,7 +635,6 @@ fn main() {
                     }
                     veritas::backend::direct_encode::encode_physical_dtal(&physical_dtal)
                 } else {
-                    // Legacy: x86 lowering (trusted regalloc + isel + encode)
                     if verbose {
                         println!("\n[8] Lowering to x86-64...");
                     }
@@ -674,7 +657,6 @@ fn main() {
                         println!("\n[10] Generating ELF executable...");
                     }
 
-                    // Determine entry point (use main or first function)
                     let entry = if encoded.symbols.contains_key("main") {
                         "main"
                     } else {
@@ -687,20 +669,17 @@ fn main() {
                             .unwrap_or("main")
                     };
 
-                    // Generate ELF (Linux or bare-metal)
                     let elf = if bare_metal {
                         veritas::backend::elf::generate_baremetal_elf(&encoded, entry)
                     } else {
                         generate_elf(&encoded, entry)
                     };
 
-                    // Write executable
                     if let Err(e) = fs::write(out_path, &elf) {
                         eprintln!("Error writing output file '{}': {}", out_path, e);
                         std::process::exit(1);
                     }
 
-                    // Make executable
                     if let Ok(metadata) = fs::metadata(out_path) {
                         let mut perms = metadata.permissions();
                         perms.set_mode(0o755);
@@ -719,7 +698,6 @@ fn main() {
                         );
                     }
                 } else if native {
-                    // Print physical DTAL or x86-64 assembly
                     if physical {
                         println!("\n{}", "=".repeat(60));
                         println!("Physical DTAL:");

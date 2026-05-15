@@ -7,53 +7,47 @@
 use crate::common::ast::{BinOp, Expr, Literal, UnaryOp};
 use crate::dtal::constraints::{Constraint, IndexExpr};
 
-/// Convert an Expr to a Constraint (for boolean expressions)
 pub fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
     match expr {
-        Expr::BinOp { op, lhs, rhs } => {
-            match op {
-                // Comparison operators -> Constraint
-                BinOp::Eq => Some(Constraint::Eq(
-                    expr_to_index(&lhs.0)?,
-                    expr_to_index(&rhs.0)?,
-                )),
-                BinOp::NotEq => Some(Constraint::Ne(
-                    expr_to_index(&lhs.0)?,
-                    expr_to_index(&rhs.0)?,
-                )),
-                BinOp::Lt => Some(Constraint::Lt(
-                    expr_to_index(&lhs.0)?,
-                    expr_to_index(&rhs.0)?,
-                )),
-                BinOp::Lte => Some(Constraint::Le(
-                    expr_to_index(&lhs.0)?,
-                    expr_to_index(&rhs.0)?,
-                )),
-                BinOp::Gt => Some(Constraint::Gt(
-                    expr_to_index(&lhs.0)?,
-                    expr_to_index(&rhs.0)?,
-                )),
-                BinOp::Gte => Some(Constraint::Ge(
-                    expr_to_index(&lhs.0)?,
-                    expr_to_index(&rhs.0)?,
-                )),
-                // Logical operators
-                BinOp::And => Some(Constraint::And(
-                    Box::new(expr_to_constraint(&lhs.0)?),
-                    Box::new(expr_to_constraint(&rhs.0)?),
-                )),
-                BinOp::Or => Some(Constraint::Or(
-                    Box::new(expr_to_constraint(&lhs.0)?),
-                    Box::new(expr_to_constraint(&rhs.0)?),
-                )),
-                BinOp::Implies => Some(Constraint::Implies(
-                    Box::new(expr_to_constraint(&lhs.0)?),
-                    Box::new(expr_to_constraint(&rhs.0)?),
-                )),
-                // Arithmetic operators can't be converted to constraints directly
-                _ => None,
-            }
-        }
+        Expr::BinOp { op, lhs, rhs } => match op {
+            BinOp::Eq => Some(Constraint::Eq(
+                expr_to_index(&lhs.0)?,
+                expr_to_index(&rhs.0)?,
+            )),
+            BinOp::NotEq => Some(Constraint::Ne(
+                expr_to_index(&lhs.0)?,
+                expr_to_index(&rhs.0)?,
+            )),
+            BinOp::Lt => Some(Constraint::Lt(
+                expr_to_index(&lhs.0)?,
+                expr_to_index(&rhs.0)?,
+            )),
+            BinOp::Lte => Some(Constraint::Le(
+                expr_to_index(&lhs.0)?,
+                expr_to_index(&rhs.0)?,
+            )),
+            BinOp::Gt => Some(Constraint::Gt(
+                expr_to_index(&lhs.0)?,
+                expr_to_index(&rhs.0)?,
+            )),
+            BinOp::Gte => Some(Constraint::Ge(
+                expr_to_index(&lhs.0)?,
+                expr_to_index(&rhs.0)?,
+            )),
+            BinOp::And => Some(Constraint::And(
+                Box::new(expr_to_constraint(&lhs.0)?),
+                Box::new(expr_to_constraint(&rhs.0)?),
+            )),
+            BinOp::Or => Some(Constraint::Or(
+                Box::new(expr_to_constraint(&lhs.0)?),
+                Box::new(expr_to_constraint(&rhs.0)?),
+            )),
+            BinOp::Implies => Some(Constraint::Implies(
+                Box::new(expr_to_constraint(&lhs.0)?),
+                Box::new(expr_to_constraint(&rhs.0)?),
+            )),
+            _ => None,
+        },
         Expr::UnaryOp {
             op: UnaryOp::Not,
             cond,
@@ -86,7 +80,6 @@ pub fn expr_to_constraint(expr: &Expr) -> Option<Constraint> {
     }
 }
 
-/// Convert an Expr to an IndexExpr (for arithmetic expressions)
 pub fn expr_to_index(expr: &Expr) -> Option<IndexExpr> {
     match expr {
         Expr::Literal(Literal::Int(n)) => Some(IndexExpr::Const(*n)),
@@ -103,7 +96,6 @@ pub fn expr_to_index(expr: &Expr) -> Option<IndexExpr> {
                 _ => None,
             }
         }
-        // Unary negation: -e  →  Sub(0, e)
         Expr::UnaryOp {
             op: UnaryOp::Neg,
             cond,

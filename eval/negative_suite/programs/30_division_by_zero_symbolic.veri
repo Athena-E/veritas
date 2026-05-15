@@ -1,4 +1,3 @@
-// Should fail: divisor could be zero
 fn divide(a: int, b: int) -> int {
     a / b
 }

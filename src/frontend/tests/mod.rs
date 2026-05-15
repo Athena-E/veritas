@@ -1,7 +1,5 @@
-// Common test utilities
 mod common;
 
-// Test modules organized by component
 mod expr_parser;
 mod function_parser;
 mod integration;

@@ -1,5 +1,3 @@
-// Error: Calling undefined function
-// Expected error: E003 - Cannot find function
 
 fn main() -> int {
     foo(42)

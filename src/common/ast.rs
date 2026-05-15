@@ -1,15 +1,13 @@
 use super::span::Spanned;
 use crate::common::ownership::BorrowKind;
 use std::fmt;
-
-// Token definition
 #[derive(Clone, Debug, PartialEq)]
+
 pub enum Token<'src> {
     Num(i128),
     Ident(&'src str),
     Op(&'src str),
     Ctrl(char),
-    // Keywords
     Let,
     Mut,
     Fn,
@@ -26,7 +24,6 @@ pub enum Token<'src> {
     Exists,
     Const,
     Region,
-    // Type keywords
     Int,
     I64,
     U64,
@@ -93,9 +90,8 @@ impl fmt::Display for BinOp {
         }
     }
 }
-
-// Binary operators
 #[derive(Clone, Copy, Debug, PartialEq)]
+
 pub enum BinOp {
     Add,
     Sub,
@@ -117,24 +113,21 @@ pub enum BinOp {
     Or,
     Implies,
 }
-
-// Unary operators
 #[derive(Clone, Copy, Debug, PartialEq)]
+
 pub enum UnaryOp {
     Not,
     Neg,
     Deref,
 }
-
-// Literals
 #[derive(Clone, Debug)]
+
 pub enum Literal {
     Int(i128),
     Bool(bool),
 }
-
-// Type expressions
 #[derive(Clone, Debug)]
+
 pub enum Type<'src> {
     Unit,
     Int,
@@ -161,9 +154,8 @@ pub enum Type<'src> {
         predicate: Box<Spanned<Expr<'src>>>,
     },
 }
-
-// Expression nodes
 #[derive(Clone, Debug)]
+
 pub enum Expr<'src> {
     Error,
     Literal(Literal),
@@ -211,18 +203,14 @@ pub enum Expr<'src> {
         body: Box<Spanned<Self>>,
     },
 }
-
-// A block: statements followed by an optional trailing expression (the block's value)
-// { stmts*; trailing_expr? }
-// `{ 1 }` has trailing_expr = Some(1), `{ 1; }` has trailing_expr = None
 #[derive(Clone, Debug)]
+
 pub struct Block<'src> {
     pub statements: Vec<Spanned<Stmt<'src>>>,
     pub trailing_expr: Option<Box<Spanned<Expr<'src>>>>,
 }
-
-// Statement nodes
 #[derive(Clone, Debug)]
+
 pub enum Stmt<'src> {
     Let {
         is_mut: bool,
@@ -254,19 +242,16 @@ pub enum Stmt<'src> {
         body: Block<'src>,
     },
 }
-
-// Function parameter
 #[derive(Debug)]
+
 pub struct Parameter<'src> {
     pub name: &'src str,
     pub ty: Spanned<Type<'src>>,
 }
 
-// Function body is a Block
 pub type FunctionBody<'src> = Block<'src>;
-
-// Function definition
 #[derive(Debug)]
+
 pub struct Function<'src> {
     pub name: &'src str,
     pub parameters: Vec<Spanned<Parameter<'src>>>,
@@ -275,17 +260,15 @@ pub struct Function<'src> {
     pub postcondition: Option<Spanned<Expr<'src>>>,
     pub body: FunctionBody<'src>,
 }
-
-// Constant declaration
 #[derive(Debug)]
+
 pub struct Constant<'src> {
     pub name: &'src str,
     pub ty: Spanned<Type<'src>>,
     pub value: Spanned<Expr<'src>>,
 }
-
-// Program
 #[derive(Debug)]
+
 pub struct Program<'src> {
     pub constants: Vec<Spanned<Constant<'src>>>,
     pub functions: Vec<Spanned<Function<'src>>>,

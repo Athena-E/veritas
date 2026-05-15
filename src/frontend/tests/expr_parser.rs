@@ -3,8 +3,8 @@ use crate::common::ast::{Expr, Literal};
 use crate::common::ownership::BorrowKind;
 use crate::frontend::parser::expr_parser_for_types;
 use chumsky::prelude::*;
-
 #[test]
+
 fn test_expr_parser_integer_literal() {
     let src = "42";
     let tokens = parse_tokens(src);
@@ -20,8 +20,8 @@ fn test_expr_parser_integer_literal() {
         assert!(matches!(expr, Expr::Literal(Literal::Int(42))));
     }
 }
-
 #[test]
+
 fn test_expr_parser_bool_literals() {
     let src = "true";
     let tokens = parse_tokens(src);
@@ -51,8 +51,8 @@ fn test_expr_parser_bool_literals() {
         assert!(matches!(expr, Expr::Literal(Literal::Bool(false))));
     }
 }
-
 #[test]
+
 fn test_expr_parser_variable() {
     let src = "x";
     let tokens = parse_tokens(src);
@@ -68,8 +68,8 @@ fn test_expr_parser_variable() {
         assert!(matches!(expr, Expr::Variable("x")));
     }
 }
-
 #[test]
+
 fn test_expr_parser_addition() {
     let src = "1 + 2";
     let tokens = parse_tokens(src);
@@ -85,8 +85,8 @@ fn test_expr_parser_addition() {
         assert!(matches!(expr, Expr::BinOp { .. }));
     }
 }
-
 #[test]
+
 fn test_expr_parser_subtraction() {
     let src = "10 - 5";
     let tokens = parse_tokens(src);
@@ -99,8 +99,8 @@ fn test_expr_parser_subtraction() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_multiplication() {
     let src = "3 * 4";
     let tokens = parse_tokens(src);
@@ -113,8 +113,8 @@ fn test_expr_parser_multiplication() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_precedence() {
     let src = "1 + 2 * 3";
     let tokens = parse_tokens(src);
@@ -126,10 +126,9 @@ fn test_expr_parser_precedence() {
         )
         .into_result();
     assert!(result.is_ok());
-    // Should parse as 1 + (2 * 3)
 }
-
 #[test]
+
 fn test_expr_parser_parentheses() {
     let src = "(1 + 2) * 3";
     let tokens = parse_tokens(src);
@@ -142,8 +141,8 @@ fn test_expr_parser_parentheses() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_comparison() {
     let src = "x > 5";
     let tokens = parse_tokens(src);
@@ -156,8 +155,8 @@ fn test_expr_parser_comparison() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_equality() {
     let src = "x == 42";
     let tokens = parse_tokens(src);
@@ -170,8 +169,8 @@ fn test_expr_parser_equality() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_logical_and() {
     let src = "x > 0 && x < 10";
     let tokens = parse_tokens(src);
@@ -184,8 +183,8 @@ fn test_expr_parser_logical_and() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_logical_or() {
     let src = "x == 0 || y == 1";
     let tokens = parse_tokens(src);
@@ -198,8 +197,8 @@ fn test_expr_parser_logical_or() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_unary_not() {
     let src = "!true";
     let tokens = parse_tokens(src);
@@ -215,8 +214,8 @@ fn test_expr_parser_unary_not() {
         assert!(matches!(expr, Expr::UnaryOp { .. }));
     }
 }
-
 #[test]
+
 fn test_expr_parser_double_negation() {
     let src = "!!x";
     let tokens = parse_tokens(src);
@@ -229,8 +228,8 @@ fn test_expr_parser_double_negation() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_shared_borrow() {
     let src = "&x";
     let tokens = parse_tokens(src);
@@ -252,8 +251,8 @@ fn test_expr_parser_shared_borrow() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_mutable_borrow() {
     let src = "&mut arr";
     let tokens = parse_tokens(src);
@@ -275,8 +274,8 @@ fn test_expr_parser_mutable_borrow() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_deref() {
     let src = "*rx";
     let tokens = parse_tokens(src);
@@ -300,8 +299,8 @@ fn test_expr_parser_deref() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_function_call_no_args() {
     let src = "foo()";
     let tokens = parse_tokens(src);
@@ -322,8 +321,8 @@ fn test_expr_parser_function_call_no_args() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_function_call_single_arg() {
     let src = "bar(42)";
     let tokens = parse_tokens(src);
@@ -344,8 +343,8 @@ fn test_expr_parser_function_call_single_arg() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_function_call_multiple_args() {
     let src = "add(1, 2, 3)";
     let tokens = parse_tokens(src);
@@ -366,8 +365,8 @@ fn test_expr_parser_function_call_multiple_args() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_function_call_with_trailing_comma() {
     let src = "func(x, y,)";
     let tokens = parse_tokens(src);
@@ -380,8 +379,8 @@ fn test_expr_parser_function_call_with_trailing_comma() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_array_indexing() {
     let src = "arr[0]";
     let tokens = parse_tokens(src);
@@ -397,8 +396,8 @@ fn test_expr_parser_array_indexing() {
         assert!(matches!(expr, Expr::Index { .. }));
     }
 }
-
 #[test]
+
 fn test_expr_parser_nested_array_indexing() {
     let src = "matrix[i][j]";
     let tokens = parse_tokens(src);
@@ -411,8 +410,8 @@ fn test_expr_parser_nested_array_indexing() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_complex_expression() {
     let src = "(x + y) * 2 > threshold && !flag";
     let tokens = parse_tokens(src);
@@ -425,8 +424,8 @@ fn test_expr_parser_complex_expression() {
         .into_result();
     assert!(result.is_ok());
 }
-
 #[test]
+
 fn test_expr_parser_array_init_simple() {
     let src = "[0; 10]";
     let tokens = parse_tokens(src);
@@ -447,8 +446,8 @@ fn test_expr_parser_array_init_simple() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_array_init_variable_value() {
     let src = "[x; 10]";
     let tokens = parse_tokens(src);
@@ -469,8 +468,8 @@ fn test_expr_parser_array_init_variable_value() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_array_init_variable_length() {
     let src = "[0; n]";
     let tokens = parse_tokens(src);
@@ -491,8 +490,8 @@ fn test_expr_parser_array_init_variable_length() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_array_init_expression_value() {
     let src = "[x + 1; 10]";
     let tokens = parse_tokens(src);
@@ -512,8 +511,8 @@ fn test_expr_parser_array_init_expression_value() {
         }
     }
 }
-
 #[test]
+
 fn test_expr_parser_array_init_expression_length() {
     let src = "[0; n * 2]";
     let tokens = parse_tokens(src);

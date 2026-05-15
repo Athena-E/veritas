@@ -1,50 +1,34 @@
-// Subtyping relation for refinement types
-// - Reflexivity: T <: T
-// - Refinement weakening
-// - Singleton to base: int(n) <: int
-// - Structural: &T <: &T, [T; n] <: [T; n] (invariant)
-
 use crate::common::ast::{Expr, Literal};
 use crate::common::types::{IProposition, IType, IValue};
 use crate::frontend::typechecker::{TypingContext, check_provable};
 use std::sync::Arc;
 
-/// Check if sub is a subtype of sup in the given typing context
 pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &IType<'src>) -> bool {
     match (sub, sup) {
-        // Reflexivity: T <: T
         (IType::Unit, IType::Unit) => true,
         (IType::Int, IType::Int) => true,
         (IType::I64, IType::I64) => true,
         (IType::U64, IType::U64) => true,
         (IType::Bool, IType::Bool) => true,
 
-        // i64 <: int (machine integers are mathematical integers)
         (IType::I64, IType::Int) => true,
-        // u64 <: int (unsigned machine integers are mathematical integers)
         (IType::U64, IType::Int) => true,
 
-        // Singleton to base: int(n) <: int, int(n) <: i64
         (IType::SingletonInt(_), IType::Int) => true,
         (IType::SingletonInt(IValue::Int(_)), IType::I64) => true,
         (IType::SingletonInt(IValue::Int(n)), IType::U64) => *n >= 0 && *n <= u64::MAX as i128,
 
-        // Singleton reflexivity: int(n) <: int(n)
         (IType::SingletonInt(v1), IType::SingletonInt(v2)) => v1 == v2,
 
-        // Singleton to refined: int(n) <: {x: int | P} if P[n/x]
         (IType::SingletonInt(n), IType::RefinedInt { prop, .. }) => {
-            // Create proposition P[n/x] - substitute n for x in predicate
             let substituted_prop = substitute_value_in_prop(prop, n);
             check_provable(ctx, &substituted_prop)
         }
 
-        // Refined to base: {x: T | P} <: T (drop refinement)
         (IType::RefinedInt { .. }, IType::Int) => true,
         (IType::RefinedInt { base, .. }, IType::I64) => is_subtype(ctx, base, &IType::I64),
         (IType::RefinedInt { base, .. }, IType::U64) => is_subtype(ctx, base, &IType::U64),
 
-        // Refined to refined: {x: int | P} <: {x: int | Q} if Phi /\ P |- Q
         (
             IType::RefinedInt {
                 base: base1,
@@ -55,15 +39,12 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
                 prop: prop2,
             },
         ) => {
-            // First check base types are compatible
             if !is_subtype(ctx, base1, base2) {
                 return false;
             }
 
-            // Check if P implies Q: add P to context, check if Q is provable
             let ctx_with_p = ctx.with_proposition(prop1.clone());
 
-            // Rename the variable in Q to match P if needed
             let renamed_q = if prop1.var != prop2.var {
                 rename_prop_var(prop2, &prop1.var)
             } else {
@@ -73,13 +54,6 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
             check_provable(&ctx_with_p, &renamed_q)
         }
 
-        // Array subtyping: [T1; n] <: [T2; m] if T1 <: T2 and sizes compatible.
-        // Size compatibility:
-        //   - concrete == concrete: equal values
-        //   - anything <: symbolic: unifies at call site (sup is a parameter type)
-        //   - otherwise: not compatible
-        // Element type is covariant since arrays are read-only from the
-        // typechecker's perspective (writes use element-type checks separately).
         (
             IType::Array {
                 element_type: elem1,
@@ -94,21 +68,16 @@ pub fn is_subtype<'src>(ctx: &TypingContext<'src>, sub: &IType<'src>, sup: &ITyp
             sizes_ok && is_subtype(ctx, elem1, elem2)
         }
 
-        // Reference subtyping: &T1 <: &T2 if T1 = T2 (invariant for shared refs)
         (IType::Ref(t1), IType::Ref(t2)) => types_equal(t1, t2),
 
-        // Mutable reference subtyping: &mut T1 <: &mut T2 if T1 = T2 (invariant)
         (IType::RefMut(t1), IType::RefMut(t2)) => types_equal(t1, t2),
 
-        // Master type unwrapping: M(T) <: T (can use master type as base)
         (IType::Master(t), sup) => is_subtype(ctx, t, sup),
 
-        // Different type constructors are incompatible
         _ => false,
     }
 }
 
-/// Check if two types are structurally equal
 fn types_equal(t1: &IType, t2: &IType) -> bool {
     match (t1, t2) {
         (IType::Unit, IType::Unit) => true,
@@ -134,8 +103,6 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
         (IType::RefMut(t1), IType::RefMut(t2)) => types_equal(t1, t2),
         (IType::Master(t1), IType::Master(t2)) => types_equal(t1, t2),
 
-        // TODO: need SMT for refined types
-        // Temp fix: require exact structural match
         (IType::RefinedInt { base: b1, prop: p1 }, IType::RefinedInt { base: b2, prop: p2 }) => {
             types_equal(b1, b2) && p1.var == p2.var
         }
@@ -144,7 +111,6 @@ fn types_equal(t1: &IType, t2: &IType) -> bool {
     }
 }
 
-/// Substitute a value for the bound variable in a proposition
 fn substitute_value_in_prop<'src>(
     prop: &IProposition<'src>,
     value: &'src IValue,
@@ -157,17 +123,13 @@ fn substitute_value_in_prop<'src>(
     }
 }
 
-/// Substitute a value for a variable in an expression
 fn substitute_value_in_expr<'src>(expr: &Expr<'src>, var: &str, value: &'src IValue) -> Expr<'src> {
     match expr {
-        Expr::Variable(name) if *name == var => {
-            // Replace variable with value
-            match value {
-                IValue::Int(n) => Expr::Literal(Literal::Int(*n)),
-                IValue::Bool(b) => Expr::Literal(Literal::Bool(*b)),
-                IValue::Symbolic(s) => Expr::Variable(s.as_str()),
-            }
-        }
+        Expr::Variable(name) if *name == var => match value {
+            IValue::Int(n) => Expr::Literal(Literal::Int(*n)),
+            IValue::Bool(b) => Expr::Literal(Literal::Bool(*b)),
+            IValue::Symbolic(s) => Expr::Variable(s.as_str()),
+        },
 
         Expr::Variable(_) | Expr::Literal(_) => expr.clone(),
 
@@ -222,7 +184,6 @@ fn substitute_value_in_expr<'src>(expr: &Expr<'src>, var: &str, value: &'src IVa
     }
 }
 
-/// Rename the bound variable in a proposition
 fn rename_prop_var<'src>(prop: &IProposition<'src>, new_var: &'src str) -> IProposition<'src> {
     let renamed_expr = rename_var_in_expr(&prop.predicate.0, &prop.var, new_var);
 
@@ -232,7 +193,6 @@ fn rename_prop_var<'src>(prop: &IProposition<'src>, new_var: &'src str) -> IProp
     }
 }
 
-/// Rename a variable in an expression
 fn rename_var_in_expr<'src>(expr: &Expr<'src>, old_var: &str, new_var: &'src str) -> Expr<'src> {
     match expr {
         Expr::Variable(name) if *name == old_var => Expr::Variable(new_var),
@@ -257,7 +217,6 @@ fn rename_var_in_expr<'src>(expr: &Expr<'src>, old_var: &str, new_var: &'src str
             body,
         } => {
             if *bound_var == old_var {
-                // Bound variable shadows — don't rename inside body
                 Expr::Forall {
                     var: bound_var,
                     start: Box::new((rename_var_in_expr(&start.0, old_var, new_var), start.1)),

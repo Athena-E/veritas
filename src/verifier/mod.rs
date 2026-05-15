@@ -53,12 +53,6 @@ use crate::dtal::instr::{DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeSt
 use checker::verify_instruction;
 use std::collections::HashMap;
 
-/// Verify every function in a DTAL program.
-///
-/// # Errors
-///
-/// Returns the first [`VerifyError`] encountered while checking function
-/// bodies, contracts, CFG joins, or constraints.
 pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
     for func in &program.functions {
         verify_function(func, program)?;
@@ -66,7 +60,6 @@ pub fn verify_dtal(program: &DtalProgram) -> Result<(), VerifyError> {
     Ok(())
 }
 
-/// Verify one function, preferring declared block entry states.
 fn verify_function(func: &DtalFunction, program: &DtalProgram) -> Result<(), VerifyError> {
     let label_map: HashMap<&str, &TypeState> = func
         .blocks
@@ -86,7 +79,6 @@ fn verify_function(func: &DtalFunction, program: &DtalProgram) -> Result<(), Ver
     }
 }
 
-/// Check each block independently from its declared entry state.
 fn verify_function_derivation(
     func: &DtalFunction,
     program: &DtalProgram,
@@ -119,7 +111,6 @@ fn verify_function_derivation(
     Ok(())
 }
 
-/// Verify one block from its declared entry state.
 fn verify_block_derivation(
     func: &DtalFunction,
     program: &DtalProgram,
@@ -129,14 +120,12 @@ fn verify_block_derivation(
 ) -> Result<(), VerifyError> {
     let mut state = block.entry_state.clone();
 
-    // Frontend-proven assertions survive joins and are available here.
     for assertion in &state.proven_assertions {
         if !state.constraints.contains(assertion) {
             state.constraints.push(assertion.clone());
         }
     }
 
-    // Recreate register/index links for declared entry states.
     seed_register_constraints(&mut state);
 
     for instr in &block.instructions {
@@ -163,7 +152,6 @@ fn verify_block_derivation(
                 {
                     state.constraints.push(neg_constraint);
                 }
-                // Most generated branches use a following `jmp` for the false edge.
                 let has_subsequent_jmp = block
                     .instructions
                     .iter()
@@ -188,7 +176,6 @@ fn verify_block_derivation(
     Ok(())
 }
 
-/// Fallback verifier for programs without declared entry states.
 fn verify_function_dataflow(func: &DtalFunction, program: &DtalProgram) -> Result<(), VerifyError> {
     let dataflow = dataflow::analyze_function(func)?;
 
@@ -211,12 +198,10 @@ fn verify_function_dataflow(func: &DtalFunction, program: &DtalProgram) -> Resul
     Ok(())
 }
 
-/// Check return type and postcondition.
 fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyError> {
     use crate::dtal::regs::{PhysicalReg, Reg};
     use crate::dtal::types::DtalType;
 
-    // Physical DTAL returns through LR; virtual DTAL returns through R0.
     if func.return_type == DtalType::Unit {
     } else {
         let is_physical = func.blocks.iter().any(|b| {
@@ -247,7 +232,6 @@ fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyErr
     }
 
     if let Some(postcond) = &func.postcondition {
-        // Postconditions refer to the current array versions.
         let versioned = checker::version_substitute_constraint(postcond, &state.array_versions);
         if !checker::is_constraint_provable(&versioned, &state.constraints) {
             return Err(VerifyError::PostconditionFailed {
@@ -261,7 +245,6 @@ fn verify_return(func: &DtalFunction, state: &TypeState) -> Result<(), VerifyErr
     Ok(())
 }
 
-/// Check return obligations for any `Ret` in a dataflow-verified block.
 fn verify_return_if_present(
     func: &DtalFunction,
     block: &DtalBlock,
@@ -275,14 +258,12 @@ fn verify_return_if_present(
     Ok(())
 }
 
-/// Verify Xi & Harper state coercion for a jump edge.
 fn verify_state_coercion(
     current: &TypeState,
     target: &TypeState,
     source_block: &str,
     target_label: &str,
 ) -> Result<(), VerifyError> {
-    // An unsatisfiable context means the edge is unreachable.
     if checker::is_constraint_provable(&Constraint::False, &current.constraints) {
         return Ok(());
     }
@@ -341,7 +322,6 @@ fn verify_state_coercion(
     ownership::verify_unique_owned_objects(current, source_block, "state coercion")?;
     ownership::verify_unique_owned_objects(target, target_label, "state coercion target")?;
 
-    // Target `.assume` constraints must be entailed by the incoming state.
     for target_constraint in &target.constraints {
         if !checker::is_constraint_provable(target_constraint, &current.constraints) {
             return Err(VerifyError::UnprovableConstraint {
@@ -358,7 +338,6 @@ fn verify_state_coercion(
     Ok(())
 }
 
-/// Seed register/index equalities implied by the type state.
 fn seed_register_constraints(state: &mut TypeState) {
     use crate::dtal::constraints::Constraint;
     use crate::dtal::types::DtalType;
@@ -379,7 +358,6 @@ fn seed_register_constraints(state: &mut TypeState) {
                 witness_var,
                 constraint,
             } => {
-                // Open the existential for this register.
                 let reg_name = format!("{}", reg);
                 let subs = std::collections::HashMap::from([(witness_var.clone(), reg_name)]);
                 let mut opened = checker::substitute_var_names_in_constraint(constraint, &subs);
@@ -389,7 +367,6 @@ fn seed_register_constraints(state: &mut TypeState) {
             DtalType::RefinedInt {
                 var, constraint, ..
             } => {
-                // Project the refinement onto the register name.
                 let reg_name = format!("{}", reg);
                 let subs = std::collections::HashMap::from([(var.clone(), reg_name)]);
                 let projected = checker::substitute_var_names_in_constraint(constraint, &subs);
@@ -402,8 +379,6 @@ fn seed_register_constraints(state: &mut TypeState) {
     state.constraints.extend(new_constraints);
 }
 
-/// Check if actual type is a subtype of (or equal to) expected type,
-/// using the constraint context for coercion proofs.
 fn types_compatible_with_constraints(
     actual: &crate::dtal::types::DtalType,
     expected: &crate::dtal::types::DtalType,
@@ -411,6 +386,5 @@ fn types_compatible_with_constraints(
 ) -> bool {
     checker::types_compatible_with_constraints(actual, expected, constraints)
 }
-
 #[cfg(test)]
 mod tests;

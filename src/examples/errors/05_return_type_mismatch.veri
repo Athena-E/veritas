@@ -1,5 +1,3 @@
-// Error: Return type doesn't match signature
-// Expected error: E005 - Mismatched return type
 
 fn get_number() -> int {
     true

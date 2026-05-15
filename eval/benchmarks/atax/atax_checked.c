@@ -1,24 +1,12 @@
-#include <stdio.h>
 
-#include "../checked_bounds.h"
 
-#ifndef M
-#define M 116
-#endif
 
-#ifndef N
-#define N 124
-#endif
 
 static long long a[M][N];
 static long long x[N];
 static long long y[N];
 static long long tmp[M];
 
-#define A(i, j) a[CHECKED_IDX1("a", (i), M)][CHECKED_IDX1("a", (j), N)]
-#define X(i) x[CHECKED_IDX1("x", (i), N)]
-#define Y(i) y[CHECKED_IDX1("y", (i), N)]
-#define TMP(i) tmp[CHECKED_IDX1("tmp", (i), M)]
 
 static void init_array(void) {
     for (int i = 0; i < N; i++) {

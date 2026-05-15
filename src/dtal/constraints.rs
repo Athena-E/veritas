@@ -5,7 +5,6 @@
 
 use std::fmt;
 
-/// A constraint in the index domain
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Constraint {
     True,
@@ -34,7 +33,6 @@ pub enum Constraint {
     },
 }
 
-/// An expression in the index domain
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndexExpr {
     Const(i128),

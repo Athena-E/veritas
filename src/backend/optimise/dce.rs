@@ -23,9 +23,6 @@ use crate::dtal::instr::{DtalFunction, DtalInstr};
 use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::HashSet;
 
-/// Eliminate dead code from a function
-///
-/// Returns true if any instructions were removed
 pub fn eliminate_dead_code(func: &mut DtalFunction) -> bool {
     let mut changed = false;
 
@@ -67,12 +64,6 @@ pub fn eliminate_dead_code(func: &mut DtalFunction) -> bool {
     changed
 }
 
-/// Check if an instruction should be kept
-///
-/// An instruction is kept if:
-/// - It has side effects (Store, Call, etc.), OR
-/// - Its defined register is live after the instruction
-/// - It's not a trivial self-move (mov r, r)
 fn should_keep_instruction(instr: &DtalInstr, live_after: &HashSet<VirtualReg>) -> bool {
     if is_trivial_move(instr) {
         return false;
@@ -82,7 +73,6 @@ fn should_keep_instruction(instr: &DtalInstr, live_after: &HashSet<VirtualReg>) 
         return true;
     }
 
-    // Keep metadata only while its target is live.
     if let DtalInstr::TypeAnnotation { reg, .. } = instr {
         return match reg {
             Reg::Virtual(vreg) => live_after.contains(vreg),
@@ -98,7 +88,6 @@ fn should_keep_instruction(instr: &DtalInstr, live_after: &HashSet<VirtualReg>) 
     }
 }
 
-/// Check if an instruction is a trivial self-move (mov r, r)
 fn is_trivial_move(instr: &DtalInstr) -> bool {
     if let DtalInstr::MovReg { dst, src, .. } = instr {
         dst == src
@@ -107,7 +96,6 @@ fn is_trivial_move(instr: &DtalInstr) -> bool {
     }
 }
 
-/// Check if an instruction has side effects (should never be removed)
 fn has_side_effects(instr: &DtalInstr) -> bool {
     matches!(
         instr,
@@ -121,7 +109,6 @@ fn has_side_effects(instr: &DtalInstr) -> bool {
     )
 }
 
-/// Get the virtual register defined by an instruction (if any)
 fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
     let reg = match instr {
         DtalInstr::MovImm { dst, .. }
@@ -140,25 +127,20 @@ fn instruction_def(instr: &DtalInstr) -> Option<VirtualReg> {
         _ => None,
     };
 
-    // Only return virtual registers
     reg.and_then(|r| match r {
         Reg::Virtual(v) => Some(v),
         Reg::Physical(_) => None,
     })
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{BinaryOp, DtalBlock, TypeState};
     use crate::dtal::types::DtalType;
-
     #[test]
+
     fn test_remove_unused_mov() {
-        // v0 = 42  (used)
-        // v1 = 100 (unused - should be removed)
-        // push v0
-        // ret
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
 
@@ -207,13 +189,9 @@ mod tests {
         ));
         assert!(matches!(&func.blocks[0].instructions[2], DtalInstr::Ret));
     }
-
     #[test]
+
     fn test_keep_used_values() {
-        // v0 = 42
-        // v1 = v0 + v0
-        // push v1
-        // ret
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
 
@@ -250,14 +228,12 @@ mod tests {
         };
 
         let changed = eliminate_dead_code(&mut func);
-        // All values are used, nothing should be removed
         assert!(!changed);
         assert_eq!(func.blocks[0].instructions.len(), 4);
     }
-
     #[test]
+
     fn test_keep_side_effects() {
-        // Store instruction should never be removed even if "unused"
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -299,17 +275,12 @@ mod tests {
         };
 
         let changed = eliminate_dead_code(&mut func);
-        // Nothing should be removed - all values feed into the Store
         assert!(!changed);
         assert_eq!(func.blocks[0].instructions.len(), 5);
     }
-
     #[test]
+
     fn test_cascading_dead_code() {
-        // v0 = 42
-        // v1 = v0 + v0  (this becomes dead if v2 is dead)
-        // v2 = v1 + v1  (dead - not used)
-        // ret
         let v0 = Reg::Virtual(VirtualReg(0));
         let v1 = Reg::Virtual(VirtualReg(1));
         let v2 = Reg::Virtual(VirtualReg(2));
@@ -349,28 +320,21 @@ mod tests {
             }],
         };
 
-        // First pass: v2 is dead, remove it
         let changed1 = eliminate_dead_code(&mut func);
         assert!(changed1);
 
-        // Second pass: now v1 is dead, remove it
         let changed2 = eliminate_dead_code(&mut func);
         assert!(changed2);
 
-        // Third pass: now v0 is dead, remove it
         let changed3 = eliminate_dead_code(&mut func);
         assert!(changed3);
 
-        // Only ret should remain
         assert_eq!(func.blocks[0].instructions.len(), 1);
         assert!(matches!(&func.blocks[0].instructions[0], DtalInstr::Ret));
     }
-
     #[test]
+
     fn test_remove_dead_type_annotation() {
-        // v0 = 42 (unused)
-        // TypeAnnotation v0, Bool (should be removed — v0 is dead)
-        // ret
         let v0 = Reg::Virtual(VirtualReg(0));
 
         let mut func = DtalFunction {
@@ -398,21 +362,15 @@ mod tests {
             }],
         };
 
-        // First pass removes MovImm (v0 unused) and TypeAnnotation (v0 dead)
         let changed = eliminate_dead_code(&mut func);
         assert!(changed);
 
-        // Only ret should remain
         assert_eq!(func.blocks[0].instructions.len(), 1);
         assert!(matches!(&func.blocks[0].instructions[0], DtalInstr::Ret));
     }
-
     #[test]
+
     fn test_keep_live_type_annotation() {
-        // v0 = 42 (used by push)
-        // TypeAnnotation v0, Bool (should be kept — v0 is live)
-        // push v0
-        // ret
         let v0 = Reg::Virtual(VirtualReg(0));
 
         let mut func = DtalFunction {
@@ -445,7 +403,6 @@ mod tests {
         };
 
         let changed = eliminate_dead_code(&mut func);
-        // Nothing should be removed
         assert!(!changed);
         assert_eq!(func.blocks[0].instructions.len(), 4);
     }

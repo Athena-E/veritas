@@ -1,4 +1,3 @@
-// C equivalent of 38_sortedness.veri
 
 static int sorted_head(const int arr[3]) {
     return arr[0];

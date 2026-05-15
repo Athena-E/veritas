@@ -4,37 +4,29 @@
 
 use std::fmt;
 
-/// x86-64 General Purpose Registers (64-bit)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum X86Reg {
-    // Caller-saved registers (volatile)
-    Rax, // Return value, accumulator
-    Rcx, // 4th argument
-    Rdx, // 3rd argument
-    Rsi, // 2nd argument
-    Rdi, // 1st argument
-    R8,  // 5th argument
-    R9,  // 6th argument
-    R10, // Caller-saved
-    R11, // Caller-saved
+    Rax,
+    Rcx,
+    Rdx,
+    Rsi,
+    Rdi,
+    R8,
+    R9,
+    R10,
+    R11,
 
-    // Callee-saved registers (non-volatile)
-    Rbx, // Callee-saved
-    Rbp, // Base pointer (callee-saved)
-    R12, // Callee-saved
-    R13, // Callee-saved
-    R14, // Callee-saved
-    R15, // Callee-saved
+    Rbx,
+    Rbp,
+    R12,
+    R13,
+    R14,
+    R15,
 
-    // Special registers
-    Rsp, // Stack pointer
+    Rsp,
 }
 
 impl X86Reg {
-    /// Registers available for allocation (excludes RSP, RBP, RAX, RDX, R11)
-    /// Rax: scratch for lowering (binop lhs, setcc, load/store base)
-    /// Rdx: implicitly clobbered by cqo/idiv (division)
-    /// R11: scratch for lowering (binop rhs, load/store offset, large immediates)
     pub const ALLOCATABLE: &'static [X86Reg] = &[
         X86Reg::Rcx,
         X86Reg::Rsi,
@@ -49,7 +41,6 @@ impl X86Reg {
         X86Reg::R15,
     ];
 
-    /// Caller-saved registers (must be saved by caller if live across call)
     pub const CALLER_SAVED: &'static [X86Reg] = &[
         X86Reg::Rax,
         X86Reg::Rcx,
@@ -62,7 +53,6 @@ impl X86Reg {
         X86Reg::R11,
     ];
 
-    /// Callee-saved registers (must be preserved by callee)
     pub const CALLEE_SAVED: &'static [X86Reg] = &[
         X86Reg::Rbx,
         X86Reg::Rbp,
@@ -72,26 +62,21 @@ impl X86Reg {
         X86Reg::R15,
     ];
 
-    /// Argument registers (System V AMD64 ABI order)
     pub const ARG_REGS: &'static [X86Reg] = &[
-        X86Reg::Rdi, // 1st argument
-        X86Reg::Rsi, // 2nd argument
-        X86Reg::Rdx, // 3rd argument
-        X86Reg::Rcx, // 4th argument
-        X86Reg::R8,  // 5th argument
-        X86Reg::R9,  // 6th argument
+        X86Reg::Rdi,
+        X86Reg::Rsi,
+        X86Reg::Rdx,
+        X86Reg::Rcx,
+        X86Reg::R8,
+        X86Reg::R9,
     ];
 
-    /// Return value register
     pub const RETURN_REG: X86Reg = X86Reg::Rax;
 
-    /// Stack pointer
     pub const STACK_PTR: X86Reg = X86Reg::Rsp;
 
-    /// Base pointer
     pub const BASE_PTR: X86Reg = X86Reg::Rbp;
 
-    /// Get the register encoding for ModR/M byte
     pub fn encoding(self) -> u8 {
         match self {
             X86Reg::Rax => 0,
@@ -113,34 +98,26 @@ impl X86Reg {
         }
     }
 
-    /// Check if register requires REX.B prefix (R8-R15)
     pub fn needs_rex_b(self) -> bool {
         self.encoding() >= 8
     }
 
-    /// Check if register requires REX.R prefix when used as reg field (R8-R15)
     pub fn needs_rex_r(self) -> bool {
         self.encoding() >= 8
     }
 
-    /// Check if register requires a REX prefix to access the low byte.
-    /// In x86-64, registers RSP/RBP/RSI/RDI (encoding 4-7) need a REX
-    /// prefix for byte access; without it, codes 4-7 refer to AH/CH/DH/BH.
     pub fn needs_rex_for_byte(self) -> bool {
         self.encoding() >= 4
     }
 
-    /// Get the 3-bit encoding (lower 3 bits of register number)
     pub fn reg3(self) -> u8 {
         self.encoding() & 0x7
     }
 
-    /// Check if this is a caller-saved register
     pub fn is_caller_saved(self) -> bool {
         Self::CALLER_SAVED.contains(&self)
     }
 
-    /// Check if this is a callee-saved register
     pub fn is_callee_saved(self) -> bool {
         Self::CALLEE_SAVED.contains(&self)
     }
@@ -170,12 +147,9 @@ impl fmt::Display for X86Reg {
     }
 }
 
-/// Location of a value - either a register or stack slot
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Location {
-    /// Value is in a register
     Reg(X86Reg),
-    /// Value is on the stack at offset from RBP
     Stack(i32),
 }
 
@@ -193,28 +167,28 @@ impl fmt::Display for Location {
         }
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
-
     #[test]
+
     fn test_register_encoding() {
         assert_eq!(X86Reg::Rax.encoding(), 0);
         assert_eq!(X86Reg::Rcx.encoding(), 1);
         assert_eq!(X86Reg::R8.encoding(), 8);
         assert_eq!(X86Reg::R15.encoding(), 15);
     }
-
     #[test]
+
     fn test_rex_prefix_needed() {
         assert!(!X86Reg::Rax.needs_rex_b());
         assert!(!X86Reg::Rdi.needs_rex_b());
         assert!(X86Reg::R8.needs_rex_b());
         assert!(X86Reg::R15.needs_rex_b());
     }
-
     #[test]
+
     fn test_arg_registers() {
         assert_eq!(X86Reg::ARG_REGS.len(), 6);
         assert_eq!(X86Reg::ARG_REGS[0], X86Reg::Rdi);

@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# Veritas Evaluation Benchmark Harness
-#
-# This harness is manifest-driven and writes outputs into a reproducible run
-# directory under eval/runs/.
-#
-# Usage:
-#   ./eval/bench.sh [--all | --compile | --timing | --verify | --errors |
-#                    --binary-size | --runtime | --loc]
-#
-# Environment:
-#   BENCH_LABEL=<label>      label for the run directory
-#   BENCH_RUN_DIR=<path>     existing run directory to reuse
-#   BENCH_RUNS=<n>           hyperfine run count / repeated run count
-#   BENCH_WARMUP=<n>         hyperfine warmup count
 
 set -euo pipefail
 

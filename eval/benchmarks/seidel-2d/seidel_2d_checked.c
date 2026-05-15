@@ -1,18 +1,9 @@
-#include <stdio.h>
 
-#include "../checked_bounds.h"
 
-#ifndef N
-#define N 120
-#endif
 
-#ifndef TSTEPS
-#define TSTEPS 40
-#endif
 
 static long long a[N][N];
 
-#define A(i, j) a[CHECKED_IDX1("a", (i), N)][CHECKED_IDX1("a", (j), N)]
 
 static void init_array(void) {
     for (int i = 0; i < N; i++) {

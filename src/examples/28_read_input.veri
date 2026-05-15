@@ -1,4 +1,3 @@
-// Read an integer from stdin and print its digit sum
 
 fn digit_sum(n: int) -> int requires n > 0 {
     let mut sum: int = 0;
@@ -19,13 +18,11 @@ fn main() -> int {
         print_int(result);
     } else {
         if n < 0 {
-            // For negative numbers, compute digit sum of the negation
             let pos: int = 0 - n;
             let result: int = digit_sum(pos);
             print_char(45);
             print_int(result);
         } else {
-            // n == 0
             print_int(0);
         }
     }

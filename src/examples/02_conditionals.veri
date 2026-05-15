@@ -1,4 +1,3 @@
-// Function with conditional logic using mutable variables
 fn check_value() {
     let x: int = 42;
     let mut result: int = 0;
@@ -9,7 +8,6 @@ fn check_value() {
     }
 }
 
-// Function with nested conditionals
 fn nested_conditionals() {
     let a: int = 10;
     let b: int = 20;

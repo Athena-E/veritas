@@ -13,44 +13,29 @@ use super::instr::{Condition, MemOperand, X86Function, X86Instr, X86Program};
 use super::regs::X86Reg;
 use std::collections::HashMap;
 
-/// Encoded machine code with label information
 #[derive(Clone, Debug)]
 pub struct EncodedProgram {
-    /// Raw machine code bytes
     pub code: Vec<u8>,
-    /// Symbol table: name -> offset
     pub symbols: HashMap<String, usize>,
-    /// Relocations: offset -> target label
     pub relocations: Vec<Relocation>,
 }
 
-/// A relocation entry
 #[derive(Clone, Debug)]
 pub struct Relocation {
-    /// Offset in code where the relocation applies
     pub offset: usize,
-    /// Target symbol name
     pub target: String,
-    /// Type of relocation
     pub kind: RelocKind,
 }
 
-/// Relocation types
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RelocKind {
-    /// PC-relative 32-bit (for near jumps/calls)
     Rel32,
 }
 
-/// x86-64 instruction encoder
 pub struct Encoder {
-    /// Output buffer
     code: Vec<u8>,
-    /// Label positions
     labels: HashMap<String, usize>,
-    /// Forward references (label, patch_offset, is_call)
     forward_refs: Vec<(String, usize, RelocKind)>,
-    /// Current function offset
     func_offset: usize,
 }
 
@@ -64,34 +49,27 @@ impl Encoder {
         }
     }
 
-    /// Encode a complete program
     pub fn encode_program(&mut self, program: &X86Program) -> EncodedProgram {
         let mut symbols = HashMap::new();
         let mut all_forward_refs: Vec<(String, usize, RelocKind)> = Vec::new();
 
         for func in &program.functions {
-            // Record function symbol
             symbols.insert(func.name.clone(), self.code.len());
             self.func_offset = self.code.len();
             self.labels.clear();
             self.forward_refs.clear();
 
-            // First pass: collect labels
             self.collect_labels(func);
 
-            // Second pass: encode instructions
             for instr in &func.instructions {
                 self.encode_instruction(instr);
             }
 
-            // Resolve forward references within function
             self.resolve_forward_refs();
 
-            // Accumulate unresolved references for cross-function resolution
             all_forward_refs.append(&mut self.forward_refs);
         }
 
-        // Resolve cross-function references using the global symbols table
         for (target, patch_offset, _kind) in &all_forward_refs {
             if let Some(&target_pos) = symbols.get(target) {
                 let offset = (target_pos as i64) - (*patch_offset as i64 + 4);
@@ -99,7 +77,6 @@ impl Encoder {
             }
         }
 
-        // Build relocations for truly unresolved references (external symbols)
         let relocations: Vec<Relocation> = all_forward_refs
             .iter()
             .filter(|(target, _, _)| !symbols.contains_key(target))
@@ -117,7 +94,6 @@ impl Encoder {
         }
     }
 
-    /// Collect label positions (first pass)
     fn collect_labels(&mut self, func: &X86Function) {
         let mut offset = 0;
 
@@ -129,7 +105,6 @@ impl Encoder {
         }
     }
 
-    /// Calculate instruction size without encoding
     fn instruction_size(&self, instr: &X86Instr) -> usize {
         match instr {
             X86Instr::Label { .. } | X86Instr::Comment { .. } => 0,
@@ -141,7 +116,6 @@ impl Encoder {
 
             X86Instr::MovRI { dst, imm: _ } => {
                 let rex = Self::needs_rex_w() || dst.needs_rex_b();
-                // REX + opcode + imm64
                 if rex { 1 + 1 + 8 } else { 1 + 8 }
             }
 
@@ -149,10 +123,7 @@ impl Encoder {
                 self.mem_instr_size(*dst, src)
             }
 
-            X86Instr::MovMI { dst, .. } => {
-                // REX.W + opcode + ModR/M + SIB? + disp + imm32
-                self.mem_only_instr_size(dst) + 4
-            }
+            X86Instr::MovMI { dst, .. } => self.mem_only_instr_size(dst) + 4,
 
             X86Instr::Lea { dst, src } => self.mem_instr_size(*dst, src),
 
@@ -162,9 +133,9 @@ impl Encoder {
             | X86Instr::TestRR { .. }
             | X86Instr::AndRR { .. }
             | X86Instr::OrRR { .. }
-            | X86Instr::XorRR { .. } => 3, // REX.W + opcode + ModR/M
+            | X86Instr::XorRR { .. } => 3,
 
-            X86Instr::ImulRR { .. } => 4, // REX.W + 0x0F + 0xAF + ModR/M
+            X86Instr::ImulRR { .. } => 4,
 
             X86Instr::AddRI { dst, imm }
             | X86Instr::SubRI { dst, imm }
@@ -175,7 +146,6 @@ impl Encoder {
             | X86Instr::TestRI { lhs: dst, imm } => {
                 let rex = Self::needs_rex_w() || dst.needs_rex_b();
                 let base = if rex { 3 } else { 2 };
-                // Check if imm fits in i8
                 if *imm >= -128 && *imm <= 127 && !matches!(instr, X86Instr::TestRI { .. }) {
                     base + 1
                 } else {
@@ -183,35 +153,33 @@ impl Encoder {
                 }
             }
 
-            X86Instr::ImulRRI { .. } => 7, // REX.W + 0x69 + ModR/M + imm32
+            X86Instr::ImulRRI { .. } => 7,
 
             X86Instr::AddRM { dst, src } => self.mem_instr_size(*dst, src),
             X86Instr::SubRM { dst, src } => self.mem_instr_size(*dst, src),
             X86Instr::CmpRM { lhs, rhs } => self.mem_instr_size(*lhs, rhs),
 
-            X86Instr::Cqo => 2,              // REX.W + 0x99
-            X86Instr::IdivR { src: _ } => 3, // REX.W + 0xF7 + ModR/M (REX.B comes free with REX.W)
+            X86Instr::Cqo => 2,
+            X86Instr::IdivR { src: _ } => 3,
 
-            X86Instr::Neg { .. } | X86Instr::Not { .. } => 3, // REX.W + opcode + ModR/M
-            X86Instr::ShlCl { .. } | X86Instr::ShrCl { .. } => 3, // REX.W + D3 + ModR/M
-            X86Instr::ShlRI { .. } | X86Instr::ShrRI { .. } => 4, // REX.W + C1 + ModR/M + imm8
+            X86Instr::Neg { .. } | X86Instr::Not { .. } => 3,
+            X86Instr::ShlCl { .. } | X86Instr::ShrCl { .. } => 3,
+            X86Instr::ShlRI { .. } | X86Instr::ShrRI { .. } => 4,
 
             X86Instr::SetCC { dst, .. } => {
-                // setcc r8 (3-4 bytes) + movzx r32, r8 (3-4 bytes)
-                // REX prefix needed for registers with encoding >= 4
                 let setcc_size = if dst.needs_rex_for_byte() { 4 } else { 3 };
                 let movzx_size = if dst.needs_rex_for_byte() { 4 } else { 3 };
                 setcc_size + movzx_size
             }
 
-            X86Instr::Jmp { .. } | X86Instr::JmpRel { .. } => 5, // E9 + rel32
-            X86Instr::Jcc { .. } | X86Instr::JccRel { .. } => 6, // 0F 8x + rel32
-            X86Instr::Call { .. } | X86Instr::CallRel { .. } => 5, // E8 + rel32
+            X86Instr::Jmp { .. } | X86Instr::JmpRel { .. } => 5,
+            X86Instr::Jcc { .. } | X86Instr::JccRel { .. } => 6,
+            X86Instr::Call { .. } | X86Instr::CallRel { .. } => 5,
 
             X86Instr::Ret => 1,
             X86Instr::Syscall => 2,
-            X86Instr::InAlDx => 1,  // 0xEC
-            X86Instr::OutDxAl => 1, // 0xEE
+            X86Instr::InAlDx => 1,
+            X86Instr::OutDxAl => 1,
 
             X86Instr::Push { src } => {
                 if src.needs_rex_b() {
@@ -237,18 +205,14 @@ impl Encoder {
         }
     }
 
-    /// Calculate size of memory instruction
     fn mem_instr_size(&self, _reg: X86Reg, mem: &MemOperand) -> usize {
-        let mut size = 3; // REX.W + opcode + ModR/M
+        let mut size = 3;
 
-        // SIB byte needed?
         if mem.index.is_some() || mem.base == X86Reg::Rsp || mem.base == X86Reg::R12 {
             size += 1;
         }
 
-        // Displacement size
         if mem.disp == 0 && mem.base != X86Reg::Rbp && mem.base != X86Reg::R13 {
-            // No displacement
         } else if mem.disp >= -128 && mem.disp <= 127 {
             size += 1;
         } else {
@@ -258,16 +222,14 @@ impl Encoder {
         size
     }
 
-    /// Calculate size of memory-only instruction (e.g., MovMI)
     fn mem_only_instr_size(&self, mem: &MemOperand) -> usize {
-        let mut size = 3; // REX.W + opcode + ModR/M
+        let mut size = 3;
 
         if mem.index.is_some() || mem.base == X86Reg::Rsp || mem.base == X86Reg::R12 {
             size += 1;
         }
 
         if mem.disp == 0 && mem.base != X86Reg::Rbp && mem.base != X86Reg::R13 {
-            // No displacement
         } else if mem.disp >= -128 && mem.disp <= 127 {
             size += 1;
         } else {
@@ -277,24 +239,19 @@ impl Encoder {
         size
     }
 
-    /// Encode a single instruction
     fn encode_instruction(&mut self, instr: &X86Instr) {
         match instr {
             X86Instr::Label { name } => {
-                // Labels don't emit code, position already recorded
                 self.labels.insert(name.clone(), self.code.len());
             }
 
-            X86Instr::Comment { .. } => {
-                // Comments don't emit code
-            }
+            X86Instr::Comment { .. } => {}
 
             X86Instr::MovRR { dst, src } => {
-                self.encode_rr(0x89, *src, *dst); // mov r/m64, r64
+                self.encode_rr(0x89, *src, *dst);
             }
 
             X86Instr::MovRI { dst, imm } => {
-                // movabs r64, imm64
                 let rex = 0x48 | if dst.needs_rex_b() { 0x01 } else { 0 };
                 self.emit_byte(rex);
                 self.emit_byte(0xB8 + dst.reg3());
@@ -302,48 +259,46 @@ impl Encoder {
             }
 
             X86Instr::MovRM { dst, src } => {
-                self.encode_rm(0x8B, *dst, src); // mov r64, r/m64
+                self.encode_rm(0x8B, *dst, src);
             }
 
             X86Instr::MovMR { dst, src } => {
-                self.encode_mr(0x89, dst, *src); // mov r/m64, r64
+                self.encode_mr(0x89, dst, *src);
             }
 
             X86Instr::MovMI { dst, imm } => {
-                // mov r/m64, imm32 (sign-extended)
                 self.encode_mi(0xC7, 0, dst, *imm);
             }
 
             X86Instr::Lea { dst, src } => {
-                self.encode_rm(0x8D, *dst, src); // lea r64, m
+                self.encode_rm(0x8D, *dst, src);
             }
 
             X86Instr::AddRR { dst, src } => {
-                self.encode_rr(0x01, *src, *dst); // add r/m64, r64
+                self.encode_rr(0x01, *src, *dst);
             }
 
             X86Instr::AddRI { dst, imm } => {
-                self.encode_ri(0x81, 0x83, 0, *dst, *imm); // add r/m64, imm
+                self.encode_ri(0x81, 0x83, 0, *dst, *imm);
             }
 
             X86Instr::AddRM { dst, src } => {
-                self.encode_rm(0x03, *dst, src); // add r64, r/m64
+                self.encode_rm(0x03, *dst, src);
             }
 
             X86Instr::SubRR { dst, src } => {
-                self.encode_rr(0x29, *src, *dst); // sub r/m64, r64
+                self.encode_rr(0x29, *src, *dst);
             }
 
             X86Instr::SubRI { dst, imm } => {
-                self.encode_ri(0x81, 0x83, 5, *dst, *imm); // sub r/m64, imm
+                self.encode_ri(0x81, 0x83, 5, *dst, *imm);
             }
 
             X86Instr::SubRM { dst, src } => {
-                self.encode_rm(0x2B, *dst, src); // sub r64, r/m64
+                self.encode_rm(0x2B, *dst, src);
             }
 
             X86Instr::ImulRR { dst, src } => {
-                // imul r64, r/m64 (two operand form)
                 let rex = 0x48
                     | if dst.needs_rex_r() { 0x04 } else { 0 }
                     | if src.needs_rex_b() { 0x01 } else { 0 };
@@ -354,7 +309,6 @@ impl Encoder {
             }
 
             X86Instr::ImulRRI { dst, src, imm } => {
-                // imul r64, r/m64, imm32
                 let rex = 0x48
                     | if dst.needs_rex_r() { 0x04 } else { 0 }
                     | if src.needs_rex_b() { 0x01 } else { 0 };
@@ -365,36 +319,32 @@ impl Encoder {
             }
 
             X86Instr::Cqo => {
-                // CQO: sign-extend rax into rdx:rax
-                // Encoding: REX.W + 0x99
                 self.emit_byte(0x48);
                 self.emit_byte(0x99);
             }
 
             X86Instr::IdivR { src } => {
-                // IDIV r/m64: signed divide rdx:rax by r/m64
-                // Encoding: REX.W + 0xF7 /7
                 self.encode_unary(0xF7, 7, *src);
             }
 
             X86Instr::Neg { dst } => {
-                self.encode_unary(0xF7, 3, *dst); // neg r/m64
+                self.encode_unary(0xF7, 3, *dst);
             }
 
             X86Instr::CmpRR { lhs, rhs } => {
-                self.encode_rr(0x39, *rhs, *lhs); // cmp r/m64, r64
+                self.encode_rr(0x39, *rhs, *lhs);
             }
 
             X86Instr::CmpRI { lhs, imm } => {
-                self.encode_ri(0x81, 0x83, 7, *lhs, *imm); // cmp r/m64, imm
+                self.encode_ri(0x81, 0x83, 7, *lhs, *imm);
             }
 
             X86Instr::CmpRM { lhs, rhs } => {
-                self.encode_rm(0x3B, *lhs, rhs); // cmp r64, r/m64
+                self.encode_rm(0x3B, *lhs, rhs);
             }
 
             X86Instr::TestRR { lhs, rhs } => {
-                self.encode_rr(0x85, *rhs, *lhs); // test r/m64, r64
+                self.encode_rr(0x85, *rhs, *lhs);
             }
 
             X86Instr::TestRI { lhs, imm } => {
@@ -406,7 +356,6 @@ impl Encoder {
             }
 
             X86Instr::SetCC { dst, cond } => {
-                // REX selects SPL/BPL/SIL/DIL instead of legacy high-byte registers.
                 if dst.needs_rex_for_byte() {
                     let rex = 0x40 | if dst.needs_rex_b() { 0x01 } else { 0 };
                     self.emit_byte(rex);
@@ -427,31 +376,31 @@ impl Encoder {
             }
 
             X86Instr::AndRR { dst, src } => {
-                self.encode_rr(0x21, *src, *dst); // and r/m64, r64
+                self.encode_rr(0x21, *src, *dst);
             }
 
             X86Instr::AndRI { dst, imm } => {
-                self.encode_ri(0x81, 0x83, 4, *dst, *imm); // and r/m64, imm
+                self.encode_ri(0x81, 0x83, 4, *dst, *imm);
             }
 
             X86Instr::OrRR { dst, src } => {
-                self.encode_rr(0x09, *src, *dst); // or r/m64, r64
+                self.encode_rr(0x09, *src, *dst);
             }
 
             X86Instr::OrRI { dst, imm } => {
-                self.encode_ri(0x81, 0x83, 1, *dst, *imm); // or r/m64, imm
+                self.encode_ri(0x81, 0x83, 1, *dst, *imm);
             }
 
             X86Instr::XorRR { dst, src } => {
-                self.encode_rr(0x31, *src, *dst); // xor r/m64, r64
+                self.encode_rr(0x31, *src, *dst);
             }
 
             X86Instr::XorRI { dst, imm } => {
-                self.encode_ri(0x81, 0x83, 6, *dst, *imm); // xor r/m64, imm
+                self.encode_ri(0x81, 0x83, 6, *dst, *imm);
             }
 
             X86Instr::Not { dst } => {
-                self.encode_unary(0xF7, 2, *dst); // not r/m64
+                self.encode_unary(0xF7, 2, *dst);
             }
 
             X86Instr::Jmp { target } => {
@@ -516,23 +465,19 @@ impl Encoder {
             }
 
             X86Instr::ShlCl { dst } => {
-                // REX.W + D3 /4 (SHL r/m64, CL)
                 self.encode_unary(0xD3, 4, *dst);
             }
 
             X86Instr::ShrCl { dst } => {
-                // REX.W + D3 /5 (SHR r/m64, CL)
                 self.encode_unary(0xD3, 5, *dst);
             }
 
             X86Instr::ShlRI { dst, imm } => {
-                // REX.W + C1 /4 imm8 (SHL r/m64, imm8)
                 self.encode_unary(0xC1, 4, *dst);
                 self.emit_byte(*imm);
             }
 
             X86Instr::ShrRI { dst, imm } => {
-                // REX.W + C1 /5 imm8 (SHR r/m64, imm8)
                 self.encode_unary(0xC1, 5, *dst);
                 self.emit_byte(*imm);
             }
@@ -547,7 +492,6 @@ impl Encoder {
         }
     }
 
-    /// Encode reg-reg instruction
     fn encode_rr(&mut self, opcode: u8, reg: X86Reg, rm: X86Reg) {
         let rex = 0x48
             | if reg.needs_rex_r() { 0x04 } else { 0 }
@@ -557,7 +501,6 @@ impl Encoder {
         self.emit_modrm(0b11, reg.reg3(), rm.reg3());
     }
 
-    /// Encode reg-mem instruction
     fn encode_rm(&mut self, opcode: u8, reg: X86Reg, mem: &MemOperand) {
         let rex = 0x48
             | if reg.needs_rex_r() { 0x04 } else { 0 }
@@ -572,12 +515,10 @@ impl Encoder {
         self.encode_mem_operand(reg.reg3(), mem);
     }
 
-    /// Encode mem-reg instruction
     fn encode_mr(&mut self, opcode: u8, mem: &MemOperand, reg: X86Reg) {
         self.encode_rm(opcode, reg, mem);
     }
 
-    /// Encode mem-imm instruction
     fn encode_mi(&mut self, opcode: u8, ext: u8, mem: &MemOperand, imm: i32) {
         let rex = 0x48
             | if mem.base.needs_rex_b() { 0x01 } else { 0 }
@@ -592,7 +533,6 @@ impl Encoder {
         self.emit_i32(imm);
     }
 
-    /// Encode reg-imm instruction
     fn encode_ri(&mut self, opcode32: u8, opcode8: u8, ext: u8, dst: X86Reg, imm: i32) {
         let rex = 0x48 | if dst.needs_rex_b() { 0x01 } else { 0 };
         self.emit_byte(rex);
@@ -608,7 +548,6 @@ impl Encoder {
         }
     }
 
-    /// Encode unary instruction (neg, not, etc.)
     fn encode_unary(&mut self, opcode: u8, ext: u8, dst: X86Reg) {
         let rex = 0x48 | if dst.needs_rex_b() { 0x01 } else { 0 };
         self.emit_byte(rex);
@@ -616,12 +555,10 @@ impl Encoder {
         self.emit_modrm(0b11, ext, dst.reg3());
     }
 
-    /// Encode memory operand (ModR/M + SIB + displacement)
     fn encode_mem_operand(&mut self, reg: u8, mem: &MemOperand) {
         let base = mem.base;
         let base3 = base.reg3();
 
-        // Determine mod and displacement size
         let (mod_bits, disp_size) = if mem.disp == 0 && base != X86Reg::Rbp && base != X86Reg::R13 {
             (0b00, 0)
         } else if mem.disp >= -128 && mem.disp <= 127 {
@@ -631,7 +568,6 @@ impl Encoder {
         };
 
         if let Some((index, scale)) = mem.index {
-            // SIB byte needed
             let scale_bits = match scale {
                 1 => 0b00,
                 2 => 0b01,
@@ -640,17 +576,15 @@ impl Encoder {
                 _ => panic!("Invalid scale: {}", scale),
             };
 
-            self.emit_modrm(mod_bits, reg, 0b100); // SIB follows
+            self.emit_modrm(mod_bits, reg, 0b100);
             self.emit_sib(scale_bits, index.reg3(), base3);
         } else if base == X86Reg::Rsp || base == X86Reg::R12 {
-            // RSP/R12 as base requires SIB
             self.emit_modrm(mod_bits, reg, 0b100);
-            self.emit_sib(0b00, 0b100, base3); // No index
+            self.emit_sib(0b00, 0b100, base3);
         } else {
             self.emit_modrm(mod_bits, reg, base3);
         }
 
-        // Emit displacement
         match disp_size {
             0 => {}
             1 => self.emit_byte(mem.disp as u8),
@@ -659,25 +593,21 @@ impl Encoder {
         }
     }
 
-    /// Encode jump to label
     fn encode_jmp_label(&mut self, target: &str) {
         let current_pos = self.code.len();
 
         if let Some(&target_pos) = self.labels.get(target) {
-            // Backward reference - calculate offset
             let offset = (target_pos as i64) - (current_pos as i64 + 5);
             self.emit_byte(0xE9);
             self.emit_i32(offset as i32);
         } else {
-            // Forward reference - emit placeholder
             self.emit_byte(0xE9);
             self.forward_refs
                 .push((target.to_string(), self.code.len(), RelocKind::Rel32));
-            self.emit_i32(0); // Placeholder
+            self.emit_i32(0);
         }
     }
 
-    /// Encode conditional jump to label
     fn encode_jcc_label(&mut self, cond: Condition, target: &str) {
         let current_pos = self.code.len();
 
@@ -695,7 +625,6 @@ impl Encoder {
         }
     }
 
-    /// Encode call to label
     fn encode_call_label(&mut self, target: &str) {
         let current_pos = self.code.len();
 
@@ -711,7 +640,6 @@ impl Encoder {
         }
     }
 
-    /// Resolve forward references within function
     fn resolve_forward_refs(&mut self) {
         let resolved: Vec<_> = self
             .forward_refs
@@ -728,12 +656,10 @@ impl Encoder {
             self.patch_i32(patch_offset, offset);
         }
 
-        // Remove resolved references
         self.forward_refs
             .retain(|(target, _, _)| !self.labels.contains_key(target));
     }
 
-    /// Check if REX.W is needed (always true for 64-bit operations)
     fn needs_rex_w() -> bool {
         true
     }
@@ -769,13 +695,13 @@ impl Default for Encoder {
         Self::new()
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::backend::x86_64::instr::X86Function;
-
     #[test]
+
     fn test_encode_ret() {
         let func = X86Function {
             name: "test".to_string(),
@@ -791,8 +717,8 @@ mod tests {
 
         assert_eq!(encoded.code, vec![0xC3]);
     }
-
     #[test]
+
     fn test_encode_mov_rr() {
         let func = X86Function {
             name: "test".to_string(),
@@ -812,12 +738,11 @@ mod tests {
         let mut encoder = Encoder::new();
         let encoded = encoder.encode_program(&program);
 
-        // REX.W (0x48) + MOV (0x89) + ModR/M (0xC3 = mod=11, reg=rbx, r/m=rax)
         assert_eq!(&encoded.code[0..3], &[0x48, 0x89, 0xD8]);
-        assert_eq!(encoded.code[3], 0xC3); // ret
+        assert_eq!(encoded.code[3], 0xC3);
     }
-
     #[test]
+
     fn test_encode_push_pop() {
         let func = X86Function {
             name: "test".to_string(),
@@ -837,17 +762,13 @@ mod tests {
         let mut encoder = Encoder::new();
         let encoded = encoder.encode_program(&program);
 
-        // push rbp = 0x55
         assert_eq!(encoded.code[0], 0x55);
-        // push r12 = 0x41 0x54
         assert_eq!(&encoded.code[1..3], &[0x41, 0x54]);
-        // pop r12 = 0x41 0x5C
         assert_eq!(&encoded.code[3..5], &[0x41, 0x5C]);
-        // pop rbp = 0x5D
         assert_eq!(encoded.code[5], 0x5D);
     }
-
     #[test]
+
     fn test_encode_add_sub() {
         let func = X86Function {
             name: "test".to_string(),
@@ -871,14 +792,12 @@ mod tests {
         let mut encoder = Encoder::new();
         let encoded = encoder.encode_program(&program);
 
-        // add rax, rbx = REX.W (0x48) + 0x01 + ModR/M
         assert_eq!(&encoded.code[0..2], &[0x48, 0x01]);
 
-        // Verify we got some valid encoding
         assert!(encoded.code.len() > 5);
     }
-
     #[test]
+
     fn test_encode_jmp_forward() {
         let func = X86Function {
             name: "test".to_string(),
@@ -904,14 +823,12 @@ mod tests {
         let mut encoder = Encoder::new();
         let encoded = encoder.encode_program(&program);
 
-        // First byte should be JMP (0xE9)
         assert_eq!(encoded.code[0], 0xE9);
 
-        // Last byte should be RET
         assert_eq!(*encoded.code.last().unwrap(), 0xC3);
     }
-
     #[test]
+
     fn test_encode_syscall() {
         let func = X86Function {
             name: "test".to_string(),
@@ -925,7 +842,6 @@ mod tests {
         let mut encoder = Encoder::new();
         let encoded = encoder.encode_program(&program);
 
-        // syscall = 0x0F 0x05
         assert_eq!(&encoded.code[0..2], &[0x0F, 0x05]);
         assert_eq!(encoded.code[2], 0xC3);
     }

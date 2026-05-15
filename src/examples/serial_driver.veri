@@ -1,5 +1,3 @@
-// Serial port driver for UART 16550 (COM1)
-// Fully verified Veritas code — DTAL verifier checks all I/O operations.
 
 const COM1: int = 0x3F8;
 const COM1_IER: int = 0x3F9;
@@ -22,7 +20,6 @@ fn serial_write(c: int) {
     port_out(COM1, c);
 }
 
-// Print digits of a positive number via recursion (most significant first).
 fn serial_print_positive(n: int) requires n > 0 {
     if n >= 10 {
         serial_print_positive(n / 10);
@@ -30,7 +27,6 @@ fn serial_print_positive(n: int) requires n > 0 {
     serial_write(n % 10 + '0');
 }
 
-// Print a non-negative integer.
 fn serial_print_nonneg(n: int) requires n >= 0 {
     if n > 0 {
         serial_print_positive(n);

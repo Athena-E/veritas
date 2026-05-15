@@ -6,7 +6,6 @@ use crate::dtal::types::DtalType;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Build a mapping from virtual register names to physical register names.
 fn build_vreg_name_map(alloc: &AllocationResult) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for (vreg, loc) in alloc.allocation.iter() {
@@ -20,7 +19,6 @@ fn build_vreg_name_map(alloc: &AllocationResult) -> HashMap<String, String> {
     map
 }
 
-/// Remap virtual register names in an index expression.
 fn remap_index_expr(expr: &IndexExpr, name_map: &HashMap<String, String>) -> IndexExpr {
     match expr {
         IndexExpr::Const(n) => IndexExpr::Const(*n),
@@ -55,7 +53,6 @@ fn remap_index_expr(expr: &IndexExpr, name_map: &HashMap<String, String>) -> Ind
     }
 }
 
-/// Remap virtual register names in a constraint.
 pub(super) fn remap_constraint(c: &Constraint, name_map: &HashMap<String, String>) -> Constraint {
     match c {
         Constraint::True => Constraint::True,
@@ -116,7 +113,6 @@ pub(super) fn remap_constraint(c: &Constraint, name_map: &HashMap<String, String
     }
 }
 
-/// Remap virtual register names in a constraint assertion.
 pub(super) fn remap_constraint_vars(
     constraint: &Constraint,
     alloc: &AllocationResult,
@@ -125,7 +121,6 @@ pub(super) fn remap_constraint_vars(
     remap_constraint(constraint, &name_map)
 }
 
-/// Remap virtual register names within type constraints.
 pub(super) fn remap_constraint_vars_in_type(ty: &DtalType, alloc: &AllocationResult) -> DtalType {
     let name_map = build_vreg_name_map(alloc);
     remap_type(ty, &name_map)

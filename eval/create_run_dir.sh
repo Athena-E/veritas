@@ -64,17 +64,9 @@ cp "$SCRIPT_DIR"/suites/README.md "$run_dir/manifests/"
 cat > "$commands_file" <<EOF
 #!/usr/bin/env bash
 
-# Fill this file with the exact evaluation commands used for this run.
-# Keep raw outputs in:
-#   $run_dir/raw
-# Keep derived summaries in:
-#   $run_dir/derived
-# Keep human-readable logs in:
-#   $run_dir/logs
 EOF
 
 cat > "$run_dir/README.md" <<EOF
-# Evaluation Run
 
 - label: \`$label\`
 - timestamp (UTC): \`$timestamp\`

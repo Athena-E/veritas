@@ -21,7 +21,6 @@ use crate::dtal::{Constraint, VirtualReg};
 use std::collections::HashMap;
 use std::fmt;
 
-/// Unique basic block identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);
 
@@ -31,7 +30,6 @@ impl fmt::Display for BlockId {
     }
 }
 
-/// Allocator for block IDs.
 #[derive(Debug, Default)]
 pub struct BlockIdAllocator {
     next_id: u32,
@@ -49,7 +47,6 @@ impl BlockIdAllocator {
     }
 }
 
-/// Type and constraint state at a point in the TIR CFG.
 #[derive(Clone, Debug, Default)]
 pub struct RegisterState<'src> {
     pub registers: HashMap<VirtualReg, IType<'src>>,
@@ -77,7 +74,6 @@ impl<'src> RegisterState<'src> {
     }
 }
 
-/// Binary operations in TIR.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
@@ -125,7 +121,6 @@ impl fmt::Display for BinaryOp {
     }
 }
 
-/// Unary operations in TIR.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     Not,

@@ -1,4 +1,3 @@
-// C equivalent of 16_array_assignment.veri
 
 static void fill_squares(int arr[5]) {
     for (int i = 0; i < 5; i++) {

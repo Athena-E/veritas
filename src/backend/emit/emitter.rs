@@ -10,7 +10,6 @@ use crate::dtal::regs::Reg;
 use crate::dtal::types::DtalType;
 use std::fmt::Write;
 
-/// Emit a DTAL program as text
 pub fn emit_program(program: &DtalProgram) -> String {
     let mut output = String::new();
 
@@ -26,7 +25,6 @@ pub fn emit_program(program: &DtalProgram) -> String {
     output
 }
 
-/// Emit a DTAL function
 fn emit_function(output: &mut String, func: &DtalFunction) {
     writeln!(output, ".function {}", func.name).unwrap();
 
@@ -60,7 +58,6 @@ fn emit_function(output: &mut String, func: &DtalFunction) {
     }
 }
 
-/// Emit a basic block
 fn emit_block(output: &mut String, block: &DtalBlock) {
     writeln!(output, "{}:", block.label).unwrap();
 
@@ -97,7 +94,6 @@ fn emit_block(output: &mut String, block: &DtalBlock) {
     }
 }
 
-/// Emit a single instruction
 fn emit_instruction(output: &mut String, instr: &DtalInstr) {
     match instr {
         DtalInstr::MovImm { dst, imm, ty } => {
@@ -475,7 +471,6 @@ fn emit_instruction(output: &mut String, instr: &DtalInstr) {
     }
 }
 
-/// Emit a register
 fn emit_reg(reg: &Reg) -> String {
     match reg {
         Reg::Virtual(vreg) => format!("v{}", vreg.0),
@@ -483,7 +478,6 @@ fn emit_reg(reg: &Reg) -> String {
     }
 }
 
-/// Emit a binary operation
 fn emit_binop(op: &BinaryOp) -> &'static str {
     match op {
         BinaryOp::Add => "add",
@@ -501,7 +495,6 @@ fn emit_binop(op: &BinaryOp) -> &'static str {
     }
 }
 
-/// Emit a comparison operation
 fn emit_cmpop(op: &CmpOp) -> &'static str {
     match op {
         CmpOp::Eq => "eq",
@@ -513,23 +506,21 @@ fn emit_cmpop(op: &CmpOp) -> &'static str {
     }
 }
 
-/// Emit a type
 fn emit_type(ty: &DtalType) -> String {
     ty.to_string()
 }
 
-/// Emit a constraint
 fn emit_constraint(constraint: &Constraint) -> String {
     constraint.to_string()
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::VirtualReg;
     use crate::dtal::instr::TypeState;
-
     #[test]
+
     fn test_emit_simple_function() {
         let func = DtalFunction {
             name: "test".to_string(),

@@ -16,8 +16,6 @@ use crate::middle::lower::widen_itype;
 use crate::middle::tir::builder::{and_constraints, negate_constraint, or_constraints};
 use crate::middle::tir::{BinaryOp, BlockId, PhiNode, Terminator, TirInstr, UnaryOp};
 
-/// Convert a typed expression to an IndexExpr for constraints.
-/// Returns None if the expression cannot be represented in the constraint domain.
 pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<IndexExpr> {
     match &expr.0 {
         TExpr::Literal {
@@ -87,8 +85,6 @@ pub(super) fn expr_to_index_expr<'src>(expr: &Spanned<TExpr<'src>>) -> Option<In
     }
 }
 
-/// Convert a boolean typed expression to a Constraint.
-/// Returns Constraint::True if the expression cannot be represented.
 fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
     match &expr.0 {
         TExpr::Literal {
@@ -145,9 +141,6 @@ fn expr_to_constraint<'src>(expr: &Spanned<TExpr<'src>>) -> Constraint {
     }
 }
 
-/// Lower a typed expression to TIR instructions
-///
-/// Returns the virtual register holding the result value.
 pub fn lower_expr<'src>(
     ctx: &mut LoweringContext<'src>,
     expr: &Spanned<TExpr<'src>>,
@@ -231,14 +224,10 @@ pub fn lower_expr<'src>(
             then_block,
             else_block,
             ty,
-        } => {
-            // Delegate to if-expression lowering
-            lower_if_expr(ctx, cond, then_block, else_block.as_ref(), ty)
-        }
+        } => lower_if_expr(ctx, cond, then_block, else_block.as_ref(), ty),
     }
 }
 
-/// Lower a literal value
 fn lower_literal<'src>(
     ctx: &mut LoweringContext<'src>,
     value: &Literal,
@@ -255,7 +244,6 @@ fn lower_literal<'src>(
             });
         }
         Literal::Bool(b) => {
-            // Booleans are represented as 0/1 with Bool type
             ctx.emit(TirInstr::LoadImm {
                 dst,
                 value: if *b { 1 } else { 0 },
@@ -267,7 +255,6 @@ fn lower_literal<'src>(
     dst
 }
 
-/// Convert AST binary operator to TIR binary operator
 fn convert_binop(op: AstBinOp) -> BinaryOp {
     match op {
         AstBinOp::Add => BinaryOp::Add,
@@ -292,7 +279,6 @@ fn convert_binop(op: AstBinOp) -> BinaryOp {
     }
 }
 
-/// Lower a binary operation
 fn lower_binop<'src>(
     ctx: &mut LoweringContext<'src>,
     op: AstBinOp,
@@ -315,7 +301,6 @@ fn lower_binop<'src>(
     dst
 }
 
-/// Convert AST unary operator to TIR unary operator
 fn convert_unaryop(op: AstUnaryOp) -> UnaryOp {
     match op {
         AstUnaryOp::Not => UnaryOp::Not,
@@ -324,7 +309,6 @@ fn convert_unaryop(op: AstUnaryOp) -> UnaryOp {
     }
 }
 
-/// Lower a unary operation
 fn lower_unaryop<'src>(
     ctx: &mut LoweringContext<'src>,
     op: AstUnaryOp,
@@ -344,7 +328,6 @@ fn lower_unaryop<'src>(
     dst
 }
 
-/// Lower a function call
 fn lower_call<'src>(
     ctx: &mut LoweringContext<'src>,
     func_name: &str,
@@ -552,8 +535,6 @@ fn lower_borrow_expr<'src>(
     dst
 }
 
-/// Flattened element count of a (possibly nested) array type.
-/// Scalars are 1; `[[T; M]; N]` is `N * flat_element_count(T) * M` via recursion.
 fn flat_element_count(ty: &IType<'_>) -> i64 {
     match ty {
         IType::Array { element_type, size } => {
@@ -567,8 +548,6 @@ fn flat_element_count(ty: &IType<'_>) -> i64 {
     }
 }
 
-/// Descend into nested `ArrayInit` expressions to find the innermost scalar
-/// initializer and the total flat element count.
 fn extract_flat_init<'a, 'src>(expr: &'a Spanned<TExpr<'src>>) -> (&'a Spanned<TExpr<'src>>, i64) {
     if let TExpr::ArrayInit { value, length, .. } = &expr.0 {
         let len = match &length.0 {
@@ -585,11 +564,6 @@ fn extract_flat_init<'a, 'src>(expr: &'a Spanned<TExpr<'src>>) -> (&'a Spanned<T
     }
 }
 
-/// Lower an array index expression (array access).
-///
-/// If the result type is itself an array (row extraction from a nested array),
-/// produce a sub-array pointer via `base + index * stride_bytes` instead of a
-/// scalar load. That pointer can then be indexed again to reach the scalar.
 fn lower_index<'src>(
     ctx: &mut LoweringContext<'src>,
     base: &Spanned<TExpr<'src>>,
@@ -600,7 +574,6 @@ fn lower_index<'src>(
     let index_reg = lower_expr(ctx, index);
 
     if matches!(ty, IType::Array { .. }) {
-        // Sub-array pointer: new_base = base + index * (flat_elements(ty) * 8)
         let stride_bytes = flat_element_count(ty) * 8;
         let stride_reg = ctx.fresh_reg();
         ctx.emit(TirInstr::LoadImm {
@@ -638,11 +611,6 @@ fn lower_index<'src>(
     dst
 }
 
-/// Lower an array initialization expression.
-///
-/// Nested initializers like `[[0; 3]; 2]` are flattened into a single
-/// allocation of `outer * inner` scalar slots, initialized in row-major
-/// order. Outer array slots hold scalar values, not inner pointers.
 fn lower_array_init<'src>(
     ctx: &mut LoweringContext<'src>,
     value: &Spanned<TExpr<'src>>,
@@ -662,7 +630,6 @@ fn lower_array_init<'src>(
 
     let scalar_ty = scalar_expr.0.get_type().clone();
 
-    // Codegen treats each flattened scalar slot as 8 bytes.
     let arr_reg = ctx.fresh_reg();
     ctx.emit(TirInstr::AllocArray {
         dst: arr_reg,
@@ -671,7 +638,6 @@ fn lower_array_init<'src>(
         region: ctx.current_region(),
     });
 
-    // Avoid unrolling stores for large zero-filled matrices.
     let is_zero_literal = matches!(
         &scalar_expr.0,
         TExpr::Literal {
@@ -710,29 +676,10 @@ fn lower_array_init<'src>(
         });
     }
 
-    let _ = ty; // outer array type; all needed info derived from length & value
+    let _ = ty;
     arr_reg
 }
 
-/// Lower an if expression to control flow with phi nodes
-///
-/// CFG structure:
-/// ```text
-///             ┌─────────┐
-///             │  cond   │  (current block)
-///             └────┬────┘
-///            true/ \false
-///               /   \
-///     ┌────────▼┐   ┌▼────────┐
-///     │  then   │   │  else   │
-///     └────┬────┘   └────┬────┘
-///          \           /
-///           \         /
-///          ┌─▼───────▼─┐
-///          │   merge   │
-///          │  φ(v1,v2) │
-///          └───────────┘
-/// ```
 pub fn lower_if_expr<'src>(
     ctx: &mut LoweringContext<'src>,
     cond: &Spanned<TExpr<'src>>,
@@ -758,7 +705,7 @@ pub fn lower_if_expr<'src>(
             true_constraint: Box::new(true_constraint),
             false_constraint: Box::new(false_constraint),
         },
-        vec![], // predecessors filled by builder
+        vec![],
     );
 
     ctx.start_block(then_cfg_block);
@@ -781,7 +728,6 @@ pub fn lower_if_expr<'src>(
 
     ctx.start_block(else_cfg_block);
 
-    // Lower else from the same incoming bindings as then.
     ctx.restore_var_map(vars_before_then.clone());
     ctx.restore_var_type_map(var_types_before_then.clone());
 
@@ -842,11 +788,6 @@ pub fn lower_if_expr<'src>(
     }
 }
 
-/// Lower a block and return the result register
-///
-/// If the block has a trailing expression, that's the result.
-/// Otherwise, if the last statement is an expression statement, that's the result.
-/// Otherwise, return a unit/default value.
 fn lower_block_with_result<'src>(
     ctx: &mut LoweringContext<'src>,
     block: &TBlock<'src>,
@@ -867,7 +808,6 @@ fn lower_block_with_result<'src>(
         return result;
     }
 
-    // Compatibility: non-unit blocks may use the last expression statement as a value.
     if !matches!(ty, IType::Unit)
         && let Some(last) = block.statements.last()
         && let TStmt::Expr(expr) = &last.0
@@ -900,7 +840,6 @@ struct BranchPhiInputs<'a, 'src> {
     else_block: BlockId,
 }
 
-/// Create phi nodes for variables that were modified differently in two branches
 fn create_phi_nodes_for_modified_vars<'src>(
     ctx: &mut LoweringContext<'src>,
     inputs: BranchPhiInputs<'_, 'src>,

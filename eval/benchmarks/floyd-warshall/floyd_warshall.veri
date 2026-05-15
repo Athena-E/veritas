@@ -1,6 +1,3 @@
-// Floyd-Warshall benchmark in Veritas.
-//
-// PolyBench/C MEDIUM dataset: N = 500.
 fn main() -> int {
     let mut path: [[int; 500]; 500] = [[0; 500]; 500];
 

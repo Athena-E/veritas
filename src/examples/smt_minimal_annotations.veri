@@ -1,18 +1,14 @@
-// Test: Which annotations are still necessary with SMT synthesis?
 
-// Original with full annotations:
 fn quadruple_annotated(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
     let x: { v:int | v > 0 } = n + n;
     x + x
 }
 
-// Minimal annotations - only function signature, no intermediate:
 fn quadruple_minimal(n: { v:int | v > 0 }) -> { v:int | v > 0 } {
     let x: int = n + n;
     x + x
 }
 
-// Even more minimal - using plain int for intermediate:
 fn triple_plus_one_minimal(n: { v:int | v >= 0 }) -> { v:int | v >= 1 } {
     let x: int = n + n;
     let y: int = x + n;

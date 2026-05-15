@@ -32,12 +32,8 @@ use crate::dtal::regs::{Reg, VirtualReg};
 use crate::dtal::types::DtalType;
 use std::collections::HashMap;
 
-/// Type alias for the constant map: virtual register → known immediate value
 type ConstMap = HashMap<VirtualReg, i128>;
 
-/// Apply constant folding to a function
-///
-/// Returns true if any changes were made
 pub fn constant_fold_function(func: &mut DtalFunction) -> bool {
     let mut changed = false;
 
@@ -48,7 +44,6 @@ pub fn constant_fold_function(func: &mut DtalFunction) -> bool {
     changed
 }
 
-/// Apply constant folding within a single block
 fn constant_fold_block(block: &mut DtalBlock) -> bool {
     let mut changed = false;
     let mut const_map: ConstMap = HashMap::new();
@@ -61,12 +56,8 @@ fn constant_fold_block(block: &mut DtalBlock) -> bool {
     changed
 }
 
-/// Try to fold an instruction using known constants
-///
-/// Returns true if the instruction was rewritten
 fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
     match instr {
-        // Constant-fold BinOp when both operands are known
         DtalInstr::BinOp {
             op,
             dst,
@@ -78,7 +69,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
             let rhs_val = lookup(rhs, const_map);
 
             match (lhs_val, rhs_val) {
-                // Both known → full constant fold
                 (Some(l), Some(r)) => {
                     if let Some(result) = eval_binop(*op, l, r) {
                         *instr = DtalInstr::MovImm {
@@ -91,9 +81,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     false
                 }
 
-                // One known → immediate operand folding and identity rewrites
-
-                // Add: fold to AddImm (commutative)
                 (Some(imm), None) if *op == BinaryOp::Add => {
                     let src = *rhs;
                     *instr = DtalInstr::AddImm {
@@ -115,7 +102,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
-                // Sub: x - 0 = x
                 (None, Some(0)) if *op == BinaryOp::Sub => {
                     let src = *lhs;
                     *instr = DtalInstr::MovReg {
@@ -126,7 +112,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
-                // Mul: x * 0 = 0 (commutative)
                 (Some(0), None) | (None, Some(0)) if *op == BinaryOp::Mul => {
                     *instr = DtalInstr::MovImm {
                         dst: *dst,
@@ -135,7 +120,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     };
                     true
                 }
-                // Mul: x * 1 = x (commutative)
                 (Some(1), None) if *op == BinaryOp::Mul => {
                     let src = *rhs;
                     *instr = DtalInstr::MovReg {
@@ -155,7 +139,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
-                // Div: x / 1 = x
                 (None, Some(1)) if *op == BinaryOp::Div => {
                     let src = *lhs;
                     *instr = DtalInstr::MovReg {
@@ -166,7 +149,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
-                // Mod: x % 1 = 0
                 (None, Some(1)) if *op == BinaryOp::Mod => {
                     *instr = DtalInstr::MovImm {
                         dst: *dst,
@@ -176,7 +158,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
-                // Strength reduction: Mul by power of 2 → ShlImm (commutative)
                 (Some(imm), None) if *op == BinaryOp::Mul && is_power_of_two(imm) => {
                     *instr = DtalInstr::ShlImm {
                         dst: *dst,
@@ -196,7 +177,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
                     true
                 }
 
-                // Strength reduction: unsigned Div by power of 2 → ShrImm
                 (None, Some(imm))
                     if *op == BinaryOp::Div && is_unsigned(ty) && is_power_of_two(imm) =>
                 {
@@ -213,7 +193,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
             }
         }
 
-        // Fold Cmp with constant RHS into CmpImm
         DtalInstr::Cmp { lhs, rhs } => {
             if let Some(imm) = lookup(rhs, const_map) {
                 let lhs_reg = *lhs;
@@ -228,7 +207,6 @@ fn try_fold(instr: &mut DtalInstr, const_map: &ConstMap) -> bool {
     }
 }
 
-/// Look up a register's constant value if it is a virtual register in the map
 fn lookup(reg: &Reg, const_map: &ConstMap) -> Option<i128> {
     match reg {
         Reg::Virtual(vreg) => const_map.get(vreg).copied(),
@@ -236,19 +214,14 @@ fn lookup(reg: &Reg, const_map: &ConstMap) -> Option<i128> {
     }
 }
 
-/// Check if a value is a power of two (positive, exactly one bit set)
 fn is_power_of_two(val: i128) -> bool {
     val > 1 && (val & (val - 1)) == 0
 }
 
-/// Check if a DTAL type is unsigned
 fn is_unsigned(ty: &DtalType) -> bool {
     matches!(ty, DtalType::U64)
 }
 
-/// Evaluate a binary operation at compile time
-///
-/// Returns `None` for division/modulo by zero (unsafe to fold)
 fn eval_binop(op: BinaryOp, lhs: i128, rhs: i128) -> Option<i128> {
     match op {
         BinaryOp::Add => Some(lhs.wrapping_add(rhs)),
@@ -278,10 +251,8 @@ fn eval_binop(op: BinaryOp, lhs: i128, rhs: i128) -> Option<i128> {
     }
 }
 
-/// Update the constant map based on an instruction's definition
 fn update_const_map(instr: &DtalInstr, const_map: &mut ConstMap) {
     match instr {
-        // Record new constant definitions
         DtalInstr::MovImm {
             dst: Reg::Virtual(vreg),
             imm,
@@ -290,7 +261,6 @@ fn update_const_map(instr: &DtalInstr, const_map: &mut ConstMap) {
             const_map.insert(*vreg, *imm);
         }
 
-        // Any other instruction that defines a virtual register invalidates it
         _ => {
             if let Some(Reg::Virtual(vreg)) = instruction_dst(instr) {
                 const_map.remove(&vreg);
@@ -299,7 +269,6 @@ fn update_const_map(instr: &DtalInstr, const_map: &mut ConstMap) {
     }
 }
 
-/// Get the destination register of an instruction (if any)
 fn instruction_dst(instr: &DtalInstr) -> Option<Reg> {
     match instr {
         DtalInstr::MovImm { dst, .. }
@@ -319,8 +288,8 @@ fn instruction_dst(instr: &DtalInstr) -> Option<Reg> {
         _ => None,
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{DtalBlock, DtalFunction, TypeState};
@@ -345,10 +314,9 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_fold_add_two_constants() {
-        // v0 = 10; v1 = 32; v2 = v0 + v1  →  v2 = 42
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -377,16 +345,14 @@ mod tests {
         let changed = constant_fold_function(&mut func);
         assert!(changed);
 
-        // The BinOp should now be a MovImm with value 42
         assert!(matches!(
             &func.blocks[0].instructions[2],
             DtalInstr::MovImm { imm: 42, .. }
         ));
     }
-
     #[test]
+
     fn test_fold_mul_constants() {
-        // v0 = 6; v1 = 7; v2 = v0 * v1  →  v2 = 42
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -420,10 +386,9 @@ mod tests {
             DtalInstr::MovImm { imm: 42, .. }
         ));
     }
-
     #[test]
+
     fn test_no_fold_div_by_zero() {
-        // v0 = 42; v1 = 0; v2 = v0 / v1  →  no fold
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -452,7 +417,6 @@ mod tests {
         let changed = constant_fold_function(&mut func);
         assert!(!changed);
 
-        // Should still be a BinOp
         assert!(matches!(
             &func.blocks[0].instructions[2],
             DtalInstr::BinOp {
@@ -461,10 +425,9 @@ mod tests {
             }
         ));
     }
-
     #[test]
+
     fn test_immediate_fold_add_rhs_known() {
-        // v0 = <param>; v1 = 5; v2 = v0 + v1  →  v2 = addimm v0, 5
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(1),
@@ -496,10 +459,9 @@ mod tests {
             panic!("Expected AddImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_immediate_fold_add_lhs_known() {
-        // v0 = 5; v2 = v0 + v1  →  v2 = addimm v1, 5
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -531,10 +493,9 @@ mod tests {
             panic!("Expected AddImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_cmp_imm_fold() {
-        // v0 = <param>; v1 = 10; cmp v0, v1  →  cmpimm v0, 10
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(1),
@@ -558,10 +519,9 @@ mod tests {
             panic!("Expected CmpImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_no_fold_non_constant_operands() {
-        // v0 = <param>; v1 = <param>; v2 = v0 + v1  →  no change
         let mut func = make_func(vec![
             DtalInstr::BinOp {
                 op: BinaryOp::Add,
@@ -580,17 +540,15 @@ mod tests {
         let changed = constant_fold_function(&mut func);
         assert!(!changed);
     }
-
     #[test]
+
     fn test_invalidation_on_redef() {
-        // v0 = 10; v0 = <load>; v1 = 5; v2 = v0 + v1  →  no full fold (v0 unknown)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
                 imm: 10,
                 ty: DtalType::Int,
             },
-            // v0 is redefined by a non-constant instruction
             DtalInstr::BinOp {
                 op: BinaryOp::Add,
                 dst: vreg(0),
@@ -620,16 +578,14 @@ mod tests {
         let changed = constant_fold_function(&mut func);
         assert!(changed);
 
-        // Should be AddImm (one operand known), not MovImm (both would need to be known)
         assert!(matches!(
             &func.blocks[0].instructions[3],
             DtalInstr::AddImm { imm: 5, .. }
         ));
     }
-
     #[test]
+
     fn test_cascading_fold() {
-        // v0 = 2; v1 = 3; v2 = v0 + v1 (→ 5); v3 = 7; v4 = v2 * v3 (→ 35)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -670,21 +626,18 @@ mod tests {
         let changed = constant_fold_function(&mut func);
         assert!(changed);
 
-        // v2 should be folded to 5
         assert!(matches!(
             &func.blocks[0].instructions[2],
             DtalInstr::MovImm { imm: 5, .. }
         ));
-        // v4 should be folded to 35
         assert!(matches!(
             &func.blocks[0].instructions[4],
             DtalInstr::MovImm { imm: 35, .. }
         ));
     }
-
     #[test]
+
     fn test_fold_bitwise_ops() {
-        // v0 = 0xFF; v1 = 0x0F; v2 = v0 & v1  →  v2 = 0x0F
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -718,10 +671,9 @@ mod tests {
             DtalInstr::MovImm { imm: 0x0F, .. }
         ));
     }
-
     #[test]
+
     fn test_no_immediate_fold_for_sub() {
-        // v0 = 5; v2 = v1 - v0  →  stays as BinOp (no SubImm instruction)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -743,13 +695,11 @@ mod tests {
         ]);
 
         let changed = constant_fold_function(&mut func);
-        // Sub with non-zero known RHS should NOT be folded
         assert!(!changed);
     }
-
     #[test]
+
     fn test_sub_rhs_zero_identity() {
-        // v0 = 0; v2 = v1 - v0  →  v2 = v1
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -780,10 +730,9 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_mul_by_zero() {
-        // v0 = 0; v2 = v1 * v0  →  v2 = 0
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -812,10 +761,9 @@ mod tests {
             DtalInstr::MovImm { imm: 0, .. }
         ));
     }
-
     #[test]
+
     fn test_mul_by_one() {
-        // v0 = 1; v2 = v1 * v0  →  v2 = v1
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -846,10 +794,9 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_mul_by_one_commutative() {
-        // v0 = 1; v2 = v0 * v1  →  v2 = v1
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -880,10 +827,9 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_div_by_one() {
-        // v0 = 1; v2 = v1 / v0  →  v2 = v1
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -914,10 +860,9 @@ mod tests {
             panic!("Expected MovReg, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_mod_by_one() {
-        // v0 = 1; v2 = v1 % v0  →  v2 = 0
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -946,10 +891,9 @@ mod tests {
             DtalInstr::MovImm { imm: 0, .. }
         ));
     }
-
     #[test]
+
     fn test_mul_by_power_of_two_to_shl() {
-        // v0 = 8; v2 = v1 * v0  →  v2 = shlimm v1, 3
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -976,15 +920,14 @@ mod tests {
         if let DtalInstr::ShlImm { dst, src, imm, .. } = &func.blocks[0].instructions[1] {
             assert_eq!(*dst, vreg(2));
             assert_eq!(*src, vreg(1));
-            assert_eq!(*imm, 3); // log2(8) = 3
+            assert_eq!(*imm, 3);
         } else {
             panic!("Expected ShlImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_mul_by_power_of_two_commutative() {
-        // v0 = 4; v2 = v0 * v1  →  v2 = shlimm v1, 2
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -1011,15 +954,14 @@ mod tests {
         if let DtalInstr::ShlImm { dst, src, imm, .. } = &func.blocks[0].instructions[1] {
             assert_eq!(*dst, vreg(2));
             assert_eq!(*src, vreg(1));
-            assert_eq!(*imm, 2); // log2(4) = 2
+            assert_eq!(*imm, 2);
         } else {
             panic!("Expected ShlImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_mul_by_non_power_of_two_unchanged() {
-        // v0 = 7; v2 = v1 * v0  →  no strength reduction
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -1041,13 +983,11 @@ mod tests {
         ]);
 
         let changed = constant_fold_function(&mut func);
-        // No change — 7 is not a power of 2
         assert!(!changed);
     }
-
     #[test]
+
     fn test_unsigned_div_by_power_of_two_to_shr() {
-        // v0 = 16; v2 = v1 / v0  →  v2 = shrimm v1, 4  (U64 type)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -1074,15 +1014,14 @@ mod tests {
         if let DtalInstr::ShrImm { dst, src, imm, .. } = &func.blocks[0].instructions[1] {
             assert_eq!(*dst, vreg(2));
             assert_eq!(*src, vreg(1));
-            assert_eq!(*imm, 4); // log2(16) = 4
+            assert_eq!(*imm, 4);
         } else {
             panic!("Expected ShrImm, got {:?}", &func.blocks[0].instructions[1]);
         }
     }
-
     #[test]
+
     fn test_signed_div_by_power_of_two_not_reduced() {
-        // v0 = 8; v2 = v1 / v0  →  no reduction (signed Int type)
         let mut func = make_func(vec![
             DtalInstr::MovImm {
                 dst: vreg(0),
@@ -1104,7 +1043,6 @@ mod tests {
         ]);
 
         let changed = constant_fold_function(&mut func);
-        // No change — signed division cannot use shift
         assert!(!changed);
     }
 }

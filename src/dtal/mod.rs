@@ -17,7 +17,6 @@ pub mod parser;
 pub mod regs;
 pub mod types;
 
-// Re-export commonly used types
 pub use constraints::{Constraint, IndexExpr};
 pub use instr::{
     BinaryOp, CmpOp, CmpOperands, DtalBlock, DtalFunction, DtalInstr, DtalProgram, TypeState,

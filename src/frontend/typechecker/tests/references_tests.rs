@@ -37,8 +37,8 @@ fn make_program<'src>(functions: Vec<Function<'src>>) -> Program<'src> {
         functions: functions.into_iter().map(spanned).collect(),
     }
 }
-
 #[test]
+
 fn shared_borrow_expression_typechecks() {
     let func = Function {
         name: "main",
@@ -78,8 +78,8 @@ fn shared_borrow_expression_typechecks() {
         other => panic!("expected let statement, got {:?}", other),
     }
 }
-
 #[test]
+
 fn mutable_borrow_expression_typechecks() {
     let func = Function {
         name: "main",
@@ -111,8 +111,8 @@ fn mutable_borrow_expression_typechecks() {
 
     check_program(&make_program(vec![func])).expect("mutable borrow should typecheck");
 }
-
 #[test]
+
 fn borrow_of_temporary_is_rejected() {
     let func = Function {
         name: "main",
@@ -142,8 +142,8 @@ fn borrow_of_temporary_is_rejected() {
         .expect_err("borrowing a temporary should be rejected");
     assert!(matches!(err, TypeError::UnsupportedFeature { .. }));
 }
-
 #[test]
+
 fn returning_references_is_rejected() {
     let func = Function {
         name: "bad",
@@ -169,8 +169,8 @@ fn returning_references_is_rejected() {
         .expect_err("returning references should be rejected");
     assert!(matches!(err, TypeError::UnsupportedFeature { .. }));
 }
-
 #[test]
+
 fn returning_reference_parameter_typechecks() {
     let func = Function {
         name: "id_ref",
@@ -190,8 +190,8 @@ fn returning_reference_parameter_typechecks() {
     check_program(&make_program(vec![func]))
         .expect("returning a reference parameter should typecheck");
 }
-
 #[test]
+
 fn shared_borrow_ends_after_last_use_before_owner_mutation() {
     let func = Function {
         name: "main",
@@ -237,8 +237,8 @@ fn shared_borrow_ends_after_last_use_before_owner_mutation() {
     check_program(&make_program(vec![func]))
         .expect("non-lexical borrow should end after final reference use");
 }
-
 #[test]
+
 fn shared_borrow_remains_live_until_later_use() {
     let func = Function {
         name: "main",
@@ -279,8 +279,8 @@ fn shared_borrow_remains_live_until_later_use() {
         .expect_err("borrow should remain live until its trailing-expression use");
     assert!(matches!(err, TypeError::BorrowConflict { .. }));
 }
-
 #[test]
+
 fn storing_references_inside_arrays_is_rejected() {
     let array_of_refs = spanned(Type::Array {
         element_type: Box::new(ref_int_type()),
@@ -324,8 +324,8 @@ fn storing_references_inside_arrays_is_rejected() {
         .expect_err("arrays of references should be rejected in the first slice");
     assert!(matches!(err, TypeError::UnsupportedFeature { .. }));
 }
-
 #[test]
+
 fn shared_scalar_borrow_parameter_call_typechecks() {
     let inspect = Function {
         name: "inspect",
@@ -371,8 +371,8 @@ fn shared_scalar_borrow_parameter_call_typechecks() {
     check_program(&make_program(vec![inspect, main]))
         .expect("scalar shared-borrow parameter calls should typecheck");
 }
-
 #[test]
+
 fn mutable_scalar_borrow_parameter_call_typechecks() {
     let write = Function {
         name: "write",
@@ -427,8 +427,8 @@ fn mutable_scalar_borrow_parameter_call_typechecks() {
     check_program(&make_program(vec![write, main]))
         .expect("scalar mutable-borrow parameter calls should typecheck");
 }
-
 #[test]
+
 fn shared_borrow_blocks_owner_mutation() {
     let func = Function {
         name: "main",
@@ -469,8 +469,8 @@ fn shared_borrow_blocks_owner_mutation() {
         .expect_err("mutating a shared-borrowed owner should be rejected");
     assert!(matches!(err, TypeError::BorrowConflict { .. }));
 }
-
 #[test]
+
 fn mutable_borrow_blocks_shared_borrow() {
     let func = Function {
         name: "main",
@@ -516,8 +516,8 @@ fn mutable_borrow_blocks_shared_borrow() {
         .expect_err("shared borrow during live mutable borrow should be rejected");
     assert!(matches!(err, TypeError::BorrowConflict { .. }));
 }
-
 #[test]
+
 fn moving_borrowed_array_is_rejected() {
     let func = Function {
         name: "main",
@@ -567,8 +567,8 @@ fn moving_borrowed_array_is_rejected() {
         .expect_err("moving a borrowed array should be rejected");
     assert!(matches!(err, TypeError::BorrowConflict { .. }));
 }
-
 #[test]
+
 fn shared_borrow_ends_at_if_block_exit() {
     let func = Function {
         name: "main",
@@ -614,8 +614,8 @@ fn shared_borrow_ends_at_if_block_exit() {
     check_program(&make_program(vec![func]))
         .expect("shared borrow should end when the if block scope exits");
 }
-
 #[test]
+
 fn shared_array_reference_indexing_typechecks() {
     let inspect = Function {
         name: "inspect",
@@ -638,8 +638,8 @@ fn shared_array_reference_indexing_typechecks() {
     check_program(&make_program(vec![inspect]))
         .expect("indexing through a shared array reference should typecheck");
 }
-
 #[test]
+
 fn mutable_array_reference_assignment_typechecks() {
     let touch = Function {
         name: "touch",
@@ -668,8 +668,8 @@ fn mutable_array_reference_assignment_typechecks() {
     check_program(&make_program(vec![touch]))
         .expect("assignment through a mutable array reference should typecheck");
 }
-
 #[test]
+
 fn assignment_through_shared_array_reference_is_rejected() {
     let touch = Function {
         name: "touch",
@@ -696,8 +696,8 @@ fn assignment_through_shared_array_reference_is_rejected() {
         .expect_err("assignment through a shared array reference should be rejected");
     assert!(matches!(err, TypeError::BorrowConflict { .. }));
 }
-
 #[test]
+
 fn local_shared_scalar_deref_typechecks() {
     let func = Function {
         name: "main",
@@ -733,8 +733,8 @@ fn local_shared_scalar_deref_typechecks() {
     check_program(&make_program(vec![func]))
         .expect("dereferencing a local shared scalar reference should typecheck");
 }
-
 #[test]
+
 fn local_mutable_scalar_deref_assignment_typechecks() {
     let func = Function {
         name: "main",
@@ -777,8 +777,8 @@ fn local_mutable_scalar_deref_assignment_typechecks() {
     check_program(&make_program(vec![func]))
         .expect("assignment through a local mutable scalar reference should typecheck");
 }
-
 #[test]
+
 fn local_shared_scalar_deref_assignment_is_rejected() {
     let func = Function {
         name: "main",

@@ -1,4 +1,3 @@
-// Functions with parameters
 fn add(x: int, y: int) {
     let result: int = x + y;
 }

@@ -4,8 +4,6 @@ use crate::common::types::IProposition;
 use crate::frontend::typechecker::TypingContext;
 use std::sync::Arc;
 
-/// Collect (array_name, index_expr) pairs for arrays modified by index
-/// assignment in a statement list. Recurses into if-blocks and nested for-loops.
 pub(super) fn collect_array_modifications<'src>(
     stmts: &[Spanned<Stmt<'src>>],
 ) -> Vec<(String, Vec<Expr<'src>>)> {
@@ -49,12 +47,6 @@ fn collect_array_modifications_inner<'src>(
     }
 }
 
-/// Selectively invalidate array element propositions when the assigned index
-/// is symbolic. For each pointwise proposition `arr[k] == v`, use SMT to check
-/// whether `assigned_index != k` is provable. If so, the proposition is safe to
-/// keep. Quantified propositions over the array are always removed.
-/// Walk a nested `Index` chain to extract (root_array_name, indices_outer_to_inner).
-/// Returns None if the chain doesn't bottom out in a plain `Variable`.
 pub(super) fn extract_array_access<'src>(
     expr: &Expr<'src>,
 ) -> Option<(&'src str, Vec<Expr<'src>>)> {
@@ -91,9 +83,7 @@ pub(super) fn invalidate_array_props_selectively<'src>(
             return true;
         }
         match &prop.predicate.0 {
-            // Quantified propositions are always invalidated
             Expr::Forall { .. } | Expr::Exists { .. } => false,
-            // Pointwise: keep if we can prove the slots don't collide
             Expr::BinOp {
                 op: BinOp::Eq, lhs, ..
             } => {
@@ -104,8 +94,6 @@ pub(super) fn invalidate_array_props_selectively<'src>(
                     return true;
                 }
 
-                // Concrete fast path: all concretely-known components equal → same slot (drop);
-                // any concretely-known component differs → distinct slot (keep).
                 let mut all_concrete_equal = true;
                 for (p, a) in prop_indices.iter().zip(assigned_indices.iter()) {
                     match (ctx.resolve_expr_to_int(p), ctx.resolve_expr_to_int(a)) {
@@ -118,8 +106,6 @@ pub(super) fn invalidate_array_props_selectively<'src>(
                     return false;
                 }
 
-                // SMT goal: disjunction of component inequalities. If provable,
-                // the slots are guaranteed distinct and the proposition survives.
                 let mut goal_expr: Option<Expr<'src>> = None;
                 for (p, a) in prop_indices.iter().zip(assigned_indices.iter()) {
                     let ne = Expr::BinOp {

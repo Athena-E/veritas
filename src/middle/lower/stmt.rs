@@ -21,9 +21,6 @@ fn is_borrow_type<'src>(ty: &IType<'src>) -> bool {
     matches!(ty, IType::Ref(_) | IType::RefMut(_))
 }
 
-/// Lower a statement to TIR
-///
-/// This may emit instructions and/or create new basic blocks.
 pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'src>>) {
     match &stmt.0 {
         TStmt::Let {
@@ -82,14 +79,12 @@ pub fn lower_stmt<'src>(ctx: &mut LoweringContext<'src>, stmt: &Spanned<TStmt<'s
     }
 }
 
-/// Lower a sequence of statements
 pub fn lower_stmts<'src>(ctx: &mut LoweringContext<'src>, stmts: &[Spanned<TStmt<'src>>]) {
     for stmt in stmts {
         lower_stmt(ctx, stmt);
     }
 }
 
-/// Lower a let statement
 fn lower_let<'src>(
     ctx: &mut LoweringContext<'src>,
     name: &str,
@@ -182,7 +177,6 @@ fn lower_let<'src>(
     ctx.declare_var_typed(name, bound_reg, ty.clone());
 }
 
-/// Lower an assignment statement
 fn lower_assignment<'src>(
     ctx: &mut LoweringContext<'src>,
     lhs: &Spanned<TExpr<'src>>,
@@ -230,7 +224,6 @@ fn lower_assignment<'src>(
 
             let rhs_reg = lower_expr(ctx, rhs);
 
-            // The RHS type may be more precise than the LHS declaration.
             let new_reg = if matches!(&rhs.0, TExpr::Borrow { .. }) {
                 rhs_reg
             } else {
@@ -310,37 +303,10 @@ fn lower_assignment<'src>(
     }
 }
 
-/// Lower a return statement
-///
-/// Note: This finishes the current block with a Return terminator.
-/// The caller should handle any cleanup needed.
 fn lower_return<'src>(ctx: &mut LoweringContext<'src>, expr: &Spanned<TExpr<'src>>) {
     let _value_reg = lower_expr(ctx, expr);
 }
 
-/// Lower a for loop to CFG with loop-carried phi nodes
-///
-/// CFG structure:
-/// ```text
-///            ┌─────────┐
-///            │  entry  │
-///            │ i = start│
-///            └────┬────┘
-///                 │
-///          ┌──────▼──────┐
-///          │ loop_header │◄────┐
-///          │ i_φ = φ(...) │    │
-///          │ cmp i < end │    │
-///          └──────┬──────┘    │
-///            true/ \false     │
-///               /   \         │
-///     ┌────────▼┐   ┌▼────┐   │
-///     │  body   │   │exit │   │
-///     │  ...    │   └─────┘   │
-///     │ i_next  │             │
-///     └────┬────┘             │
-///          └──────────────────┘
-/// ```
 fn lower_for_loop<'src>(
     ctx: &mut LoweringContext<'src>,
     var: &str,
@@ -369,12 +335,10 @@ fn lower_for_loop<'src>(
 
     ctx.start_block(header_block);
 
-    // Loop-variable phi: entry provides start, body provides i_next.
     let i_phi_reg = ctx.fresh_reg();
     let mut i_phi = PhiNode::new(i_phi_reg, var_ty.clone());
     i_phi.add_incoming(entry_block, start_reg);
 
-    // Use the register name as the existential witness for codegen.
     let phi_witness = format!("v{}", i_phi_reg.0);
     let phi_start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
     let phi_end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX as i128));
@@ -394,7 +358,6 @@ fn lower_for_loop<'src>(
 
     ctx.bind_var_typed(var, i_phi_reg, var_ty.clone());
 
-    // Loop-carried variables follow the loop-variable phi.
     let mut loop_carried_vars: Vec<(String, VirtualReg)> = Vec::new();
     for (name, &before_reg) in &vars_before_loop {
         if name != var {
@@ -404,7 +367,6 @@ fn lower_for_loop<'src>(
                 continue;
             }
 
-            // Preserve refined ints as phi existentials.
             let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
                 use crate::dtal::convert::expr_to_constraint;
                 if let Some(constraint) = expr_to_constraint(&prop.predicate.0) {
@@ -440,7 +402,6 @@ fn lower_for_loop<'src>(
         ty: IType::Bool,
     });
 
-    // Branch constraints use register names because verification is register-based.
     let loop_var_idx = IndexExpr::Var(format!("v{}", i_phi_reg.0));
     let start_idx = expr_to_index_expr(start).unwrap_or(IndexExpr::Const(0));
     let end_idx = expr_to_index_expr(end).unwrap_or(IndexExpr::Const(i64::MAX as i128));
@@ -458,7 +419,7 @@ fn lower_for_loop<'src>(
             true_constraint: Box::new(true_constraint),
             false_constraint: Box::new(false_constraint),
         },
-        vec![entry_block], // Predecessor from entry's jump
+        vec![entry_block],
     );
 
     ctx.start_block(body_block);
@@ -512,38 +473,16 @@ fn lower_for_loop<'src>(
         Terminator::Jump {
             target: header_block,
         },
-        vec![header_block], // Body is a successor of header
+        vec![header_block],
     );
 
     ctx.start_block(exit_block);
 
-    // Exit from the header sees header phi values.
     for (name, phi_reg) in &loop_carried_vars {
         ctx.bind_var(name, *phi_reg);
     }
 }
 
-/// Lower a while loop to CFG with loop-carried phi nodes
-///
-/// CFG structure:
-/// ```text
-///            ┌─────────┐
-///            │  entry   │
-///            └────┬─────┘
-///                 │
-///          ┌──────▼──────┐
-///          │ loop_header │◄────┐
-///          │  eval cond  │    │
-///          │ branch      │    │
-///          └──────┬──────┘    │
-///            true/ \false     │
-///               /   \         │
-///     ┌────────▼┐   ┌▼────┐  │
-///     │  body   │   │exit │  │
-///     │  ...    │   └─────┘  │
-///     └────┬────┘            │
-///          └─────────────────┘
-/// ```
 fn lower_while_loop<'src>(
     ctx: &mut LoweringContext<'src>,
     condition: &Spanned<TExpr<'src>>,
@@ -575,7 +514,6 @@ fn lower_while_loop<'src>(
         }
         let phi_reg = ctx.fresh_reg();
 
-        // Preserve refined types as phi existentials.
         let existential = if let IType::RefinedInt { prop, .. } = &original_ty {
             use crate::dtal::convert::expr_to_constraint;
             if let Some(constraint) = expr_to_constraint(&prop.predicate.0) {
@@ -603,7 +541,6 @@ fn lower_while_loop<'src>(
 
     let cond_reg = lower_expr(ctx, condition);
 
-    // Arbitrary boolean conditions do not carry comparison constraints yet.
     ctx.finish_block(
         Terminator::Branch {
             cond: cond_reg,

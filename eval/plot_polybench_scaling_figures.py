@@ -56,7 +56,7 @@ def group_rows(rows: list[dict[str, str]]) -> dict[str, dict[str, list[dict[str,
     return grouped
 
 
-def plot_absolute(grouped: dict[str, dict[str, list[dict[str, str]]]], run_label: str) -> None:
+def plot_absolute(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(10.2, 6.5))
     axes = axes.flatten()
 
@@ -87,7 +87,7 @@ def plot_absolute(grouped: dict[str, dict[str, list[dict[str, str]]]], run_label
         axes[idx].set_visible(False)
 
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.suptitle(f"PolyBench Runtime Scaling by Kernel ({run_label})", fontsize=13, y=0.962)
+    fig.suptitle("PolyBench Runtime Scaling by Kernel", fontsize=13, y=0.962)
     fig.legend(handles, labels, frameon=False, fontsize=9, loc="upper center", bbox_to_anchor=(0.5, 0.915), ncol=3)
     fig.tight_layout(rect=(0, 0.01, 1, 0.93))
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,7 +95,7 @@ def plot_absolute(grouped: dict[str, dict[str, list[dict[str, str]]]], run_label
     fig.savefig(OUTPUT_DIR / "chapter4_polybench_scaling_absolute.png", dpi=220, bbox_inches="tight")
 
 
-def plot_ratios(grouped: dict[str, dict[str, list[dict[str, str]]]], run_label: str) -> None:
+def plot_ratios(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(10.2, 6.5))
     axes = axes.flatten()
 
@@ -129,7 +129,7 @@ def plot_ratios(grouped: dict[str, dict[str, list[dict[str, str]]]], run_label: 
         axes[idx].set_visible(False)
 
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.suptitle(f"PolyBench Runtime Ratios by Kernel ({run_label})", fontsize=13, y=0.962)
+    fig.suptitle("PolyBench Runtime Ratios by Kernel", fontsize=13, y=0.962)
     fig.legend(handles, labels, frameon=False, fontsize=9, loc="upper center", bbox_to_anchor=(0.5, 0.915), ncol=2)
     fig.tight_layout(rect=(0, 0.01, 1, 0.93))
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,11 +141,10 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(f"usage: {Path(sys.argv[0]).name} <polybench_scaling_runtime.csv>")
     csv_path = Path(sys.argv[1]).resolve()
-    run_label = csv_path.parent.parent.name
     rows = load_rows(csv_path)
     grouped = group_rows(rows)
-    plot_absolute(grouped, run_label)
-    plot_ratios(grouped, run_label)
+    plot_absolute(grouped)
+    plot_ratios(grouped)
 
 
 if __name__ == "__main__":

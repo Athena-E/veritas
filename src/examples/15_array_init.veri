@@ -1,33 +1,27 @@
-// Simple array initialization with literal values
 fn simple_array_init() {
     let arr: [int; 10] = [0; 10];
 }
 
-// Array initialization with variable value
 fn array_init_with_value(val: int) {
     let arr: [int; 5] = [val; 5];
 }
 
-// Array initialization with expression as value
 fn array_init_expression_value(x: int) {
     let arr: [int; 10] = [x * 2; 10];
 }
 
-// Using array initialization in function body
 fn initialize_and_modify() {
     let mut numbers: [int; 5] = [1; 5];
     numbers[0] = 10;
     numbers[1] = 20;
 }
 
-// Multiple array initializations
 fn multiple_arrays() {
     let zeros: [int; 100] = [0; 100];
     let ones: [int; 50] = [1; 50];
     let flags: [bool; 10] = [true; 10];
 }
 
-// Nested context: array init inside for loop
 fn array_in_loop() {
     for i in 0..10 {
         let temp: [int; 10] = [i; 10];

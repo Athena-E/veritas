@@ -1,8 +1,3 @@
-// Verified UART-facing unikernel demo.
-//
-// This program runs without Linux intrinsics under --target-bare-metal.  The
-// device-facing boundary is uart_write_byte: every value sent to the 16550 UART
-// must be statically proved to be an 8-bit byte.
 
 const COM1: int = 0x3F8;
 const COM1_IER: int = 0x3F9;

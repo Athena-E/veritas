@@ -1,4 +1,3 @@
-// Modulo operator test
 
 fn last_digit(n: int) -> int {
     let d: int = n % 10;

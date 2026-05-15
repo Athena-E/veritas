@@ -17,65 +17,46 @@ use crate::dtal::instr::{DtalFunction, DtalInstr};
 use crate::dtal::regs::{Reg, VirtualReg};
 use std::collections::{BTreeMap, HashSet};
 
-/// A live interval for a virtual register
 #[derive(Clone, Debug)]
 pub struct LiveInterval {
-    /// The virtual register
     pub vreg: VirtualReg,
-    /// Start position (instruction index)
     pub start: usize,
-    /// End position (instruction index)
     pub end: usize,
-    /// All use positions within the interval
     pub uses: Vec<usize>,
 }
 
-/// Result of register allocation
 #[derive(Clone, Debug)]
 pub struct AllocationResult {
-    /// Mapping from virtual registers to locations (register or stack)
     pub allocation: BTreeMap<VirtualReg, Location>,
-    /// Number of stack slots needed for spills
     pub spill_slots: usize,
-    /// Registers that need to be saved/restored (callee-saved)
     pub callee_saved_used: Vec<X86Reg>,
 }
 
-/// Linear scan register allocator
 pub struct LinearScanAllocator {
-    /// Available physical registers for allocation
     available_regs: Vec<X86Reg>,
-    /// Currently active intervals (sorted by end point)
     active: Vec<(LiveInterval, X86Reg)>,
-    /// Free registers pool
     free_regs: Vec<X86Reg>,
-    /// Allocation result
     allocation: BTreeMap<VirtualReg, Location>,
-    /// Next spill slot
     next_spill_slot: i32,
-    /// Set of callee-saved registers actually used
     callee_saved_used: HashSet<X86Reg>,
 }
 
 impl LinearScanAllocator {
-    /// Create a new allocator with default x86-64 registers
     pub fn new() -> Self {
         Self::with_available_regs(X86Reg::ALLOCATABLE.to_vec())
     }
 
-    /// Create a new allocator with an explicit allocatable register set.
     pub fn with_available_regs(available_regs: Vec<X86Reg>) -> Self {
         Self {
             free_regs: available_regs.clone(),
             available_regs,
             active: Vec::new(),
             allocation: BTreeMap::new(),
-            next_spill_slot: -8, // Start at [rbp-8]
+            next_spill_slot: -8,
             callee_saved_used: HashSet::new(),
         }
     }
 
-    /// Allocate registers for a function
     pub fn allocate(&mut self, func: &DtalFunction) -> AllocationResult {
         self.active.clear();
         self.free_regs = self.available_regs.clone();
@@ -116,7 +97,6 @@ impl LinearScanAllocator {
         }
     }
 
-    /// Compute live intervals from liveness information
     fn compute_live_intervals(
         &self,
         func: &DtalFunction,
@@ -147,7 +127,6 @@ impl LinearScanAllocator {
                         uses: Vec::new(),
                     });
                     interval.start = interval.start.min(position);
-                    // Keep multi-def intervals live through each definition.
                     interval.end = interval.end.max(position);
                 }
 
@@ -175,7 +154,6 @@ impl LinearScanAllocator {
         intervals.into_values().collect()
     }
 
-    /// Expire intervals that end before the current position
     fn expire_old_intervals(&mut self, position: usize) {
         let (expired, still_active): (Vec<_>, Vec<_>) = self
             .active
@@ -189,7 +167,6 @@ impl LinearScanAllocator {
         self.active = still_active;
     }
 
-    /// Spill a register to make room for a new interval
     fn spill_at_interval(&mut self, interval: &LiveInterval) {
         if let Some(last_idx) = self.active.iter().position(|(i, _)| i.end > interval.end) {
             let (spilled_interval, reg) = self.active.remove(last_idx);
@@ -213,7 +190,6 @@ impl LinearScanAllocator {
         }
     }
 
-    /// Get the virtual register defined by an instruction
     fn get_def(instr: &DtalInstr) -> Option<VirtualReg> {
         let reg = match instr {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
@@ -240,7 +216,6 @@ impl LinearScanAllocator {
         })
     }
 
-    /// Get the virtual registers used by an instruction
     fn get_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
@@ -282,12 +257,8 @@ impl Default for LinearScanAllocator {
     }
 }
 
-/// Graph coloring register allocator (alternative to linear scan)
-/// Uses the interference graph to find a valid k-coloring
 pub struct GraphColoringAllocator {
-    /// Number of available registers
     num_regs: usize,
-    /// Available physical registers
     available_regs: Vec<X86Reg>,
 }
 
@@ -303,12 +274,10 @@ impl GraphColoringAllocator {
         }
     }
 
-    /// Allocate registers using graph coloring
     pub fn allocate(&self, func: &DtalFunction) -> AllocationResult {
         let liveness = LivenessAnalysis::analyze(func);
         let graph = InterferenceGraph::build(func, &liveness);
 
-        // Values live across calls must avoid caller-saved registers.
         let mut live_across_calls: HashSet<VirtualReg> = HashSet::new();
         for block in &func.blocks {
             let block_info = &liveness.blocks[&block.label];
@@ -411,17 +380,14 @@ impl GraphColoringAllocator {
         }
     }
 
-    /// Collect all virtual registers used in a function
     fn collect_all_vregs(func: &DtalFunction) -> HashSet<VirtualReg> {
         let mut vregs = HashSet::new();
 
         for block in &func.blocks {
             for instr in &block.instructions {
-                // Collect defs
                 if let Some(vreg) = Self::get_def(instr) {
                     vregs.insert(vreg);
                 }
-                // Collect uses
                 for vreg in Self::get_uses(instr) {
                     vregs.insert(vreg);
                 }
@@ -431,7 +397,6 @@ impl GraphColoringAllocator {
         vregs
     }
 
-    /// Get the virtual register defined by an instruction
     fn get_def(instr: &DtalInstr) -> Option<VirtualReg> {
         let reg = match instr {
             DtalInstr::MovImm { dst, .. } => Some(*dst),
@@ -458,7 +423,6 @@ impl GraphColoringAllocator {
         })
     }
 
-    /// Get the virtual registers used by an instruction
     fn get_uses(instr: &DtalInstr) -> Vec<VirtualReg> {
         let regs: Vec<Reg> = match instr {
             DtalInstr::MovReg { src, .. } => vec![*src],
@@ -499,8 +463,8 @@ impl Default for GraphColoringAllocator {
         Self::new()
     }
 }
-
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::dtal::instr::{BinaryOp, DtalBlock, TypeState};
@@ -544,45 +508,39 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_linear_scan_basic() {
         let func = make_test_function();
         let mut allocator = LinearScanAllocator::new();
         let result = allocator.allocate(&func);
 
-        // All three virtual registers should be allocated
         assert!(result.allocation.contains_key(&VirtualReg(0)));
         assert!(result.allocation.contains_key(&VirtualReg(1)));
         assert!(result.allocation.contains_key(&VirtualReg(2)));
 
-        // With only 3 registers and 14 available, no spills needed
         assert_eq!(result.spill_slots, 0);
     }
-
     #[test]
+
     fn test_graph_coloring_basic() {
         let func = make_test_function();
         let allocator = GraphColoringAllocator::new();
         let result = allocator.allocate(&func);
 
-        // All three virtual registers should be allocated
         assert!(result.allocation.contains_key(&VirtualReg(0)));
         assert!(result.allocation.contains_key(&VirtualReg(1)));
         assert!(result.allocation.contains_key(&VirtualReg(2)));
 
-        // No spills needed for simple case
         assert_eq!(result.spill_slots, 0);
     }
-
     #[test]
+
     fn test_interference_respected() {
         let func = make_test_function();
         let allocator = GraphColoringAllocator::new();
         let result = allocator.allocate(&func);
 
-        // v0 and v1 interfere (both live at add instruction)
-        // They should get different registers
         let loc0 = &result.allocation[&VirtualReg(0)];
         let loc1 = &result.allocation[&VirtualReg(1)];
 
@@ -590,18 +548,13 @@ mod tests {
             (Location::Reg(r0), Location::Reg(r1)) => {
                 assert_ne!(r0, r1, "v0 and v1 should have different registers");
             }
-            _ => {
-                // If either is spilled, that's also valid
-            }
+            _ => {}
         }
     }
 
     fn make_high_pressure_function() -> DtalFunction {
-        // Create a function that needs more registers than available
-        // to test spilling
         let mut instructions = Vec::new();
 
-        // Define 20 virtual registers (more than the 14 allocatable)
         for i in 0..20 {
             instructions.push(DtalInstr::MovImm {
                 dst: Reg::Virtual(VirtualReg(i)),
@@ -610,7 +563,6 @@ mod tests {
             });
         }
 
-        // Use all of them to keep them live
         for i in 0..19 {
             instructions.push(DtalInstr::BinOp {
                 op: BinaryOp::Add,
@@ -637,22 +589,19 @@ mod tests {
             }],
         }
     }
-
     #[test]
+
     fn test_spilling() {
         let func = make_high_pressure_function();
         let mut allocator = LinearScanAllocator::new();
         let result = allocator.allocate(&func);
 
-        // Should have some spills since we use more virtual regs than physical
-        // Not asserting exact count as it depends on allocation order
         println!(
             "Allocated {} registers, {} spills",
             result.allocation.len(),
             result.spill_slots
         );
 
-        // All virtual registers should have an allocation
         for i in 0..39 {
             assert!(
                 result.allocation.contains_key(&VirtualReg(i)),

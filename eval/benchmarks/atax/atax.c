@@ -1,12 +1,5 @@
-#include <stdio.h>
 
-#ifndef M
-#define M 116
-#endif
 
-#ifndef N
-#define N 124
-#endif
 
 static long long a[M][N];
 static long long x[N];

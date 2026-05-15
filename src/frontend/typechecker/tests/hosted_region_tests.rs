@@ -24,8 +24,8 @@ fn parse_program<'src>(src: &'src str) -> crate::common::ast::Program<'src> {
         .into_result()
         .unwrap()
 }
-
 #[test]
+
 fn hosted_target_allows_passing_arrays_to_calls() {
     let src = r#"
         fn consume(arr: [int; 4]) -> int {
@@ -41,8 +41,8 @@ fn hosted_target_allows_passing_arrays_to_calls() {
     let program = parse_program(src);
     check_program(&program).expect("hosted target should allow non-escaping array calls");
 }
-
 #[test]
+
 fn hosted_target_allows_non_main_array_returns() {
     let src = r#"
         fn make_arr() -> [int; 4] {
@@ -58,8 +58,8 @@ fn hosted_target_allows_non_main_array_returns() {
     let program = parse_program(src);
     check_program(&program).expect("hosted target should allow non-main owned array returns");
 }
-
 #[test]
+
 fn hosted_target_rejects_returning_arrays_from_main() {
     let src = r#"
         fn main() -> [int; 4] {
@@ -78,8 +78,8 @@ fn hosted_target_rejects_returning_arrays_from_main() {
         other => panic!("expected UnsupportedFeature, got {other:?}"),
     }
 }
-
 #[test]
+
 fn bare_metal_target_allows_array_calls() {
     let src = r#"
         fn consume(arr: [int; 4]) -> int {
@@ -96,8 +96,8 @@ fn bare_metal_target_allows_array_calls() {
     check_program_bare_metal(&program)
         .expect("bare-metal target should allow array arguments without hosted regions");
 }
-
 #[test]
+
 fn hosted_owned_array_returns_are_explicit_in_tast_and_tir() {
     let src = r#"
         fn make_arr() -> [int; 4] {
@@ -182,8 +182,8 @@ fn hosted_owned_array_returns_are_explicit_in_tast_and_tir() {
         .expect("main should contain a call to make_arr");
     assert_eq!(call, OwnershipMode::FreshOwned);
 }
-
 #[test]
+
 fn hosted_target_rejects_use_after_move_via_let_binding() {
     let src = r#"
         fn main() -> int {
@@ -201,8 +201,8 @@ fn hosted_target_rejects_use_after_move_via_let_binding() {
         other => panic!("expected UseAfterMove, got {other:?}"),
     }
 }
-
 #[test]
+
 fn hosted_target_allows_reusing_arrays_after_calls() {
     let src = r#"
         fn consume(arr: [int; 4]) -> int {
@@ -219,8 +219,8 @@ fn hosted_target_allows_reusing_arrays_after_calls() {
     let program = parse_program(src);
     check_program(&program).expect("hosted target should treat array call args as non-consuming");
 }
-
 #[test]
+
 fn plain_array_calls_lower_to_explicit_tir_borrows_and_borrow_end() {
     let src = r#"
         fn consume(arr: [int; 4]) -> int {
@@ -259,8 +259,8 @@ fn plain_array_calls_lower_to_explicit_tir_borrows_and_borrow_end() {
             .any(|instr| matches!(instr, TirInstr::BorrowEnd { .. }))
     );
 }
-
 #[test]
+
 fn hosted_region_allows_local_reference_to_region_local_array() {
     let src = r#"
         fn main() -> int {
@@ -275,8 +275,8 @@ fn hosted_region_allows_local_reference_to_region_local_array() {
     let program = parse_program(src);
     check_program(&program).expect("local references to region-local arrays should stay local");
 }
-
 #[test]
+
 fn hosted_region_rejects_assigning_region_local_borrow_to_outer_reference_binding() {
     let src = r#"
         fn main() -> int {
@@ -302,8 +302,8 @@ fn hosted_region_rejects_assigning_region_local_borrow_to_outer_reference_bindin
         other => panic!("expected UnsupportedFeature, got {other:?}"),
     }
 }
-
 #[test]
+
 fn consuming_signature_marks_call_argument_as_consumed() {
     let span = SimpleSpan::new(0, 0);
     let array_ty = IType::Array {
@@ -338,8 +338,8 @@ fn consuming_signature_marks_call_argument_as_consumed() {
     let (_, new_ctx) = check_stmt(&ctx, &(stmt, span)).expect("consuming call should typecheck");
     assert!(new_ctx.is_moved("arr"));
 }
-
 #[test]
+
 fn hosted_target_allows_reinitializing_moved_mutable_arrays() {
     let src = r#"
         fn main() -> int {
@@ -353,8 +353,8 @@ fn hosted_target_allows_reinitializing_moved_mutable_arrays() {
     let program = parse_program(src);
     check_program(&program).expect("reinitializing a moved mutable binding should be allowed");
 }
-
 #[test]
+
 fn hosted_owned_moves_lower_to_explicit_tir_moves() {
     let src = r#"
         fn consume(arr: [int; 4]) -> int {
@@ -400,8 +400,8 @@ fn hosted_owned_moves_lower_to_explicit_tir_moves() {
         .expect("main should contain a call to consume");
     assert_eq!(call, vec![ParameterKind::SharedBorrow]);
 }
-
 #[test]
+
 fn hosted_owned_shadowing_lowers_to_explicit_tir_drop() {
     let src = r#"
         fn main() -> int {
@@ -431,8 +431,8 @@ fn hosted_owned_shadowing_lowers_to_explicit_tir_drop() {
             .any(|instr| matches!(instr, TirInstr::DropOwned { .. }))
     );
 }
-
 #[test]
+
 fn hosted_owned_reassignment_lowers_to_explicit_tir_drop() {
     let src = r#"
         fn main() -> int {
@@ -462,8 +462,8 @@ fn hosted_owned_reassignment_lowers_to_explicit_tir_drop() {
             .any(|instr| matches!(instr, TirInstr::DropOwned { .. }))
     );
 }
-
 #[test]
+
 fn hosted_owned_locals_drop_at_function_exit() {
     let src = r#"
         fn main() -> int {

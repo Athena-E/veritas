@@ -1,4 +1,3 @@
-// Test modules for type checker components
 mod common;
 mod context_tests;
 mod hosted_region_tests;

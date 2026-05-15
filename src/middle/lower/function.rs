@@ -14,7 +14,6 @@ use crate::middle::lower::expr::lower_expr;
 use crate::middle::lower::stmt::lower_stmts;
 use crate::middle::tir::{Terminator, TirFunction, TirInstr};
 
-/// Lower a typed function to TIR
 pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     let mut ctx = LoweringContext::new();
 
@@ -66,10 +65,9 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
                 OwnershipMode::Plain
             },
         },
-        vec![], // Entry block has no predecessors
+        vec![],
     );
 
-    // Quantified preconditions are still verifier-only for arrays.
     let precondition = func
         .precondition
         .as_ref()
@@ -94,12 +92,10 @@ pub fn lower_function<'src>(func: &TFunction<'src>) -> TirFunction<'src> {
     )
 }
 
-/// Convert an IProposition to a Constraint
 pub(super) fn proposition_to_constraint(prop: &IProposition) -> Option<Constraint> {
     expr_to_constraint(&prop.predicate.0)
 }
 
-/// Check if a constraint contains quantifiers (forall/exists)
 fn contains_quantifier(c: &Constraint) -> bool {
     match c {
         Constraint::Forall { .. } | Constraint::Exists { .. } => true,

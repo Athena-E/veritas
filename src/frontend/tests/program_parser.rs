@@ -1,8 +1,8 @@
 use super::common::parse_tokens;
 use crate::frontend::parser::program_parser;
 use chumsky::prelude::*;
-
 #[test]
+
 fn test_program_single_function() {
     let src = "fn main() { let x: int = 1; }";
     let tokens = parse_tokens(src);
@@ -18,8 +18,8 @@ fn test_program_single_function() {
         assert_eq!(program.functions.len(), 1);
     }
 }
-
 #[test]
+
 fn test_program_multiple_functions() {
     let src = "fn foo() { } fn bar() { let x: int = 1; } fn baz(n: int) { }";
     let tokens = parse_tokens(src);

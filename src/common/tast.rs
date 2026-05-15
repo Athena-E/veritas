@@ -3,18 +3,15 @@ use crate::common::ownership::{BorrowKind, LifetimeId, OwnershipMode, ParameterK
 use crate::common::span::{Span, Spanned};
 use crate::common::types::{IProposition, IType};
 
-/// A typed block: statements followed by an optional trailing expression (the block's value)
 #[derive(Clone, Debug)]
 pub struct TBlock<'src> {
     pub statements: Vec<Spanned<TStmt<'src>>>,
     pub trailing_expr: Option<Box<Spanned<TExpr<'src>>>>,
 }
 
-/// Typed expression AST - output of type checking
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum TExpr<'src> {
-    /// Error recovery node (reserved for future error recovery)
     Error {
         ty: IType<'src>,
     },
@@ -101,8 +98,8 @@ impl<'src> TExpr<'src> {
         }
     }
 }
-
 #[derive(Clone, Debug)]
+
 pub enum TStmt<'src> {
     Let {
         is_mut: bool,
@@ -151,17 +148,15 @@ pub enum TStmt<'src> {
         body: TBlock<'src>,
     },
 }
-
 #[derive(Clone, Debug)]
+
 pub struct TParameter<'src> {
     pub name: String,
     pub ty: IType<'src>,
 }
 
-// Typed function body is a TBlock
 pub type TFunctionBody<'src> = TBlock<'src>;
 
-/// Typed function - output of type checking a function
 #[derive(Clone, Debug)]
 pub struct TFunction<'src> {
     pub name: String,
@@ -171,12 +166,12 @@ pub struct TFunction<'src> {
     pub returns_owned: bool,
     pub precondition: Option<IProposition<'src>>,
     pub postcondition: Option<IProposition<'src>>,
-    pub body: TFunctionBody<'src>,
     #[allow(dead_code)]
+    pub body: TFunctionBody<'src>,
     pub span: Span,
 }
-
 #[derive(Clone, Debug)]
+
 pub struct TProgram<'src> {
     pub functions: Vec<TFunction<'src>>,
 }

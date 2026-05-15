@@ -1,6 +1,3 @@
-// Helper functions for type checking
-// constant folding, proposition extraction, context joining, SMT synthesis
-
 use crate::common::ast::{BinOp, Block, Expr, Literal, UnaryOp};
 use crate::common::span::Span;
 use crate::common::types::{IProposition, IType, IValue};
@@ -9,16 +6,9 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 thread_local! {
-    /// Per-compilation-thread counter for generating fresh variable names.
-    ///
-    /// The pipeline resets this before each compile to keep emitted DTAL stable.
-    /// Keeping it thread-local avoids parallel test runs resetting another
-    /// compilation while that compilation is still synthesizing refinements.
     static FRESH_VAR_COUNTER: Cell<u64> = const { Cell::new(0) };
 }
 
-/// Generate a fresh variable name that won't conflict with user variables
-/// Uses the prefix `_synth_` which is unlikely to be used by programmers
 pub fn fresh_var_name() -> String {
     let id = FRESH_VAR_COUNTER.with(|counter| {
         let id = counter.get();
@@ -28,16 +18,11 @@ pub fn fresh_var_name() -> String {
     format!("_synth_{}", id)
 }
 
-/// Reset the fresh variable counter (useful for testing)
 #[allow(dead_code)]
 pub fn reset_fresh_var_counter() {
     FRESH_VAR_COUNTER.with(|counter| counter.set(0));
 }
 
-/// Build a refined type that captures the expression's value symbolically
-/// For expr `n + n`, produces `{v: int | v = n + n}`
-/// This enables SMT-based synthesis: the solver can derive properties
-/// from the equality constraint combined with known refinements
 pub fn build_equality_refinement<'src>(
     expr: &Expr<'src>,
     span: Span,
@@ -48,7 +33,6 @@ pub fn build_equality_refinement<'src>(
 
     let v_expr = Expr::Variable(bound_var_leaked);
 
-    // Build predicate: v = expr
     let eq_predicate = Expr::BinOp {
         op: BinOp::Eq,
         lhs: Box::new((v_expr, span)),
@@ -64,11 +48,7 @@ pub fn build_equality_refinement<'src>(
     }
 }
 
-/// Constant folding (join-op from formal semantics)
-/// Attempts to compute the result type of binary operations on singleton types
 pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'src> {
-    // Try constant folding when both operands are compile-time singleton ints.
-    // Uses checked arithmetic to avoid silently wrapping at compile time.
     if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) = (ty1, ty2)
         && let Some(folded) = checked_fold(op, *n1, *n2)
     {
@@ -87,20 +67,10 @@ pub fn join_op<'src>(op: BinOp, ty1: &IType<'src>, ty2: &IType<'src>) -> IType<'
         | BinOp::Shl
         | BinOp::Shr => IType::Int,
 
-        // Comparisons always produce bool
         _ => IType::Bool,
     }
 }
 
-/// Attempt to constant-fold a binary arithmetic op on two values.
-/// Computes the mathematical result in i128, then checks it fits within
-/// the i128 range (which subsumes i64 and u64 ranges).
-///
-/// For type-specific overflow checking (i64 or u64 bounds), use
-/// `checked_fold_in_range` instead.
-///
-/// Returns `None` if the op overflows i128, is undefined (shift count
-/// out of range, div by zero), or is not foldable.
 pub fn checked_fold(op: BinOp, n1: i128, n2: i128) -> Option<i128> {
     match op {
         BinOp::Add => n1.checked_add(n2),
@@ -118,12 +88,6 @@ pub fn checked_fold(op: BinOp, n1: i128, n2: i128) -> Option<i128> {
     }
 }
 
-/// Constant-fold with a range check: compute the result in i128, then
-/// verify it lies within `[lo, hi]`. Returns `None` if the result is
-/// out of the specified range or if `checked_fold` itself fails.
-///
-/// Use `(i64::MIN as i128, i64::MAX as i128)` for i64-typed folding,
-/// `(0, u64::MAX as i128)` for u64-typed folding.
 pub fn checked_fold_in_range(op: BinOp, n1: i128, n2: i128, lo: i128, hi: i128) -> Option<i128> {
     let result = checked_fold(op, n1, n2)?;
     if result >= lo && result <= hi {
@@ -133,16 +97,6 @@ pub fn checked_fold_in_range(op: BinOp, n1: i128, n2: i128, lo: i128, hi: i128) 
     }
 }
 
-/// Phase 2 entry point: when the typechecker detects bounded machine-integer
-/// arithmetic, this helper rejects any
-/// compile-time-known arithmetic that would overflow the given bounds.
-///
-/// `range_lo` and `range_hi` specify the valid result range:
-///  - For i64: `(i64::MIN as i128, i64::MAX as i128)`
-///  - For u64: `(0, u64::MAX as i128)`
-///
-/// If both operands are singleton ints and the result exceeds the range,
-/// this raises `IntegerOverflow`.
 pub fn check_const_fold_overflow<'src>(
     op: BinOp,
     ty1: &IType<'src>,
@@ -153,7 +107,6 @@ pub fn check_const_fold_overflow<'src>(
 ) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
     use crate::frontend::typechecker::TypeError;
 
-    // Only flag arith ops that can overflow — bitwise and/or/xor never do.
     let can_overflow = matches!(
         op,
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Shl | BinOp::Shr
@@ -163,7 +116,6 @@ pub fn check_const_fold_overflow<'src>(
     }
     if let (IType::SingletonInt(IValue::Int(n1)), IType::SingletonInt(IValue::Int(n2))) = (ty1, ty2)
     {
-        // Divide-by-zero is a separate error; don't mask it with IntegerOverflow.
         if matches!(op, BinOp::Div | BinOp::Mod) && *n2 == 0 {
             return Ok(());
         }
@@ -187,16 +139,13 @@ pub fn check_const_fold_overflow<'src>(
     Ok(())
 }
 
-/// Converts comparison expressions into propositions
 pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>> {
     match expr {
-        // Simple comparisons: x op n
         Expr::BinOp {
             op: BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte | BinOp::Eq | BinOp::NotEq,
             lhs,
             ..
         } => {
-            // Check if lhs is a variable
             if let Expr::Variable(var_name) = &lhs.0 {
                 Some(IProposition {
                     var: var_name.to_string(),
@@ -210,8 +159,6 @@ pub fn extract_proposition<'src>(expr: &Expr<'src>) -> Option<IProposition<'src>
     }
 }
 
-/// Negate a proposition
-/// for else-branches
 pub fn negate_proposition<'src>(prop: &IProposition<'src>) -> IProposition<'src> {
     let negated_expr = negate_expr(&prop.predicate.0);
 
@@ -221,10 +168,8 @@ pub fn negate_proposition<'src>(prop: &IProposition<'src>) -> IProposition<'src>
     }
 }
 
-/// Negate an expression
 fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
     match expr {
-        // Negate comparisons by flipping the operator
         Expr::BinOp {
             op: BinOp::Lt,
             lhs,
@@ -280,7 +225,6 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
             rhs: rhs.clone(),
         },
 
-        // !(P ==> Q) becomes P && !Q
         Expr::BinOp {
             op: BinOp::Implies,
             lhs,
@@ -291,7 +235,6 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
             rhs: Box::new((negate_expr(&rhs.0), rhs.1)),
         },
 
-        // !forall{P} → exists{!P}
         Expr::Forall {
             var,
             start,
@@ -304,7 +247,6 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
             body: Box::new((negate_expr(&body.0), body.1)),
         },
 
-        // !exists{P} → forall{!P}
         Expr::Exists {
             var,
             start,
@@ -324,8 +266,6 @@ fn negate_expr<'src>(expr: &Expr<'src>) -> Expr<'src> {
     }
 }
 
-/// Check array bounds using the actual index expression
-/// This preserves variable names so SMT can use context propositions
 pub fn check_array_bounds_expr<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     index_expr: &Expr<'src>,
@@ -338,7 +278,6 @@ pub fn check_array_bounds_expr<'src>(
 
     let dummy_span = SimpleSpan::new(0, 0);
 
-    // Create proposition: 0 <= index_expr
     let lower_bound = IProposition {
         var: "idx".to_string(),
         predicate: Arc::new((
@@ -351,7 +290,6 @@ pub fn check_array_bounds_expr<'src>(
         )),
     };
 
-    // Create proposition: index_expr < size
     let upper_bound = IProposition {
         var: "idx".to_string(),
         predicate: Arc::new((
@@ -364,7 +302,6 @@ pub fn check_array_bounds_expr<'src>(
         )),
     };
 
-    // Check lower bound: 0 <= index
     if !check_provable(ctx, &lower_bound) {
         return Err(TypeError::InvalidArrayAccess {
             array_type: array_type.clone(),
@@ -374,7 +311,6 @@ pub fn check_array_bounds_expr<'src>(
         });
     }
 
-    // Check upper bound: index < size
     if !check_provable(ctx, &upper_bound) {
         return Err(TypeError::InvalidArrayAccess {
             array_type: array_type.clone(),
@@ -387,12 +323,6 @@ pub fn check_array_bounds_expr<'src>(
     Ok(())
 }
 
-/// Check that a binary arithmetic operation cannot overflow 64-bit signed range.
-///
-/// Builds the proposition `INT_MIN <= lhs op rhs <= INT_MAX` and asks the SMT oracle
-/// to prove it under the current typing context. If the oracle cannot discharge it,
-/// returns `TypeError::IntegerOverflow`.
-///
 pub fn check_no_overflow<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     op: BinOp,
@@ -404,7 +334,6 @@ pub fn check_no_overflow<'src>(
 ) -> Result<(), crate::frontend::typechecker::TypeError<'src>> {
     use crate::frontend::typechecker::{TypeError, check_provable};
 
-    // Bitwise ops (except shifts) and comparison/logical ops cannot overflow.
     match op {
         BinOp::Add
         | BinOp::Sub
@@ -428,26 +357,22 @@ pub fn check_no_overflow<'src>(
         _ => unreachable!(),
     };
 
-    // result = lhs op rhs
     let result_expr = Expr::BinOp {
         op,
         lhs: Box::new((lhs_expr.clone(), dummy_span)),
         rhs: Box::new((rhs_expr.clone(), dummy_span)),
     };
 
-    // range_lo <= result
     let lower = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((Expr::Literal(Literal::Int(range_lo)), dummy_span)),
         rhs: Box::new((result_expr.clone(), dummy_span)),
     };
-    // result <= range_hi
     let upper = Expr::BinOp {
         op: BinOp::Lte,
         lhs: Box::new((result_expr, dummy_span)),
         rhs: Box::new((Expr::Literal(Literal::Int(range_hi)), dummy_span)),
     };
-    // (range_lo <= result) && (result <= range_hi)
     let in_range = Expr::BinOp {
         op: BinOp::And,
         lhs: Box::new((lower, dummy_span)),
@@ -468,17 +393,12 @@ pub fn check_no_overflow<'src>(
         });
     }
 
-    // For shifts, additionally prove the count is in [0, 64).
-    // x86 masks the count to 6 bits, so `x << 65` silently becomes `x << 1`
-    // — a correctness bug the type system should catch.
     if matches!(op, BinOp::Shl | BinOp::Shr) {
-        // rhs >= 0
         let count_lower = Expr::BinOp {
             op: BinOp::Gte,
             lhs: Box::new((rhs_expr.clone(), dummy_span)),
             rhs: Box::new((Expr::Literal(Literal::Int(0)), dummy_span)),
         };
-        // rhs < 64
         let count_upper = Expr::BinOp {
             op: BinOp::Lt,
             lhs: Box::new((rhs_expr.clone(), dummy_span)),
@@ -501,10 +421,7 @@ pub fn check_no_overflow<'src>(
         }
     }
 
-    // For `/` and `%`, additionally rule out range_lo / -1 which also overflows
-    // (only relevant for signed types where range_lo is negative).
     if matches!(op, BinOp::Div | BinOp::Mod) && range_lo < 0 {
-        // NOT (lhs == range_lo && rhs == -1)
         let lhs_is_min = Expr::BinOp {
             op: BinOp::Eq,
             lhs: Box::new((lhs_expr.clone(), dummy_span)),
@@ -705,8 +622,6 @@ fn reverse_cmp(op: BinOp) -> Option<BinOp> {
     }
 }
 
-/// Check that unary negation cannot overflow (operand must not be `INT_MIN`).
-///
 pub fn check_no_negation_overflow<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     operand_expr: &Expr<'src>,
@@ -731,7 +646,6 @@ pub fn check_no_negation_overflow<'src>(
     Ok(())
 }
 
-/// Check that the divisor in a division expression is provably non-zero
 pub fn check_divisor_nonzero<'src>(
     ctx: &crate::frontend::typechecker::TypingContext<'src>,
     divisor_expr: &Expr<'src>,
@@ -760,7 +674,6 @@ pub fn check_divisor_nonzero<'src>(
     Ok(())
 }
 
-/// Convert IValue to expression for SMT translation
 fn value_to_expr_from_ivalue<'src>(val: &'src IValue) -> Expr<'src> {
     match val {
         IValue::Int(n) => Expr::Literal(Literal::Int(*n)),
@@ -769,7 +682,6 @@ fn value_to_expr_from_ivalue<'src>(val: &'src IValue) -> Expr<'src> {
     }
 }
 
-/// Rename the bound variable in a proposition
 pub fn rename_prop_var<'src>(
     prop: &IProposition<'src>,
     old_var: &str,
@@ -782,16 +694,12 @@ pub fn rename_prop_var<'src>(
     }
 }
 
-/// Rename a variable in an expression
 pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'src> {
     match expr {
         Expr::Error => Expr::Error,
         Expr::Literal(lit) => Expr::Literal(lit.clone()),
         Expr::Variable(name) => {
             if *name == old {
-                // Convert to owned string for Variable
-                // Note: This requires Variable to accept owned strings
-                // For now, we leak the string (acceptable for type checking)
                 let leaked: &'src str = Box::leak(new.to_string().into_boxed_str());
                 Expr::Variable(leaked)
             } else {
@@ -836,7 +744,6 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
             body,
         } => {
             if *var == old {
-                // Bound variable shadows — don't rename inside body
                 Expr::Forall {
                     var,
                     start: Box::new((rename_expr_var(&start.0, old, new), start.1)),
@@ -906,10 +813,6 @@ pub fn rename_expr_var<'src>(expr: &Expr<'src>, old: &str, new: &str) -> Expr<'s
     }
 }
 
-/// Substitute an expression for all occurrences of a variable in an expression.
-/// Unlike `rename_expr_var` which replaces a variable with another variable name,
-/// this replaces a variable with an arbitrary expression (e.g., `arr[i]`).
-/// Respects bound variable shadowing in quantifiers.
 pub fn substitute_expr_for_var<'src>(
     expr: &Expr<'src>,
     var: &str,
@@ -966,7 +869,6 @@ pub fn substitute_expr_for_var<'src>(
             body,
         } => {
             if *bound == var {
-                // Bound variable shadows — don't substitute inside body
                 Expr::Forall {
                     var: bound,
                     start: Box::new((substitute_expr_for_var(&start.0, var, replacement), start.1)),
@@ -1004,12 +906,10 @@ pub fn substitute_expr_for_var<'src>(
                 }
             }
         }
-        // For specification-level expressions, If/For shouldn't appear
         other => other.clone(),
     }
 }
 
-/// Rename a variable in a statement (helper for rename_expr_var)
 fn rename_stmt_var<'src>(
     stmt: &crate::common::ast::Stmt<'src>,
     old: &str,

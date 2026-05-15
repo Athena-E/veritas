@@ -1,4 +1,3 @@
-// C equivalent of 33_mutable_borrow.veri
 
 static int touch(int arr[1]) {
     arr[0] = 9;

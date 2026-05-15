@@ -20,21 +20,15 @@ use crate::dtal::VirtualReg;
 use crate::dtal::constraints::Constraint;
 use crate::middle::tir::types::BlockId;
 
-/// SSA phi node for a block entry.
 #[derive(Clone, Debug)]
 pub struct PhiNode<'src> {
-    /// SSA variable being defined.
     pub dst: VirtualReg,
-    /// Joined result type.
     pub ty: IType<'src>,
-    /// Incoming `(predecessor block, value)` pairs.
     pub incoming: Vec<(BlockId, VirtualReg)>,
-    /// Optional existential constraint for loop-counter phis.
     pub existential_constraint: Option<(String, Constraint)>,
 }
 
 impl<'src> PhiNode<'src> {
-    /// Create a new phi node.
     pub fn new(dst: VirtualReg, ty: IType<'src>) -> Self {
         Self {
             dst,
@@ -44,12 +38,10 @@ impl<'src> PhiNode<'src> {
         }
     }
 
-    /// Add an incoming edge.
     pub fn add_incoming(&mut self, block: BlockId, reg: VirtualReg) {
         self.incoming.push((block, reg));
     }
 
-    /// Return the incoming edge count.
     pub fn incoming_count(&self) -> usize {
         self.incoming.len()
     }

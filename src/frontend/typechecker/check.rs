@@ -1,5 +1,3 @@
-// Statement and program type checking
-
 use crate::common::ast::{Block, Expr, Function, Program, Stmt};
 use crate::common::ownership::{LifetimeId, OwnershipMode, ParameterKind};
 use crate::common::span::{Span, Spanned};
@@ -111,8 +109,6 @@ fn reject_region_borrow_escape<'src>(
     Ok(())
 }
 
-/// Recursively walk an expression and replace `arr[i]` subexpressions with their
-/// resolved concrete values from the typing context. Returns `(resolved_expr, any_resolved)`.
 fn resolve_array_reads_in_expr<'src>(
     ctx: &TypingContext<'src>,
     expr: &Expr<'src>,
@@ -441,8 +437,6 @@ fn validate_reference_return<'src>(
     Ok(())
 }
 
-/// Check a statement and produce a typed statement with updated context
-/// Returns (typed_stmt, new_context)
 pub fn check_stmt<'src>(
     ctx: &TypingContext<'src>,
     stmt: &Spanned<Stmt<'src>>,
@@ -450,7 +444,6 @@ pub fn check_stmt<'src>(
     let span = stmt.1;
 
     match &stmt.0 {
-        // LET-IMMUT: Immutable variable binding
         Stmt::Let {
             name,
             ty,
@@ -459,10 +452,8 @@ pub fn check_stmt<'src>(
         } => {
             reject_shadowing_borrowed_owner(ctx, name, span)?;
 
-            // Synthesize type of initializer
             let (mut tvalue, value_ty) = synth_expr(ctx, value)?;
 
-            // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
 
             if array_contains_reference_type(&ann_ty) {
@@ -472,7 +463,6 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            // Check value type is subtype of annotation
             if !is_subtype(ctx, &value_ty, &ann_ty) {
                 return Err(TypeError::TypeMismatch {
                     expected: ann_ty,
@@ -483,7 +473,6 @@ pub fn check_stmt<'src>(
 
             let move_ctx = apply_whole_value_move(ctx, &value.0, &value_ty, value.1)?;
 
-            // Add to context with the synthesized type (more precise)
             let mut new_ctx = move_ctx.with_immutable(name.to_string(), value_ty.clone());
             if matches!(ann_ty, IType::Ref(_) | IType::RefMut(_))
                 && !matches!(value.0, Expr::Borrow { .. })
@@ -514,8 +503,6 @@ pub fn check_stmt<'src>(
                 new_ctx = new_ctx.mark_region_local_array(name);
             }
 
-            // Resolve array reads in the RHS expression and snapshot their values
-            // so that subsequent mutations to the array don't drag this binding along.
             let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &value.0);
             if any_resolved {
                 let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
@@ -532,7 +519,6 @@ pub fn check_stmt<'src>(
                 new_ctx = new_ctx.with_proposition(prop);
             }
 
-            // Propagate postcondition from function calls to the binding
             if let Some(prop) = postcondition_for_call(ctx, name, &value.0) {
                 new_ctx = new_ctx.with_proposition(prop);
             }
@@ -549,7 +535,6 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), new_ctx))
         }
 
-        // LET-MUT: Mutable variable binding
         Stmt::Let {
             name,
             ty,
@@ -558,10 +543,8 @@ pub fn check_stmt<'src>(
         } => {
             reject_shadowing_borrowed_owner(ctx, name, span)?;
 
-            // Synthesize type of initializer
             let (mut tvalue, value_ty) = synth_expr(ctx, value)?;
 
-            // Convert annotated type to semantic type
             let ann_ty = ast_type_to_itype(ty)?;
 
             if array_contains_reference_type(&ann_ty) {
@@ -571,7 +554,6 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            // Check value type is subtype of annotation
             if !is_subtype(ctx, &value_ty, &ann_ty) {
                 return Err(TypeError::TypeMismatch {
                     expected: ann_ty.clone(),
@@ -580,9 +562,6 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            // Add to mutable context with current type and master type
-            // For arrays, use the annotated type so we can assign values matching the element type
-            // (not just the singleton from initialization)
             let master_ty = IType::Master(Arc::new(ann_ty.clone()));
             let current_ty = match &ann_ty {
                 IType::Array { .. } | IType::RefinedInt { .. } => ann_ty.clone(),
@@ -621,11 +600,6 @@ pub fn check_stmt<'src>(
                 new_ctx = new_ctx.mark_region_local_array(name);
             }
 
-            // For mutable array init, add pointwise propositions for each index
-            // rather than a single forall. This way, `arr[k] = v` only invalidates
-            // the proposition at index k, preserving knowledge of other elements.
-            // e.g. `let mut a = [0;3]` produces:
-            //   select(a, 0) == 0, select(a, 1) == 0, select(a, 2) == 0
             if let IType::Array { element_type, size } = &value_ty
                 && let IValue::Int(n) = size
             {
@@ -662,7 +636,6 @@ pub fn check_stmt<'src>(
                 }
             }
 
-            // Resolve array reads in the RHS and snapshot their values
             let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &value.0);
             if any_resolved {
                 let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
@@ -679,7 +652,6 @@ pub fn check_stmt<'src>(
                 new_ctx = new_ctx.with_proposition(prop);
             }
 
-            // Propagate postcondition from function calls to the binding
             if let Some(prop) = postcondition_for_call(ctx, name, &value.0) {
                 new_ctx = new_ctx.with_proposition(prop);
             }
@@ -696,15 +668,10 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), new_ctx))
         }
 
-        // ASSIGN: Assignment
-        // Handles both variable assignment and array indexing assignment
         Stmt::Assignment { lhs, rhs } => {
-            // Synthesize type of RHS value
             let (mut trhs, rhs_ty) = synth_expr(ctx, rhs)?;
 
-            // Check what kind of LHS we have
             match &lhs.0 {
-                // Variable assignment
                 crate::common::ast::Expr::Variable(var_name) => {
                     if ctx.lookup_borrow_binding(var_name).is_none() {
                         reject_mutating_borrowed_owner(ctx, var_name, span)?;
@@ -730,7 +697,6 @@ pub fn check_stmt<'src>(
                         });
                     }
 
-                    // Look up mutable variable
                     let binding =
                         ctx.lookup_mutable(var_name)
                             .ok_or_else(|| TypeError::NotMutable {
@@ -738,7 +704,6 @@ pub fn check_stmt<'src>(
                                 span,
                             })?;
 
-                    // Extract master type and check subtyping
                     let master_base = match &binding.master_type {
                         IType::Master(base) => base.as_ref(),
                         _ => &binding.master_type,
@@ -765,7 +730,6 @@ pub fn check_stmt<'src>(
                         });
                     }
 
-                    // Update mutable variable's current type
                     let move_ctx = if matches!(&rhs.0, Expr::Variable(rhs_name) if *rhs_name == *var_name)
                     {
                         apply_call_argument_moves(ctx, &rhs.0)?
@@ -806,7 +770,6 @@ pub fn check_stmt<'src>(
                         }
                     }
 
-                    // Resolve array reads in the RHS and snapshot their values
                     let (resolved_rhs, any_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
                     if any_resolved {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
@@ -824,7 +787,6 @@ pub fn check_stmt<'src>(
                         new_ctx = new_ctx.with_proposition(prop);
                     }
 
-                    // Create TExpr for the left-hand side
                     let tlhs_expr = TExpr::Variable {
                         name: var_name.to_string(),
                         ty: binding.current_type.clone(),
@@ -844,7 +806,6 @@ pub fn check_stmt<'src>(
                     Ok(((tstmt, span), new_ctx))
                 }
 
-                // Array indexing assignment
                 crate::common::ast::Expr::Index { base, index } => {
                     if let Expr::Variable(arr_name) = &base.0 {
                         reject_mutating_borrowed_owner(ctx, arr_name, span)?;
@@ -853,7 +814,6 @@ pub fn check_stmt<'src>(
                     let (tbase, base_ty) = synth_expr(ctx, base)?;
                     let (tindex, index_ty) = synth_expr(ctx, index)?;
 
-                    // Check index is int
                     if !is_subtype(ctx, &index_ty, &IType::Int) {
                         return Err(TypeError::TypeMismatch {
                             expected: IType::Int,
@@ -862,7 +822,6 @@ pub fn check_stmt<'src>(
                         });
                     }
 
-                    // Check array/reference-to-array type and extract element type
                     let (elem_ty, array_size) = match &base_ty {
                         IType::Ref(_) => {
                             let name = if let Expr::Variable(name) = &base.0 {
@@ -895,7 +854,6 @@ pub fn check_stmt<'src>(
                         },
                     };
 
-                    // Check array bounds using the actual index expression
                     crate::frontend::typechecker::check_array_bounds_expr(
                         ctx,
                         &index.0,
@@ -905,7 +863,6 @@ pub fn check_stmt<'src>(
                         index.1,
                     )?;
 
-                    // Check value type matches element type
                     if !is_subtype(ctx, &rhs_ty, &elem_ty) {
                         return Err(TypeError::TypeMismatch {
                             expected: elem_ty.clone(),
@@ -914,7 +871,6 @@ pub fn check_stmt<'src>(
                         });
                     }
 
-                    // Create typed LHS (the index expression)
                     let tlhs_expr = TExpr::Index {
                         base: Box::new(tbase),
                         index: Box::new(tindex),
@@ -929,17 +885,11 @@ pub fn check_stmt<'src>(
                         ownership: OwnershipMode::Plain,
                     };
 
-                    // Add pointwise proposition: arr[i]...[k] == rhs.
-                    // Supports nested index chains (2D+) by extracting the root
-                    // array name and the full index tuple.
                     let mut new_ctx = move_ctx.clone();
 
                     if let Some((arr_name, indices)) = extract_array_access(&lhs.0) {
                         let dummy_span = chumsky::span::SimpleSpan::new(0, 0);
 
-                        // Snapshot array reads in the RHS so the proposition
-                        // doesn't contain live references that become stale
-                        // after later mutations.
                         let (resolved, any_resolved) = resolve_array_reads_in_expr(ctx, &rhs.0);
                         let snapshot_rhs = if any_resolved {
                             resolved
@@ -947,7 +897,6 @@ pub fn check_stmt<'src>(
                             rhs.0.clone()
                         };
 
-                        // Rebuild the nested Index chain: arr[i0][i1]...[ik]
                         let mut lhs_access = crate::common::ast::Expr::Variable(arr_name);
                         for idx in &indices {
                             lhs_access = crate::common::ast::Expr::Index {
@@ -1066,7 +1015,6 @@ pub fn check_stmt<'src>(
             }
         }
 
-        // RETURN: Return statement
         Stmt::Return { expr } => {
             if !ctx.bare_metal && ctx.in_region_scope() {
                 return Err(TypeError::UnsupportedFeature {
@@ -1078,7 +1026,6 @@ pub fn check_stmt<'src>(
 
             let (texpr, ret_ty) = synth_expr(ctx, expr)?;
 
-            // Check return type matches expected return type
             if let Some(expected) = ctx.get_expected_return()
                 && !is_subtype(ctx, &ret_ty, expected)
             {
@@ -1089,7 +1036,6 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            // Check postcondition if present
             if let Some(postcond) = ctx.get_postcondition() {
                 let substituted = substitute_result_in_postcond(postcond, &ret_ty, &expr.0);
                 if !check_postcondition_provable(ctx, &substituted) {
@@ -1112,7 +1058,6 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), move_ctx))
         }
 
-        // FOR-LOOP: For loop with range and optional invariant
         Stmt::For {
             var,
             start,
@@ -1123,7 +1068,6 @@ pub fn check_stmt<'src>(
             let (tstart, start_ty) = synth_expr(ctx, start)?;
             let (tend, end_ty) = synth_expr(ctx, end)?;
 
-            // Check start and end are integers
             if !is_subtype(ctx, &start_ty, &IType::Int) {
                 return Err(TypeError::TypeMismatch {
                     expected: IType::Int,
@@ -1163,30 +1107,21 @@ pub fn check_stmt<'src>(
                 },
             };
 
-            // Add loop variable to context (immutable)
             let mut loop_ctx = ctx.with_immutable(var.to_string(), loop_var_ty.clone());
 
-            // Add propositions about loop variable bounds: var >= start && var < end
-            // This allows the SMT solver to prove array bounds within the loop
-
-            // Create proposition: var >= start
             let lower_bound_prop = crate::common::types::IProposition {
                 var: var.to_string(),
                 predicate: Arc::new((lower_bound_expr, dummy_span)),
             };
             loop_ctx = loop_ctx.with_proposition(lower_bound_prop);
 
-            // Create proposition: var < end
             let upper_bound_prop = crate::common::types::IProposition {
                 var: var.to_string(),
                 predicate: Arc::new((upper_bound_expr, dummy_span)),
             };
             loop_ctx = loop_ctx.with_proposition(upper_bound_prop);
 
-            // Process invariant if present
             let tinvariant = if let Some(inv_expr) = invariant {
-                // Type-check the invariant expression (must be bool)
-                // Allow quantifiers in specification context
                 let mut spec_ctx = loop_ctx.clone();
                 spec_ctx.allow_quantifiers = true;
                 let (_tinv, inv_ty) = synth_expr(&spec_ctx, inv_expr)?;
@@ -1199,8 +1134,6 @@ pub fn check_stmt<'src>(
                     });
                 }
 
-                // Step 3: Verify invariant holds at loop entry (base case)
-                // Substitute start for var in invariant
                 use crate::frontend::typechecker::helpers::substitute_expr_for_var;
                 let inv_at_entry = substitute_expr_for_var(&inv_expr.0, var, &start.0);
                 let inv_at_entry_prop = IProposition {
@@ -1213,25 +1146,21 @@ pub fn check_stmt<'src>(
                     });
                 }
 
-                // Add invariant as proposition to loop body context
                 let inv_prop = IProposition {
                     var: var.to_string(),
                     predicate: Arc::new(inv_expr.clone()),
                 };
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
-                // Convert invariant to Constraint for lowering
                 crate::dtal::convert::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };
 
-            // Check body statements with invariant in context
             let scoped_loop_ctx = loop_ctx.enter_borrow_scope();
             let (tbody, body_ctx) = check_stmts(&scoped_loop_ctx, &body.statements)?;
             let body_ctx = body_ctx.exit_borrow_scope();
 
-            // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
                 use crate::frontend::typechecker::helpers::substitute_expr_for_var;
                 let var_plus_1 = crate::common::ast::Expr::BinOp {
@@ -1266,19 +1195,12 @@ pub fn check_stmt<'src>(
                 },
             };
 
-            // Step 5: Project invariant into post-loop context
             let post_ctx = if let Some(inv_expr) = invariant {
                 use crate::frontend::typechecker::helpers::substitute_expr_for_var;
                 let mut post = ctx.clone();
 
-                // Invalidate pointwise props for arrays modified in loop body.
-                // Use selective invalidation: only remove propositions for
-                // indices that might overlap with the assigned indices.
                 let modifications = collect_array_modifications(&body.statements);
                 for (arr_name, indices) in &modifications {
-                    // Add loop variable bounds to the SMT context so the
-                    // selective-invalidation prover can use them when checking
-                    // whether each pointwise prop's indices collide.
                     let mut smt_ctx = post.clone();
                     let lower_bound = crate::common::ast::Expr::BinOp {
                         op: crate::common::ast::BinOp::Gte,
@@ -1301,7 +1223,6 @@ pub fn check_stmt<'src>(
                     post = invalidate_array_props_selectively(&smt_ctx, arr_name, indices);
                 }
 
-                // Substitute end for var in invariant
                 let inv_at_end = substitute_expr_for_var(&inv_expr.0, var, &end.0);
                 let inv_at_end_prop = IProposition {
                     var: var.to_string(),
@@ -1316,7 +1237,6 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), post_ctx))
         }
 
-        // WHILE-LOOP: While loop with condition and optional invariant
         Stmt::While {
             condition,
             invariant,
@@ -1324,7 +1244,6 @@ pub fn check_stmt<'src>(
         } => {
             let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
 
-            // Step 1: Synthesize condition, check it's bool
             let (tcond, cond_ty) = synth_expr(ctx, condition)?;
             if !is_subtype(ctx, &cond_ty, &IType::Bool) {
                 return Err(TypeError::TypeMismatch {
@@ -1334,16 +1253,13 @@ pub fn check_stmt<'src>(
                 });
             }
 
-            // Build loop context: start with current context + condition is true
             let cond_prop = IProposition {
                 var: "_cond".to_string(),
                 predicate: Arc::new(*condition.clone()),
             };
             let mut loop_ctx = ctx.with_proposition(cond_prop);
 
-            // Step 2: Process invariant if present
             let tinvariant = if let Some(inv_expr) = invariant {
-                // Type-check the invariant expression (must be bool)
                 let mut spec_ctx = loop_ctx.clone();
                 spec_ctx.allow_quantifiers = true;
                 let (_tinv, inv_ty) = synth_expr(&spec_ctx, inv_expr)?;
@@ -1356,7 +1272,6 @@ pub fn check_stmt<'src>(
                     });
                 }
 
-                // Verify invariant holds at loop entry (base case)
                 let inv_prop = IProposition {
                     var: "_inv".to_string(),
                     predicate: Arc::new(inv_expr.clone()),
@@ -1367,21 +1282,17 @@ pub fn check_stmt<'src>(
                     });
                 }
 
-                // Add invariant as proposition to loop body context
                 loop_ctx = loop_ctx.with_proposition(inv_prop);
 
-                // Convert invariant to Constraint for lowering
                 crate::dtal::convert::expr_to_constraint(&inv_expr.0)
             } else {
                 None
             };
 
-            // Step 3: Check body statements
             let scoped_loop_ctx = loop_ctx.enter_borrow_scope();
             let (tbody, body_ctx) = check_stmts(&scoped_loop_ctx, &body.statements)?;
             let body_ctx = body_ctx.exit_borrow_scope();
 
-            // Step 4: Verify loop body preserves invariant (inductive step)
             if let Some(inv_expr) = invariant {
                 let inv_prop = IProposition {
                     var: "_inv".to_string(),
@@ -1403,21 +1314,13 @@ pub fn check_stmt<'src>(
                 },
             };
 
-            // Step 5: Post-loop context
-            // After the loop: invariant still holds (if present), condition is false
             let mut post_ctx = ctx.clone();
 
-            // Invalidate array propositions modified in the loop body.
-            // While loops don't have a simple index bound, so fall back to the
-            // component-wise selective invalidation without added loop bounds;
-            // if any component is symbolic and SMT can't prove distinctness,
-            // the prop is dropped.
             let modifications = collect_array_modifications(&body.statements);
             for (arr_name, indices) in &modifications {
                 post_ctx = invalidate_array_props_selectively(&post_ctx, arr_name, indices);
             }
 
-            // Add invariant to post-loop context (it was preserved)
             if let Some(inv_expr) = invariant {
                 let inv_prop = IProposition {
                     var: "_inv".to_string(),
@@ -1426,7 +1329,6 @@ pub fn check_stmt<'src>(
                 post_ctx = post_ctx.with_proposition(inv_prop);
             }
 
-            // Add negated condition (loop exited because condition is false)
             let negated_cond = Expr::UnaryOp {
                 op: crate::common::ast::UnaryOp::Not,
                 cond: condition.clone(),
@@ -1447,29 +1349,21 @@ pub fn check_stmt<'src>(
             Ok(((tstmt, span), ctx.merge_region_exit(&final_region_ctx)))
         }
 
-        // EXPR-STMT: Expression statement
-        // Special handling for if-expressions to support context joining
-        Stmt::Expr(expr) => {
-            match &expr.0 {
-                // If-expression as statement: handle context joining
-                crate::common::ast::Expr::If {
-                    cond,
-                    then_block,
-                    else_block,
-                } => check_if_stmt(ctx, cond, then_block, else_block.as_ref(), span),
-                // Other expressions: context unchanged
-                _ => {
-                    let (texpr, _) = synth_expr(ctx, expr)?;
-                    let tstmt = TStmt::Expr(texpr);
-                    Ok(((tstmt, span), apply_call_argument_moves(ctx, &expr.0)?))
-                }
+        Stmt::Expr(expr) => match &expr.0 {
+            crate::common::ast::Expr::If {
+                cond,
+                then_block,
+                else_block,
+            } => check_if_stmt(ctx, cond, then_block, else_block.as_ref(), span),
+            _ => {
+                let (texpr, _) = synth_expr(ctx, expr)?;
+                let tstmt = TStmt::Expr(texpr);
+                Ok(((tstmt, span), apply_call_argument_moves(ctx, &expr.0)?))
             }
-        }
+        },
     }
 }
 
-/// Check an if-statement with context joining
-/// Returns the joined context after both branches merge
 fn check_if_stmt<'src>(
     ctx: &TypingContext<'src>,
     cond: &Spanned<crate::common::ast::Expr<'src>>,
@@ -1479,7 +1373,6 @@ fn check_if_stmt<'src>(
 ) -> Result<(Spanned<TStmt<'src>>, TypingContext<'src>), TypeError<'src>> {
     use crate::frontend::typechecker::{extract_proposition, negate_proposition};
 
-    // Synthesize condition
     let (tcond, cond_ty) = synth_expr(ctx, cond)?;
 
     if !is_subtype(ctx, &cond_ty, &IType::Bool) {
@@ -1490,16 +1383,13 @@ fn check_if_stmt<'src>(
         });
     }
 
-    // Create then-branch context with condition proposition
     let mut then_ctx = ctx.clone();
     if let Some(prop) = extract_proposition(&cond.0) {
         then_ctx = then_ctx.with_proposition(prop);
     }
 
-    // Check then block (statements + trailing_expr) and get final context
     let (tthen_block, then_final_ctx) = check_block_as_stmt(&then_ctx, then_block)?;
 
-    // Check else block (if present) and get final context
     let (telse_block, else_final_ctx) = if let Some(else_blk) = else_block {
         let mut else_ctx = ctx.clone();
         if let Some(prop) = extract_proposition(&cond.0) {
@@ -1510,12 +1400,9 @@ fn check_if_stmt<'src>(
         let (typed_else, else_ctx_final) = check_block_as_stmt(&else_ctx, else_blk)?;
         (Some(typed_else), else_ctx_final)
     } else {
-        // No else branch - context unchanged from original
         (None, ctx.clone())
     };
 
-    // Join the contexts from both branches, passing the pre-branch context
-    // so that semantic index matching can be used for array propositions.
     let joined_ctx =
         TypingContext::join_mutable_contexts_with_base(&then_final_ctx, &else_final_ctx, Some(ctx));
 
@@ -1531,10 +1418,6 @@ fn check_if_stmt<'src>(
     Ok(((tstmt, span), joined_ctx))
 }
 
-/// Check a block used as a statement body (e.g., then/else block of an if-statement).
-/// Processes both the block's statements and its trailing_expr (if any).
-/// When the trailing_expr is an if-else, it's checked as a nested if-statement
-/// so that context joining works correctly for mutable variable updates.
 fn check_block_as_stmt<'src>(
     ctx: &TypingContext<'src>,
     block: &Block<'src>,
@@ -1546,10 +1429,8 @@ fn check_block_as_stmt<'src>(
         block.trailing_expr.as_deref(),
     )?;
 
-    // If there's a trailing expression, check it and thread context
     if let Some(trailing) = &block.trailing_expr {
         match &trailing.0 {
-            // Trailing if-else: check as a statement for context joining
             crate::common::ast::Expr::If {
                 cond,
                 then_block,
@@ -1562,7 +1443,6 @@ fn check_block_as_stmt<'src>(
                     else_block.as_ref(),
                     trailing.1,
                 )?;
-                // Wrap the if-statement result back into the block's statements
                 let mut all_stmts = typed_stmts;
                 all_stmts.push(if_tstmt);
                 Ok((
@@ -1573,7 +1453,6 @@ fn check_block_as_stmt<'src>(
                     final_ctx.exit_borrow_scope(),
                 ))
             }
-            // Other trailing expressions: synthesize and include
             _ => {
                 let (texpr, _ty) = synth_expr(&stmts_ctx, trailing)?;
                 Ok((
@@ -1596,8 +1475,6 @@ fn check_block_as_stmt<'src>(
     }
 }
 
-/// Check a sequence of statements
-/// Returns (typed_stmts, final_context)
 pub fn check_stmts<'src>(
     ctx: &TypingContext<'src>,
     stmts: &[Spanned<Stmt<'src>>],
@@ -1628,15 +1505,12 @@ fn check_stmts_with_trailing<'src>(
     Ok((typed_stmts, current_ctx))
 }
 
-/// Check a function
-/// Returns typed function
 pub fn check_function<'src>(
     global_ctx: &TypingContext<'src>,
     func: &Spanned<Function<'src>>,
 ) -> Result<TFunction<'src>, TypeError<'src>> {
     let (func_inner, func_span) = func;
 
-    // Convert parameter types to semantic types
     let mut param_types = Vec::new();
     for spanned_param in &func_inner.parameters {
         let param = &spanned_param.0;
@@ -1647,7 +1521,6 @@ pub fn check_function<'src>(
 
     validate_reference_return(func_inner, &param_types, &return_type)?;
 
-    // Create context with parameters and expected return type
     let mut func_ctx = global_ctx.clone();
     for (spanned_param, ty) in func_inner.parameters.iter().zip(param_types.iter()) {
         let param = &spanned_param.0;
@@ -1659,10 +1532,6 @@ pub fn check_function<'src>(
             });
         }
 
-        // Reject nested arrays with a symbolic inner dimension. The backend
-        // needs a concrete stride to flatten multi-dim access, so only the
-        // outermost dimension may be symbolic (e.g. `[[int; 5]; n]` is OK,
-        // but `[[int; n]; 5]` is not).
         if has_symbolic_inner_dim(ty) {
             return Err(TypeError::UnsupportedFeature {
                 feature: format!(
@@ -1675,9 +1544,6 @@ pub fn check_function<'src>(
 
         func_ctx = func_ctx.with_immutable(param.name.to_string(), ty.clone());
 
-        // For i64-typed parameters, add implicit range bounds [INT_MIN, INT_MAX].
-        // Z3 models integers as unbounded; these axioms tell it the value is
-        // representable as a 64-bit signed machine integer.
         if is_subtype(&func_ctx, ty, &IType::I64) {
             func_ctx = add_i64_range_props(func_ctx, param.name);
         }
@@ -1685,10 +1551,6 @@ pub fn check_function<'src>(
             func_ctx = add_u64_range_props(func_ctx, param.name);
         }
 
-        // For array parameters with symbolic size, add axioms:
-        //   len >= 0  (arrays cannot have negative length)
-        //   len <= INT_MAX  (array length fits in a machine word)
-        // These are load-bearing for proving i64 loop counter arithmetic.
         if let IType::Array {
             size: IValue::Symbolic(size_var),
             ..
@@ -1697,11 +1559,8 @@ pub fn check_function<'src>(
             func_ctx = add_array_length_axioms(func_ctx, size_var);
         }
     }
-    // Set expected return type for checking return statements
     func_ctx = func_ctx.with_expected_return(return_type.clone());
 
-    // Add precondition to context (if present) - this allows the function body
-    // to assume the precondition holds
     if let Some(precond_expr) = &func_inner.precondition {
         let var_name = func_inner
             .parameters
@@ -1716,7 +1575,6 @@ pub fn check_function<'src>(
         func_ctx = func_ctx.with_proposition(precond_prop);
     }
 
-    // Store postcondition and current function name in context for return checking
     let postcondition = global_ctx
         .lookup_function(func_inner.name)
         .and_then(|sig| sig.postcondition.clone());
@@ -1733,7 +1591,6 @@ pub fn check_function<'src>(
         func_inner.body.trailing_expr.as_deref(),
     )?;
 
-    // Check if body contains any return statements
     fn has_return_stmt(stmts: &[Spanned<TStmt>]) -> bool {
         for (stmt, _) in stmts {
             match stmt {
@@ -1749,11 +1606,9 @@ pub fn check_function<'src>(
         false
     }
 
-    // Check return expression (if present)
     let treturn = if let Some(ret_expr) = &func_inner.body.trailing_expr {
         let (texpr, ret_ty) = synth_expr(&final_ctx, ret_expr)?;
 
-        // Check return type matches signature
         if !check_expr_satisfies_refined(&final_ctx, &ret_expr.0, &ret_ty, &return_type) {
             return Err(TypeError::TypeMismatch {
                 expected: return_type.clone(),
@@ -1762,7 +1617,6 @@ pub fn check_function<'src>(
             });
         }
 
-        // Verify postcondition at implicit return
         if let Some(ref postcond) = postcondition {
             let substituted = substitute_result_in_postcond(postcond, &ret_ty, &ret_expr.0);
             if !check_postcondition_provable(&final_ctx, &substituted) {
@@ -1786,7 +1640,6 @@ pub fn check_function<'src>(
         None
     };
 
-    // Build typed function
     let tparams: Vec<TParameter> = func_inner
         .parameters
         .iter()
@@ -1824,7 +1677,6 @@ pub fn check_function<'src>(
     Ok(tfunc)
 }
 
-/// Check an entire program
 pub fn check_program<'src>(program: &Program<'src>) -> Result<TProgram<'src>, TypeError<'src>> {
     check_program_with_options(program, false)
 }
@@ -1844,7 +1696,6 @@ fn check_program_with_options<'src>(
     for spanned_func in &program.functions {
         let (func, func_span) = spanned_func;
 
-        // Convert parameter types
         let mut parameters = Vec::new();
         for spanned_param in &func.parameters {
             let param = &spanned_param.0;
@@ -1858,7 +1709,6 @@ fn check_program_with_options<'src>(
             parameters.push((param.name.to_string(), ty));
         }
 
-        // Convert return type
         let return_type = ast_type_to_itype(&func.return_type)?;
         if array_contains_reference_type(&return_type) {
             return Err(TypeError::UnsupportedFeature {
@@ -1880,10 +1730,7 @@ fn check_program_with_options<'src>(
             });
         }
 
-        // Convert precondition to IProposition
         let precondition = func.precondition.as_ref().map(|precond_expr| {
-            // For preconditions, the bound variable is typically the first parameter
-            // or we use a generic "_" if there are no parameters
             let var_name = func
                 .parameters
                 .first()
@@ -1896,8 +1743,6 @@ fn check_program_with_options<'src>(
             }
         });
 
-        // Convert postcondition to IProposition
-        // For postconditions, the bound variable is "result"
         let postcondition =
             func.postcondition
                 .as_ref()
@@ -1906,7 +1751,6 @@ fn check_program_with_options<'src>(
                     predicate: Arc::new(postcond_expr.clone()),
                 });
 
-        // Validate postcondition only references `result` and parameter names
         if let Some(postcond_expr) = &func.postcondition {
             let mut allowed: std::collections::HashSet<&str> = std::collections::HashSet::new();
             allowed.insert("result");
@@ -1939,10 +1783,8 @@ fn check_program_with_options<'src>(
         signatures.insert(func.name.to_string(), sig);
     }
 
-    // Register runtime intrinsic signatures
     let dummy_span = chumsky::prelude::SimpleSpan::new(0, 0);
 
-    // Linux-only intrinsics (use syscalls — not available on bare metal)
     if !bare_metal {
         signatures.insert(
             "print_int".into(),
@@ -1986,9 +1828,8 @@ fn check_program_with_options<'src>(
                 span: dummy_span,
             },
         );
-    } // end if !bare_metal
+    }
 
-    // Port I/O intrinsics (available on both Linux and bare metal)
     signatures.insert(
         "port_in".into(),
         FunctionSignature {
@@ -2021,12 +1862,9 @@ fn check_program_with_options<'src>(
     let mut global_ctx = TypingContext::with_functions(signatures);
     global_ctx.bare_metal = bare_metal;
 
-    // Process constant declarations — add as immutable singleton bindings
     for (constant, _span) in &program.constants {
         let ty = ast_type_to_itype(&constant.ty)?;
-        // Evaluate constant value to a singleton
         let (_, value_ty) = synth_expr(&global_ctx, &constant.value)?;
-        // Constants must be compile-time known (singleton)
         if !is_subtype(&global_ctx, &value_ty, &ty) {
             return Err(TypeError::TypeMismatch {
                 expected: ty,

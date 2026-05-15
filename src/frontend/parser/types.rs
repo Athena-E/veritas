@@ -3,7 +3,6 @@ use crate::common::ast::{Token, Type};
 use crate::common::span::{Span, Spanned};
 use chumsky::{input::ValueInput, prelude::*};
 
-// Type parser
 pub fn type_parser<'tokens, 'src: 'tokens, I>()
 -> impl Parser<'tokens, I, Spanned<Type<'src>>, extra::Err<Rich<'tokens, Token<'src>, Span>>> + Clone
 where
@@ -20,7 +19,6 @@ where
         }
         .map_with(|t, e| (t, e.span()));
 
-        // Array type with size expressions
         let array_type = ty
             .clone()
             .then_ignore(just(Token::Ctrl(';')))
@@ -36,7 +34,6 @@ where
                 )
             });
 
-        // Singleton int type
         let singleton_type = just(Token::Int)
             .ignore_then(
                 expr.clone()
@@ -44,7 +41,6 @@ where
             )
             .map_with(|expr, e| (Type::SingletonInt(Box::new(expr)), e.span()));
 
-        // Refined int type: {v: int | P}
         let refined_type = select! { Token::Ident(name) => name }
             .then_ignore(just(Token::Ctrl(':')))
             .then_ignore(just(Token::Int))
@@ -61,7 +57,6 @@ where
                 )
             });
 
-        // Refined i64 type: {v: i64 | P}
         let refined_i64_type = select! { Token::Ident(name) => name }
             .then_ignore(just(Token::Ctrl(':')))
             .then_ignore(just(Token::I64))
@@ -78,7 +73,6 @@ where
                 )
             });
 
-        // Refined u64 type: {v: u64 | P}
         let refined_u64_type = select! { Token::Ident(name) => name }
             .then_ignore(just(Token::Ctrl(':')))
             .then_ignore(just(Token::U64))
@@ -95,7 +89,6 @@ where
                 )
             });
 
-        // Reference types
         let ref_type = just(Token::Op("&"))
             .ignore_then(
                 just(Token::Mut)

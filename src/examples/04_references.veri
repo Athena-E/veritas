@@ -1,4 +1,3 @@
-// Demonstrating reference types in function parameters
 fn use_reference(r: &int) {
     let value: int = 100;
 }

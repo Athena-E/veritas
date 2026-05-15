@@ -1,12 +1,5 @@
-#include <stdio.h>
 
-#ifndef N
-#define N 120
-#endif
 
-#ifndef TSTEPS
-#define TSTEPS 40
-#endif
 
 static long long a[N];
 static long long b[N];
